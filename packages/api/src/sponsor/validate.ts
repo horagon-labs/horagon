@@ -138,6 +138,7 @@ function validate(tx: VersionedTransaction, policy: SponsorPolicy): PublicKey {
   }
 
   let trades = 0
+  let ataCreates = 0
   for (const ix of instructions) {
     const program = keys[ix.programIdIndex]
     if (!program) reject('PROGRAM_NOT_ALLOWED', 'Program index out of range')
@@ -148,8 +149,12 @@ function validate(tx: VersionedTransaction, policy: SponsorPolicy): PublicKey {
       }
     })
     if (program.equals(ComputeBudgetProgram.programId)) checkComputeBudget(ix.data, policy)
-    else if (program.equals(ASSOCIATED_TOKEN_PROGRAM_ID)) checkAta(accounts, ix.data, user, policy)
-    else if (program.equals(PM_AMM_PROGRAM_ID)) {
+    else if (program.equals(ASSOCIATED_TOKEN_PROGRAM_ID)) {
+      if (++ataCreates > policy.limits.maxAtaCreates) {
+        reject('ATA_RULE', `More than ${policy.limits.maxAtaCreates} ATA creates`)
+      }
+      checkAta(accounts, ix.data, user, policy)
+    } else if (program.equals(PM_AMM_PROGRAM_ID)) {
       checkPmAmm(accounts, ix.data, user, policy)
       trades++
     } else if (program.equals(TOKEN_PROGRAM_ID)) checkToken(accounts, ix.data, user, policy)

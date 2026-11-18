@@ -7,12 +7,15 @@ export interface SponsorLimits {
   maxMicroLamportsPerCu: bigint
   /** Most top-level instructions in one sponsored transaction. */
   maxInstructions: number
+  /** Most CreateIdempotent instructions; each one costs the sponsor an ATA's rent. Spec section 9 names five: the user's mUSDC, YES and NO, and the two fee ATAs. */
+  maxAtaCreates: number
 }
 
 export const DEFAULT_SPONSOR_LIMITS: SponsorLimits = {
   maxComputeUnits: 1_000_000,
   maxMicroLamportsPerCu: 100_000n,
   maxInstructions: 12,
+  maxAtaCreates: 5,
 }
 
 /** Everything the validator needs to know about the world. Pure data, no I/O. */

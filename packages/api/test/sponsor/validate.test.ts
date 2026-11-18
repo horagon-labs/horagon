@@ -6,6 +6,7 @@ import {
   PROTOCOL_DAO,
 } from '@horagon/sdk/pm-amm'
 import {
+  ASSOCIATED_TOKEN_PROGRAM_ID,
   createAssociatedTokenAccountIdempotentInstruction,
   createAssociatedTokenAccountInstruction,
   createCloseAccountInstruction,
@@ -186,6 +187,24 @@ describe('validateSponsoredTransaction rejects', () => {
       build([ata(stranger, yesMint), pmAmm('swap')]),
       'ATA_RULE',
     ],
+    [
+      'a fee-owner ATA for an outcome mint',
+      build([ata(PROTOCOL_DAO, yesMint), pmAmm('swap')]),
+      'ATA_RULE',
+    ],
+    [
+      'more ATA creates than the limit',
+      build([
+        ata(user, yesMint),
+        ata(user, noMint),
+        ata(user, usdc),
+        ata(PROTOCOL_DAO, usdc),
+        ata(authority, usdc),
+        ata(user, yesMint),
+        pmAmm('swap'),
+      ]),
+      'ATA_RULE',
+    ],
     ['an ATA the user pays for', build([ata(user, yesMint, user), pmAmm('swap')]), 'ATA_RULE'],
     [
       'a non-idempotent ATA create',
@@ -345,9 +364,15 @@ describe('validateSponsoredTransaction property', () => {
   it('accepts a transaction exactly when every instruction is on the allowlist', () => {
     fc.assert(
       fc.property(fc.array(atom, { maxLength: 10 }), (atoms) => {
-        const tx = build([pmAmm('swap'), ...atoms.map((a) => a.ix)])
+        const ixs = atoms.map((a) => a.ix)
+        const tx = build([pmAmm('swap'), ...ixs])
         const verdict = validateSponsoredTransaction(tx, policy)
-        expect(verdict.ok).toBe(atoms.every((a) => a.ok))
+        const ataCreates = ixs.filter((ix) =>
+          ix.programId.equals(ASSOCIATED_TOKEN_PROGRAM_ID),
+        ).length
+        expect(verdict.ok).toBe(
+          atoms.every((a) => a.ok) && ataCreates <= DEFAULT_SPONSOR_LIMITS.maxAtaCreates,
+        )
       }),
       { numRuns: 500 },
     )
