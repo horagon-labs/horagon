@@ -1,11 +1,16 @@
 // Spike S4 (compact): turns a raw recording into one replay fixture per game, with a frame
 // whenever a feed's status, period, clock or score changes. Games are matched across feeds by
 // tricodes (AWAY@HOME); either feed alone is enough. `--raw <AWAY@HOME>` also keeps that game's
-// raw lines, gzipped, for parser tests.
+// raw lines, gzipped, for parser tests: every scoreboard line plus that game's boxscore and
+// summary lines. A full night is several hundred MB, so the recording is streamed line by line
+// (never held in memory), only the scoreboard lines are parsed, and a line that is truncated or
+// malformed is counted and skipped.
 //   pnpm --filter @horagon/spikes s4:compact recordings/2026-11-20.ndjson [--raw NYK@TOR]
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { createReadStream, createWriteStream, mkdirSync, statSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
-import { gzipSync } from 'node:zlib'
+import { createInterface } from 'node:readline'
+import { pipeline } from 'node:stream/promises'
+import { createGzip } from 'node:zlib'
 import {
   type EspnScoreboard,
   espnStatus,
@@ -52,12 +57,31 @@ const easternDate = (iso: string) =>
 
 const [input, ...rest] = process.argv.slice(2)
 if (!input) throw new Error('usage: s4:compact <recording.ndjson> [--raw AWAY@HOME ...]')
+const inputPath = resolve(input)
 const keepRaw = new Set(rest.filter((_, i) => rest[i - 1] === '--raw'))
 
-const lines = readFileSync(resolve(input), 'utf8')
-  .split('\n')
-  .filter(Boolean)
-  .map((l) => JSON.parse(l) as RawLine)
+/** Non-empty lines of a file, streamed. */
+async function* linesOf(path: string): AsyncGenerator<string> {
+  const reader = createInterface({
+    input: createReadStream(path, { encoding: 'utf8' }),
+    crlfDelay: Number.POSITIVE_INFINITY,
+  })
+  for await (const line of reader) if (line !== '') yield line
+}
+
+const HEAD = /^\{"t":"[^"]*","src":"([^"]*)"/
+
+/**
+ * The `src` of a recorder line, read from its first characters without parsing the body.
+ * undefined means the line is not a whole recorder line (truncated by a crash, or garbage).
+ */
+function srcOf(line: string): string | undefined {
+  if (!line.endsWith('}')) return undefined
+  return HEAD.exec(line.slice(0, 120))?.[1]
+}
+
+const isScoreboard = (src: string | undefined) =>
+  src === 'nba-scoreboard' || src === 'espn-scoreboard'
 
 const games = new Map<string, ReplayGame>()
 const lastFrame = new Map<string, string>()
@@ -88,10 +112,11 @@ function push(g: ReplayGame, frame: ReplayFrame): void {
   g.frames.push(frame)
 }
 
-for (const line of lines) {
-  if (line.body == null) continue
+function ingest(line: RawLine): void {
+  if (line.body == null) return
   if (line.src === 'nba-scoreboard') {
-    for (const n of (line.body as NbaScoreboard).scoreboard?.games ?? []) {
+    const list = (line.body as Partial<NbaScoreboard>).scoreboard?.games
+    for (const n of Array.isArray(list) ? list : []) {
       const g = game(n.awayTeam.teamTricode, n.homeTeam.teamTricode, n.gameTimeUTC)
       g.nbaGameId = n.gameId
       push(g, {
@@ -105,7 +130,8 @@ for (const line of lines) {
       })
     }
   } else if (line.src === 'espn-scoreboard') {
-    for (const e of (line.body as EspnScoreboard).events ?? []) {
+    const list = (line.body as Partial<EspnScoreboard>).events
+    for (const e of Array.isArray(list) ? list : []) {
       const c = e.competitions[0]
       const home = c?.competitors.find((x) => x.homeAway === 'home')
       const away = c?.competitors.find((x) => x.homeAway === 'away')
@@ -125,22 +151,79 @@ for (const line of lines) {
   }
 }
 
+// Pass 1: frames. Only scoreboard lines are parsed; everything else is skipped by prefix.
+let totalLines = 0
+let scoreboardLines = 0
+let skipped = 0
+// Numbers of scoreboard lines that are not JSON, so the raw pass can leave them out.
+const unparseable = new Set<number>()
+for await (const text of linesOf(inputPath)) {
+  totalLines++
+  const src = srcOf(text)
+  if (src === undefined) {
+    skipped++
+    continue
+  }
+  if (!isScoreboard(src)) continue
+  let parsed: RawLine
+  try {
+    parsed = JSON.parse(text) as RawLine
+  } catch {
+    skipped++
+    unparseable.add(totalLines)
+    continue
+  }
+  try {
+    ingest(parsed)
+    scoreboardLines++
+  } catch {
+    skipped++
+  }
+}
+
 mkdirSync(join(REPLAY_DIR, 'raw'), { recursive: true })
-for (const [key, g] of games) {
+for (const g of games.values()) {
   const name = `${g.gameDate}-${g.away}-at-${g.home}`
   writeFileSync(join(REPLAY_DIR, `${name}.json`), `${JSON.stringify(g, null, 1)}\n`)
   console.log(`${name}.json: ${g.frames.length} frames`)
-  if (keepRaw.has(key)) {
-    const mine = (l: RawLine) =>
-      (l.src !== 'nba-boxscore' || (g.nbaGameId !== undefined && l.url.includes(g.nbaGameId))) &&
-      (l.src !== 'espn-summary' || (g.espnEventId !== undefined && l.url.endsWith(g.espnEventId)))
-    const gz = gzipSync(
-      lines
-        .filter(mine)
-        .map((l) => JSON.stringify(l))
-        .join('\n'),
-    )
-    writeFileSync(join(REPLAY_DIR, 'raw', `${name}.ndjson.gz`), gz)
-    console.log(`raw/${name}.ndjson.gz: ${gz.length} bytes`)
+}
+
+// Pass 2 (only with --raw): stream the selected lines straight into a gzip file.
+async function* rawLinesOf(g: ReplayGame): AsyncGenerator<string> {
+  let lineNo = 0
+  for await (const text of linesOf(inputPath)) {
+    lineNo++
+    const src = srcOf(text)
+    if (isScoreboard(src)) {
+      if (!unparseable.has(lineNo)) yield `${text}\n`
+      continue
+    }
+    const id =
+      src === 'nba-boxscore' ? g.nbaGameId : src === 'espn-summary' ? g.espnEventId : undefined
+    if (id === undefined) continue
+    const url = /"url":"([^"]*)"/.exec(text.slice(0, 400))?.[1] ?? ''
+    if (
+      src === 'nba-boxscore' ? url.endsWith(`boxscore_${id}.json`) : url.endsWith(`event=${id}`)
+    ) {
+      yield `${text}\n`
+    }
   }
 }
+
+for (const key of keepRaw) {
+  const g = games.get(key)
+  if (!g) {
+    console.error(
+      `warning: --raw ${key} matches no game in the recording (games found: ${[...games.keys()].join(', ') || 'none'})`,
+    )
+    continue
+  }
+  const name = `${g.gameDate}-${g.away}-at-${g.home}`
+  const out = join(REPLAY_DIR, 'raw', `${name}.ndjson.gz`)
+  await pipeline(rawLinesOf(g), createGzip(), createWriteStream(out))
+  console.log(`raw/${name}.ndjson.gz: ${statSync(out).size} bytes`)
+}
+
+console.log(
+  `read ${totalLines} lines, ${scoreboardLines} scoreboard lines used, ${skipped} skipped (truncated or malformed)`,
+)

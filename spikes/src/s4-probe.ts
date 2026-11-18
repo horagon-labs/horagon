@@ -1,19 +1,17 @@
 // Spike S4 (probe): from this machine, can we read the NBA CDN (scoreboard, boxscore, schedule)
-// and ESPN, and do Kalshi or Polymarket publish NBA game prices? Run it from a datacenter too
-// (`.github/workflows/feed-probe.yml`), since home IPs and cloud IPs are treated differently.
+// and ESPN? Run it from a datacenter too (`.github/workflows/feed-probe.yml`), since home IPs
+// and cloud IPs are treated differently. Reference odds (component C) are out of the MVP and
+// Kalshi's terms bar scripted access, so this probe makes no Kalshi or Polymarket call.
 import {
   ESPN_SCOREBOARD_URL,
   type EspnScoreboard,
   espnSummaryUrl,
   type Fetched,
   getJson,
-  KALSHI_NBA_GAMES_URL,
   NBA_SCHEDULE_URL,
   NBA_SCOREBOARD_URL,
   type NbaScoreboard,
   nbaBoxscoreUrl,
-  POLYMARKET_GAME_SLUG,
-  POLYMARKET_NBA_EVENTS_URL,
 } from './lib/feeds'
 import { runSpike, SpikeRun } from './lib/results'
 
@@ -70,29 +68,4 @@ await runSpike(run, async () => {
     }),
   )
   if (events[0]) await probe('espn-summary', espnSummaryUrl(events[0].id))
-
-  // Reference odds (component C). Availability only; ToS is read by hand (docs/spikes.md).
-  const kalshi = await probe('kalshi-nba-games', KALSHI_NBA_GAMES_URL)
-  const kalshiMarkets =
-    (kalshi?.json as { markets?: Array<Record<string, unknown>> } | undefined)?.markets ?? []
-  run.check(
-    'Kalshi lists single NBA games',
-    kalshiMarkets.length > 0,
-    `${kalshiMarkets.length} markets`,
-  )
-  run.record(
-    'kalshi-sample',
-    kalshiMarkets
-      .slice(0, 3)
-      .map((m) => ({ ticker: m.ticker, title: m.title, yes_bid: m.yes_bid, yes_ask: m.yes_ask })),
-  )
-  const poly = await probe('polymarket-nba-events', POLYMARKET_NBA_EVENTS_URL)
-  const polyEvents = Array.isArray(poly?.json) ? (poly.json as Array<Record<string, unknown>>) : []
-  // The nba tag also holds futures; single games have slugs like nba-bos-gsw-2026-11-22.
-  const polyGames = polyEvents.filter((e) => POLYMARKET_GAME_SLUG.test(String(e.slug)))
-  run.check('Polymarket lists single NBA games', polyGames.length > 0, `${polyGames.length} games`)
-  run.record(
-    'polymarket-sample',
-    polyGames.slice(0, 3).map((e) => ({ slug: e.slug, title: e.title })),
-  )
 })
