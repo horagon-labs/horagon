@@ -1,0 +1,210 @@
+{
+  "spike": "s1-devnet",
+  "cluster": "devnet",
+  "startedAt": "2026-11-18T09:13:42.490Z",
+  "finishedAt": "2026-11-18T09:23:49.711Z",
+  "pass": true,
+  "checks": [
+    {
+      "name": "create_market + deposit_liquidity confirmed",
+      "pass": true,
+      "detail": "wBKmukjW48o9aZ4LHmqZs8VpBb6zSowvZfsWmFccc2SZQVBvbojco3zA9R4orurYF1nJniKnNGKnhg5Zh1xZfFJ"
+    },
+    {
+      "name": "market authority is the creator",
+      "pass": true
+    },
+    {
+      "name": "swap usdcToYes: quote within 0.1% of the chain",
+      "pass": true,
+      "detail": "in 20000000, chain 38721969, quote 38721969, err 0.0000%, 482870 CU"
+    },
+    {
+      "name": "swap usdcToNo: quote within 0.1% of the chain",
+      "pass": true,
+      "detail": "in 20000000, chain 39673496, quote 39673492, err 0.0000%, 499776 CU"
+    },
+    {
+      "name": "swap yesToUsdc: quote within 0.1% of the chain",
+      "pass": true,
+      "detail": "in 9680492, chain 4724744, quote 4724744, err 0.0000%, 391187 CU"
+    },
+    {
+      "name": "swap noToUsdc: quote within 0.1% of the chain",
+      "pass": true,
+      "detail": "in 9918374, chain 4878720, quote 4878720, err 0.0000%, 393988 CU"
+    },
+    {
+      "name": "swap yesToNo: quote within 0.1% of the chain",
+      "pass": true,
+      "detail": "in 7260369, chain 7183290, quote 7183290, err 0.0000%, 469453 CU"
+    },
+    {
+      "name": "swap noToYes: quote within 0.1% of the chain",
+      "pass": true,
+      "detail": "in 9234603, chain 9308451, quote 9308352, err 0.0011%, 483443 CU"
+    },
+    {
+      "name": "claim_lp_residuals mid-life confirmed",
+      "pass": true,
+      "detail": "3F91XiiBQKAzcM7j3355uXfZK2KvS6bcM1T3Ui3JKorw49rvAs5SztaRWsEvG94y4Zv7v8oFBH1JofyYFzJBUezt"
+    },
+    {
+      "name": "withdraw_liquidity(all) leaves l_zero = 0",
+      "pass": true,
+      "detail": "l_zero raw 0"
+    },
+    {
+      "name": "swap after full withdrawal -> MARKET_HALTED (6004 InsufficientLiquidity)",
+      "pass": true,
+      "detail": "MARKET_HALTED 6004"
+    },
+    {
+      "name": "resolve_market(YES) recorded",
+      "pass": true
+    },
+    {
+      "name": "trader: claim_winnings pays 1 collateral unit per YES",
+      "pass": true,
+      "detail": "31089559 YES -> 31089559"
+    },
+    {
+      "name": "creator: claim_winnings pays 1 collateral unit per YES",
+      "pass": true,
+      "detail": "498310985 YES -> 498310985"
+    }
+  ],
+  "data": {
+    "market": "JBEvyrW6w6bbcGFnUuNdN5AdNBayiBRB4ggoFmX5D4tH",
+    "create": {
+      "signature": "wBKmukjW48o9aZ4LHmqZs8VpBb6zSowvZfsWmFccc2SZQVBvbojco3zA9R4orurYF1nJniKnNGKnhg5Zh1xZfFJ",
+      "slot": 523581199,
+      "blockTime": 1794993224,
+      "computeUnits": 544363,
+      "feeLamports": 5000,
+      "sizeBytes": 713,
+      "maxInvokeDepth": 3,
+      "solCost": 0.03538216
+    },
+    "swaps": [
+      {
+        "direction": "usdcToYes",
+        "amountIn": "20000000",
+        "now": 1794993225,
+        "marketDataBase64": "277VNwDjxpqgv1BK6HnKwEawAZC+dk4qRi0mEAMiHwXxFTfmGbgAw5z2c28mxQAAJT9fnCWGmj5XTTzCQISc02i1qqi5w/e8E4Qvh8D7MZbOHTomylPAs/0tIAFVBp2Dr5PSpe8Ja6bCeAmzuMZqFHftJfA6WrA6qZnG4M234pEGz0hsKt6nU5pW1vklmtAMH/ReW0+BmFBE+3yU0esM+5MomsKWRk8i/VDyjCpZT7FHbP1qAAAAAJ9u/WoAAAAAE70xwiNRf7wMAwAAAAAAAADhyQHfbf5kzR0AAAAAAABOxyACAAAAZc0dAAAAAAAAR2z9agAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAZc0dAAAAAAAAAAD+SFJHIFNQSUtFIDExMTgtMDkxMwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIgTAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+        "actualOut": "38721969",
+        "quotedOut": "38721969",
+        "relErr": 0,
+        "computeUnits": 482870,
+        "signature": "dBvPN4uJhdZAGeoTWxZJNSkUCgVa5Cd2iuKi2QvYCD8Z6xEqsovLxQNoQN4t8Hn5er3GRbs2Z1APwXTv4y7HgGA"
+      },
+      {
+        "direction": "usdcToNo",
+        "amountIn": "20000000",
+        "now": 1794993235,
+        "marketDataBase64": "277VNwDjxpqgv1BK6HnKwEawAZC+dk4qRi0mEAMiHwXxFTfmGbgAw5z2c28mxQAAJT9fnCWGmj5XTTzCQISc02i1qqi5w/e8E4Qvh8D7MZbOHTomylPAs/0tIAFVBp2Dr5PSpe8Ja6bCeAmzuMZqFHftJfA6WrA6qZnG4M234pEGz0hsKt6nU5pW1vklmtAMH/ReW0+BmFBE+3yU0esM+5MomsKWRk8i/VDyjCpZT7FHbP1qAAAAAJ9u/WoAAAAAE70xwiNRf7wMAwAAAAAAACfxX1nax9/jnBwAAAAAAAAvltOb+Q+TveseAAAAAAAASWz9agAAAADW/11RbQAAAAAAAAAAAAAAlAVeUW0AAAAAAAAAAAAAAOy5DAAAAAAA7LkMAAAAAAAAAAAAAAAAZc0dAAAAAAAAAAD+SFJHIFNQSUtFIDExMTgtMDkxMwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIgTAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+        "actualOut": "39673496",
+        "quotedOut": "39673492",
+        "relErr": 1.0082297763726191e-7,
+        "computeUnits": 499776,
+        "signature": "3H36aPZp9W7Qe1p6XJ6uDQdszLQdd91CvcK8NkkP3no2tPwfV7dYA14C4SuHbcZ7i5r1uMMuNzkgAWN6EJFqnMas"
+      },
+      {
+        "direction": "yesToUsdc",
+        "amountIn": "9680492",
+        "now": 1794993238,
+        "marketDataBase64": "277VNwDjxpqgv1BK6HnKwEawAZC+dk4qRi0mEAMiHwXxFTfmGbgAw5z2c28mxQAAJT9fnCWGmj5XTTzCQISc02i1qqi5w/e8E4Qvh8D7MZbOHTomylPAs/0tIAFVBp2Dr5PSpe8Ja6bCeAmzuMZqFHftJfA6WrA6qZnG4M234pEGz0hsKt6nU5pW1vklmtAMH/ReW0+BmFBE+3yU0esM+5MomsKWRk8i/VDyjCpZT7FHbP1qAAAAAJ9u/WoAAAAAE70xwiNRf7wMAwAAAAAAAAx5gYy7Y5Z1ih0AAAAAAAA8lHRhdMWp+nYdAAAAAAAAU2z9agAAAAAzEg6gfQIAAAAAAAAAAAAAN/2DPagCAAAAAAAAAAAAALU6SgAAAAAAvDBPAAAAAAAAAAAAAAAAZc0dAAAAAAAAAAD+SFJHIFNQSUtFIDExMTgtMDkxMwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIgTAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+        "actualOut": "4724744",
+        "quotedOut": "4724744",
+        "relErr": 0,
+        "computeUnits": 391187,
+        "signature": "4EKRRWpZqscG6Ni7CLgP1XjwMC2CVsi5rrMTwVovRHYCGuKm6Eh4P4NjbL7jHaXd9aqh47QieF5qzX6RUZYzGQgt"
+      },
+      {
+        "direction": "noToUsdc",
+        "amountIn": "9918374",
+        "now": 1794993243,
+        "marketDataBase64": "277VNwDjxpqgv1BK6HnKwEawAZC+dk4qRi0mEAMiHwXxFTfmGbgAw5z2c28mxQAAJT9fnCWGmj5XTTzCQISc02i1qqi5w/e8E4Qvh8D7MZbOHTomylPAs/0tIAFVBp2Dr5PSpe8Ja6bCeAmzuMZqFHftJfA6WrA6qZnG4M234pEGz0hsKt6nU5pW1vklmtAMH/ReW0+BmFBE+3yU0esM+5MomsKWRk8i/VDyjCpZT7FHbP1qAAAAAJ9u/WoAAAAAE70xwiNRf7wMAwAAAAAAAEQM5BOeSEJKwR0AAAAAAACRLVI90JimJRodAAAAAAAAVmz9agAAAAAk1NWNIwMAAAAAAAAAAAAA4Y7gvU0DAAAAAAAAAAAAAMWLXQAAAAAAD3ViAAAAAAAAAAAAAAAAZc0dAAAAAAAAAAD+SFJHIFNQSUtFIDExMTgtMDkxMwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIgTAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+        "actualOut": "4878720",
+        "quotedOut": "4878720",
+        "relErr": 0,
+        "computeUnits": 393988,
+        "signature": "2d4qntN3vYXcBzK5cZA7RVzXLxyFvFeTAfCi7LinS6HhnenAB53q7i8vNSJQBHQyjwtHkTmjUebuUxkhk7J4nQqF"
+      },
+      {
+        "direction": "yesToNo",
+        "amountIn": "7260369",
+        "now": 1794993248,
+        "marketDataBase64": "277VNwDjxpqgv1BK6HnKwEawAZC+dk4qRi0mEAMiHwXxFTfmGbgAw5z2c28mxQAAJT9fnCWGmj5XTTzCQISc02i1qqi5w/e8E4Qvh8D7MZbOHTomylPAs/0tIAFVBp2Dr5PSpe8Ja6bCeAmzuMZqFHftJfA6WrA6qZnG4M234pEGz0hsKt6nU5pW1vklmtAMH/ReW0+BmFBE+3yU0esM+5MomsKWRk8i/VDyjCpZT7FHbP1qAAAAAJ9u/WoAAAAAE70xwiNRf7wMAwAAAAAAAHW9nXZjcIC0VB0AAAAAAAAFKSC+36zKnkUdAAAAAAAAW2z9agAAAAD8kTHHOwQAAAAAAAAAAAAAE/Mh0V8EAAAAAAAAAAAAABgrfgAAAAAAIl2CAAAAAAAAAAAAAAAAZc0dAAAAAAAAAAD+SFJHIFNQSUtFIDExMTgtMDkxMwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIgTAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+        "actualOut": "7183290",
+        "quotedOut": "7183290",
+        "relErr": 0,
+        "computeUnits": 469453,
+        "signature": "3pqn1oajjkkEAAK2FhNjfQ4GeYde4aStXwRPnqwaiHeuCqYRS47EARHy1n2CPuL43V6CVmZu7RzGVAac8Us78DZg"
+      },
+      {
+        "direction": "noToYes",
+        "amountIn": "9234603",
+        "now": 1794993253,
+        "marketDataBase64": "277VNwDjxpqgv1BK6HnKwEawAZC+dk4qRi0mEAMiHwXxFTfmGbgAw5z2c28mxQAAJT9fnCWGmj5XTTzCQISc02i1qqi5w/e8E4Qvh8D7MZbOHTomylPAs/0tIAFVBp2Dr5PSpe8Ja6bCeAmzuMZqFHftJfA6WrA6qZnG4M234pEGz0hsKt6nU5pW1vklmtAMH/ReW0+BmFBE+3yU0esM+5MomsKWRk8i/VDyjCpZT7FHbP1qAAAAAJ9u/WoAAAAAE70xwiNRf7wMAwAAAAAAAJC/BPYBneoNox0AAAAAAABFnC2IRr5XpLccAAAAAAAAYGz9agAAAABc7d5kUgUAAAAAAAAAAAAAHKyE33UFAAAAAAAAAAAAAH6angAAAAAA2ruiAAAAAAAAAAAAAAAAZc0dAAAAAAAAAAD+SFJHIFNQSUtFIDExMTgtMDkxMwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIgTAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+        "actualOut": "9308451",
+        "quotedOut": "9308352",
+        "relErr": 0.000010635496711536645,
+        "computeUnits": 483443,
+        "signature": "28Ug53JVZaPnvtdhzw1duRd9QH71sCjdrHvp4h4ae7RstDT22ESd8hq3rduRkn5g54DibYVR4zj2k6ucCXnAqnaJ"
+      }
+    ],
+    "claimLpResidualsMidLife": {
+      "signature": "3F91XiiBQKAzcM7j3355uXfZK2KvS6bcM1T3Ui3JKorw49rvAs5SztaRWsEvG94y4Zv7v8oFBH1JofyYFzJBUezt",
+      "slot": 523581832,
+      "blockTime": 1794993375,
+      "computeUnits": 361643,
+      "feeLamports": 5000,
+      "sizeBytes": 531,
+      "maxInvokeDepth": 2
+    },
+    "withdrawAll": {
+      "signature": "5prStGuJtQKWescUirJaLGb4vC8nv2Wc1BXsHcGJ7pBoKBaxpw39LPvkdXAD7rLMet2mx8Mhbd31vAbb2KqeFD4p",
+      "slot": 523581838,
+      "blockTime": 1794993376,
+      "computeUnits": 333942,
+      "feeLamports": 5000,
+      "sizeBytes": 498,
+      "maxInvokeDepth": 2
+    },
+    "chainTimeAtResolve": 1794993825,
+    "resolve": {
+      "signature": "2abi57WzmirJ1diFTx1Kvhb2c1zkX7Xbifj7PW2hZ1v5auum9UsEr3Accj5EKzWhz8ph6Yum1STUU4oA3XwpzUcz",
+      "slot": 523583720,
+      "blockTime": 1794993825,
+      "computeUnits": 4545,
+      "feeLamports": 5000,
+      "sizeBytes": 252,
+      "maxInvokeDepth": 1
+    },
+    "trader.claim": {
+      "signature": "3PEv3CMecgdbs2yAZMmj1RvBQKUVbccxac3GqNC4vk3SP19rqJdXXrkZSPN4vA3c849vk2NmfyvG7D6DQ2btSWJ6",
+      "slot": 523583727,
+      "blockTime": 1794993827,
+      "computeUnits": 21940,
+      "feeLamports": 5000,
+      "sizeBytes": 523,
+      "maxInvokeDepth": 2,
+      "yes": "31089559",
+      "paid": "31089559"
+    },
+    "creator.claim": {
+      "signature": "Ubr7KHAH6hNYyZAuCrvojhg4PoZjU81mun5VEUYVixjEbbczo6DbQwgmCrZxv5vWF8tchpSMqnmzJBH8sWLCirg",
+      "slot": 523583733,
+      "blockTime": 1794993828,
+      "computeUnits": 21958,
+      "feeLamports": 5000,
+      "sizeBytes": 523,
+      "maxInvokeDepth": 2,
+      "yes": "498310985",
+      "paid": "498310985"
+    },
+    "claimLpResidualsAfterResolve": "MISSING_TOKEN_ACCOUNT 3012",
+    "fixture": "E:\\1Hackathon2026\\solana-hackathon\\horagon\\packages\\sdk\\test\\fixtures\\s1-swaps.json"
+  }
+}
