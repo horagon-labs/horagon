@@ -1,0 +1,28 @@
+[package]
+name = "horagon_spike"
+version = "0.0.0"
+description = "Throwaway spike S2: a PDA of this program as pm-AMM market authority via CPI"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "horagon_spike"
+
+[features]
+default = []
+cpi = ["no-entrypoint"]
+no-entrypoint = []
+no-idl = []
+no-log-ix-name = []
+idl-build = ["anchor-lang/idl-build"]
+anchor-debug = []
+custom-heap = []
+custom-panic = []
+
+[dependencies]
+# Keep equal to `anchor --version` (Task 2 pins the CLI to 1.2.2).
+anchor-lang = "1.2.2"
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("solana"))'] }

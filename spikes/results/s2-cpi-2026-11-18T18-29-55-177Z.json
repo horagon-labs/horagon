@@ -1,0 +1,73 @@
+{
+  "spike": "s2-cpi",
+  "cluster": "local",
+  "startedAt": "2026-11-18T18:29:55.177Z",
+  "finishedAt": "2026-11-18T18:30:11.879Z",
+  "pass": true,
+  "checks": [
+    {
+      "name": "horagon_spike is deployed",
+      "pass": true
+    },
+    {
+      "name": "CPI initialize_market + deposit_liquidity signed by the PDA",
+      "pass": true,
+      "detail": "2a4L9AWnMmFKJctxrrhkNtxeKhHC9tjLP6ynDL4wVyEbhgDHPF2v1rUPyDXCkAi9e4D5pNHpz971zCf6TU8bqrnu"
+    },
+    {
+      "name": "invoke depth stays within the limit of 5",
+      "pass": true,
+      "detail": "depth 4"
+    },
+    {
+      "name": "create transaction fits in 1,232 bytes",
+      "pass": true,
+      "detail": "756 bytes"
+    },
+    {
+      "name": "market.authority is the Authority PDA",
+      "pass": true
+    },
+    {
+      "name": "the PDA holds the LP position",
+      "pass": true
+    },
+    {
+      "name": "creator fee reaches the PDA treasury",
+      "pass": true,
+      "detail": "100000 raw"
+    },
+    {
+      "name": "resolve before end_ts fails with 6003 MarketNotExpired",
+      "pass": true,
+      "detail": "code 6003"
+    },
+    {
+      "name": "CPI resolve_market(YES) signed by the PDA",
+      "pass": true
+    }
+  ],
+  "data": {
+    "programId": "9CLcuW2xyrNUMCrXKP54uWgSMWz5TEgFYfmG8vWGYTTE",
+    "authority": "7Yqv1H5thUvGgLNNXmEvtQhugGJD4SmwtfXKP4zcWuQo",
+    "create": {
+      "signature": "2a4L9AWnMmFKJctxrrhkNtxeKhHC9tjLP6ynDL4wVyEbhgDHPF2v1rUPyDXCkAi9e4D5pNHpz971zCf6TU8bqrnu",
+      "slot": 523720550,
+      "blockTime": 1795026591,
+      "computeUnits": 577046,
+      "feeLamports": 5000,
+      "sizeBytes": 756,
+      "maxInvokeDepth": 4,
+      "rentPaidByPdaSol": 0.03537716
+    },
+    "resolve": {
+      "signature": "42jVtLbwU5GRZ7Xipb1jpno5v2ZTqtUZYzpmhCATE2fEeYctvr1MPKxNP3aSC8fTN6o2LoAAvT3qAAEy9xHFAwwq",
+      "slot": 523721871,
+      "blockTime": 1795026922,
+      "computeUnits": 22480,
+      "feeLamports": 5000,
+      "sizeBytes": 279,
+      "maxInvokeDepth": 2
+    }
+  }
+}
