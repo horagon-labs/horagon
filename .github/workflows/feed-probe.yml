@@ -1,0 +1,29 @@
+name: feed-probe
+
+# Spike S4 from a datacenter IP: can GitHub-hosted runners read the NBA CDN, ESPN, Kalshi
+# and Polymarket? Manual only. The result JSON is uploaded as an artifact.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @horagon/spikes s4:probe
+        env:
+          HORAGON_PROBE_SITE: github-actions
+        continue-on-error: true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: feed-probe
+          path: spikes/results/s4-probe-github-actions-*.json

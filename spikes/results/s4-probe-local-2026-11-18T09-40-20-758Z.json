@@ -1,0 +1,181 @@
+{
+  "spike": "s4-probe-local",
+  "cluster": "n/a",
+  "startedAt": "2026-11-18T09:40:20.758Z",
+  "finishedAt": "2026-11-18T09:40:24.417Z",
+  "pass": false,
+  "checks": [
+    {
+      "name": "nba-scoreboard answers 200 with JSON",
+      "pass": false,
+      "detail": "HTTP 403, 202 ms"
+    },
+    {
+      "name": "nba-schedule answers 200 with JSON",
+      "pass": false,
+      "detail": "HTTP 403, 115 ms"
+    },
+    {
+      "name": "espn-scoreboard answers 200 with JSON",
+      "pass": true,
+      "detail": "HTTP 200, 143 ms"
+    },
+    {
+      "name": "espn-summary answers 200 with JSON",
+      "pass": true,
+      "detail": "HTTP 200, 330 ms"
+    },
+    {
+      "name": "kalshi-nba-games answers 200 with JSON",
+      "pass": true,
+      "detail": "HTTP 200, 625 ms"
+    },
+    {
+      "name": "Kalshi lists single NBA games",
+      "pass": true,
+      "detail": "20 markets"
+    },
+    {
+      "name": "polymarket-nba-events answers 200 with JSON",
+      "pass": true,
+      "detail": "HTTP 200, 2239 ms"
+    },
+    {
+      "name": "Polymarket lists single NBA games",
+      "pass": true,
+      "detail": "46 games"
+    }
+  ],
+  "data": {
+    "nba-scoreboard": {
+      "status": 403,
+      "ms": 202,
+      "bytes": 445,
+      "headers": {
+        "content-type": "text/html"
+      },
+      "topLevelKeys": []
+    },
+    "nba-games": [],
+    "nba-schedule": {
+      "status": 403,
+      "ms": 115,
+      "bytes": 425,
+      "headers": {
+        "content-type": "text/html"
+      },
+      "topLevelKeys": []
+    },
+    "espn-scoreboard": {
+      "status": 200,
+      "ms": 143,
+      "bytes": 95159,
+      "headers": {
+        "content-type": "application/json;charset=UTF-8",
+        "cache-control": "max-age=1"
+      },
+      "topLevelKeys": [
+        "leagues",
+        "season",
+        "day",
+        "events",
+        "provider"
+      ]
+    },
+    "espn-events": [
+      "401910002 NY@TOR post",
+      "401910003 POR@MIN post",
+      "401910004 DET@SA post",
+      "401910006 UTAH@LAC post",
+      "401910005 CHA@LAL post"
+    ],
+    "espn-summary": {
+      "status": 200,
+      "ms": 330,
+      "bytes": 412217,
+      "headers": {
+        "content-type": "application/json;charset=UTF-8",
+        "cache-control": "max-age=2"
+      },
+      "topLevelKeys": [
+        "boxscore",
+        "format",
+        "gameInfo",
+        "leaders",
+        "seasonseries",
+        "injuries",
+        "broadcasts",
+        "pickcenter",
+        "odds",
+        "againstTheSpread",
+        "header",
+        "news"
+      ]
+    },
+    "kalshi-nba-games": {
+      "status": 200,
+      "ms": 625,
+      "bytes": 41639,
+      "headers": {
+        "content-type": "application/json",
+        "cache-control": "public, max-age=15"
+      },
+      "topLevelKeys": [
+        "cursor",
+        "markets"
+      ]
+    },
+    "kalshi-sample": [
+      {
+        "ticker": "KXNBAGAME-26NOV22BOSGSW-GSW",
+        "title": "Golden State wins"
+      },
+      {
+        "ticker": "KXNBAGAME-26NOV22BOSGSW-BOS",
+        "title": "Boston wins"
+      },
+      {
+        "ticker": "KXNBAGAME-26NOV21NOPSAS-SAS",
+        "title": "San Antonio wins"
+      }
+    ],
+    "polymarket-nba-events": {
+      "status": 200,
+      "ms": 2239,
+      "bytes": 28499195,
+      "headers": {
+        "content-type": "application/json",
+        "cache-control": "public, max-age=300",
+        "age": "237"
+      },
+      "topLevelKeys": [
+        "0",
+        "1",
+        "2",
+        "3",
+        "4",
+        "5",
+        "6",
+        "7",
+        "8",
+        "9",
+        "10",
+        "11"
+      ]
+    },
+    "polymarket-sample": [
+      {
+        "slug": "nba-sas-sac-2026-11-06",
+        "title": "Spurs vs. Kings"
+      },
+      {
+        "slug": "nba-orl-bos-2026-11-16",
+        "title": "Magic vs. Celtics"
+      },
+      {
+        "slug": "nba-chi-cle-2026-11-16",
+        "title": "Bulls vs. Cavaliers"
+      }
+    ]
+  }
+}
