@@ -12,6 +12,7 @@ export default defineConfig({
   dts: true,
   sourcemap: true,
   clean: true,
+  splitting: true,
   target: 'es2022',
   external: ['@solana/web3.js'],
 })
