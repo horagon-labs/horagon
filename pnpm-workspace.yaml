@@ -1,0 +1,9 @@
+packages:
+  - packages/*
+  - packages/sdk/vendor/*
+  - spikes
+
+# pnpm 10 skips dependency install scripts unless listed here. esbuild (via tsup) needs its
+# postinstall; the native addons pulled in by @solana/web3.js have pure-JS fallbacks.
+onlyBuiltDependencies:
+  - esbuild
