@@ -1,0 +1,25 @@
+{
+  "name": "@horagon/api",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./sponsor": "./src/sponsor/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --coverage"
+  },
+  "dependencies": {
+    "@horagon/sdk": "workspace:*",
+    "@solana/spl-token": "^0.4.15",
+    "@solana/web3.js": "^1.98.4"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "@vitest/coverage-v8": "^5.1.0",
+    "fast-check": "^4.10.2",
+    "typescript": "~5.9.3",
+    "vitest": "^5.1.0"
+  }
+}
