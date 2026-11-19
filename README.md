@@ -14,13 +14,13 @@ Tier 0 (foundation and spikes). Spike results live in [`docs/spikes.md`](docs/sp
 
 ## Repository
 
-| Path                         | What it is                                                                                      |
-| ---------------------------- | ----------------------------------------------------------------------------------------------- |
-| `packages/sdk`               | `@horagon/sdk`: pm-AMM math and quotes, market decoding, errors, model, evidence hashing        |
-| `packages/sdk/vendor/pm-amm` | Vendored pm-AMM TypeScript SDK, pinned to a commit ([VENDOR.md](packages/sdk/vendor/VENDOR.md)) |
-| `packages/api`               | API v1 internals; today the sponsor transaction validator                                       |
-| `spikes`                     | Tier 0 feasibility spikes (throwaway code, kept for the record)                                 |
-| `docs`                       | Developer setup, spike report, runbooks                                                         |
+| Path                         | What it is                                                                                            |
+| ---------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `packages/sdk`               | `@horagon/sdk`: pm-AMM math and quotes, market decoding, errors, model, evidence hashing              |
+| `packages/sdk/vendor/pm-amm` | Vendored pm-AMM TypeScript SDK, pinned to a commit ([VENDOR.md](packages/sdk/vendor/VENDOR.md))       |
+| `packages/api`               | API v1 internals; today the sponsor transaction validator                                             |
+| `spikes`                     | Tier 0 feasibility spikes (throwaway code, kept for the record)                                       |
+| `docs`                       | `dev-setup.md` (developer setup) and `spikes.md` (Tier 0 spike report); runbooks come in a later tier |
 
 ## Develop
 

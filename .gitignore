@@ -15,3 +15,7 @@ target/
 
 # Spike outputs that stay local (results/ is committed; raw recordings are large).
 spikes/recordings/
+
+# Agent working notes and Vitest caches stay local.
+.superpowers/
+**/.vitest/
