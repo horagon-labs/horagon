@@ -14,7 +14,9 @@
     "s3a": "tsx src/s3a-sponsor.ts",
     "s4:probe": "tsx src/s4-probe.ts",
     "s4:record": "tsx src/s4-record.ts",
-    "s4:compact": "tsx src/s4-compact.ts"
+    "s4:compact": "tsx src/s4-compact.ts",
+    "end-ts:fetch": "tsx src/end-ts-fetch.ts",
+    "end-ts": "tsx src/end-ts.ts"
   },
   "dependencies": {
     "@anchor-lang/core": "^1.2.2",
