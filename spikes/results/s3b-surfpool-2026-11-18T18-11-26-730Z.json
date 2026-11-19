@@ -1,0 +1,228 @@
+{
+  "spike": "s3b-surfpool",
+  "cluster": "local",
+  "startedAt": "2026-11-18T18:11:26.730Z",
+  "finishedAt": "2026-11-18T18:12:39.990Z",
+  "pass": true,
+  "checks": [
+    {
+      "name": "pm-AMM program is available on the fork",
+      "pass": true
+    },
+    {
+      "name": "Metaplex Token Metadata program is available on the fork",
+      "pass": true
+    },
+    {
+      "name": "Surfnet clock starts within 60 s of wall time",
+      "pass": true,
+      "detail": "skew -4 s"
+    },
+    {
+      "name": "surfnet_timeTravel moves the Clock sysvar forward",
+      "pass": true,
+      "detail": "1795025500 -> 1795025530"
+    },
+    {
+      "name": "create_market + deposit_liquidity confirmed",
+      "pass": true,
+      "detail": "2ZfgJ1nRSniFURjPxoSKAQwWMDUTzW5kvxvu6QuNbmPrfqgooq3v1eY4uCHu9rB6m8M9LmTvydTBLitH2sistt1k"
+    },
+    {
+      "name": "market authority is the creator",
+      "pass": true
+    },
+    {
+      "name": "swap usdcToYes: quote within 0.1% of the chain",
+      "pass": true,
+      "detail": "in 20000000, chain 38721116, quote 38721116, err 0.0000%, 501333 CU"
+    },
+    {
+      "name": "swap usdcToNo: quote within 0.1% of the chain",
+      "pass": true,
+      "detail": "in 20000000, chain 39676376, quote 39676371, err 0.0000%, 499868 CU"
+    },
+    {
+      "name": "swap yesToUsdc: quote within 0.1% of the chain",
+      "pass": true,
+      "detail": "in 9680279, chain 4725114, quote 4725114, err 0.0000%, 378690 CU"
+    },
+    {
+      "name": "swap noToUsdc: quote within 0.1% of the chain",
+      "pass": true,
+      "detail": "in 9919094, chain 4878585, quote 4878585, err 0.0000%, 393994 CU"
+    },
+    {
+      "name": "swap yesToNo: quote within 0.1% of the chain",
+      "pass": true,
+      "detail": "in 7260209, chain 7184567, quote 7184567, err 0.0000%, 469409 CU"
+    },
+    {
+      "name": "swap noToYes: quote within 0.1% of the chain",
+      "pass": true,
+      "detail": "in 9235462, chain 9307342, quote 9307341, err 0.0000%, 483475 CU"
+    },
+    {
+      "name": "claim_lp_residuals mid-life confirmed",
+      "pass": true,
+      "detail": "35wj5Sx6jKRyhxsFuJRNZWfmEW4Her9UCrCTZtu2Ah1jywJ9fMbd1bN1K1SkpQ6FpG2y3CbSfJSHTKUJNAjn4UcE"
+    },
+    {
+      "name": "withdraw_liquidity(all) leaves l_zero = 0",
+      "pass": true,
+      "detail": "l_zero raw 0"
+    },
+    {
+      "name": "swap after full withdrawal -> MARKET_HALTED (6004 InsufficientLiquidity)",
+      "pass": true,
+      "detail": "MARKET_HALTED 6004"
+    },
+    {
+      "name": "resolve_market(YES) recorded",
+      "pass": true
+    },
+    {
+      "name": "trader: claim_winnings pays 1 collateral unit per YES",
+      "pass": true,
+      "detail": "31087970 YES -> 31087970"
+    },
+    {
+      "name": "creator: claim_winnings pays 1 collateral unit per YES",
+      "pass": true,
+      "detail": "498312335 YES -> 498312335"
+    }
+  ],
+  "data": {
+    "collateralMint": "GsyD5QweyhGMeLgebdYmGBenAVbKy7de1K5F6ndzQtAt",
+    "market": "8XDz3HknRXFGiywjqkHiDPLm5cTYGf3hCfMYnicULNfa",
+    "create": {
+      "signature": "2ZfgJ1nRSniFURjPxoSKAQwWMDUTzW5kvxvu6QuNbmPrfqgooq3v1eY4uCHu9rB6m8M9LmTvydTBLitH2sistt1k",
+      "slot": 523716240,
+      "blockTime": 1795025532,
+      "computeUnits": 551871,
+      "feeLamports": 5000,
+      "sizeBytes": 713,
+      "maxInvokeDepth": 3,
+      "solCost": 0.03538216
+    },
+    "swaps": [
+      {
+        "direction": "usdcToYes",
+        "amountIn": "20000000",
+        "now": 1795025536,
+        "marketDataBase64": "277VNwDjxprvcFzgGfUBLNTtuYsphdgJY4G9KQd3hbRnTVAHGIT8COK8jqbeGgAA6+3mMDBdXX+MPDcatEfD++TaDeYw6iy+Wr/qCzF8yNG2DIV5rPZMXxHLDGtu8WgKGY2jl8OWtybvL5rDFFGwRBV8wb+Hr2Ep15oHIZ4vvXVYHuZM8BbGfHJSGilpso760VkKfSlPOHZIEu6oCIgRA9Ev757+WpI6qLOatQS1X0V86v1qAAAAALrs/WoAAAAADUSp60VIATkeAwAAAAAAAHTykAHfbf5kzR0AAAAAAADC2OcBAAAAZc0dAAAAAAAAfOr9agAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAZc0dAAAAAAAAAAD+SFJHIFNQSUtFIDExMTgtMTgxMQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIgTAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+        "actualOut": "38721116",
+        "quotedOut": "38721116",
+        "relErr": 0,
+        "computeUnits": 501333,
+        "signature": "5GiZEyvjZZsf8QCpd5rC99DGUazDPxbN1yfLTGMQ7VzbR4KkV5YERnN2zuXNoJHSJqpjXyKJKmmAGu6w9qz8wSv5"
+      },
+      {
+        "direction": "usdcToNo",
+        "amountIn": "20000000",
+        "now": 1795025541,
+        "marketDataBase64": "277VNwDjxprvcFzgGfUBLNTtuYsphdgJY4G9KQd3hbRnTVAHGIT8COK8jqbeGgAA6+3mMDBdXX+MPDcatEfD++TaDeYw6iy+Wr/qCzF8yNG2DIV5rPZMXxHLDGtu8WgKGY2jl8OWtybvL5rDFFGwRBV8wb+Hr2Ep15oHIZ4vvXVYHuZM8BbGfHJSGilpso760VkKfSlPOHZIEu6oCIgRA9Ev757+WpI6qLOatQS1X0V86v1qAAAAALrs/WoAAAAADUSp60VIATkeAwAAAAAAAELjhVVNp+v/jhwAAAAAAACqLs2SKfpJ1t0eAAAAAAAAgOr9agAAAADWiWW/5AAAAAAAAAAAAAAA35Vlv+QAAAAAAAAAAAAAADahGgAAAAAANqEaAAAAAAAAAAAAAAAAZc0dAAAAAAAAAAD+SFJHIFNQSUtFIDExMTgtMTgxMQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIgTAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+        "actualOut": "39676376",
+        "quotedOut": "39676371",
+        "relErr": 1.2601957396512223e-7,
+        "computeUnits": 499868,
+        "signature": "7GJ6avU6Bumc5wZP3BZ8DomX1YcpGFxt88SZbwpDWgMpng8UqAgJdqQLhoZB9uNPVuydve3zzQvLxCUVAQ3TM7F"
+      },
+      {
+        "direction": "yesToUsdc",
+        "amountIn": "9680279",
+        "now": 1795025546,
+        "marketDataBase64": "277VNwDjxprvcFzgGfUBLNTtuYsphdgJY4G9KQd3hbRnTVAHGIT8COK8jqbeGgAA6+3mMDBdXX+MPDcatEfD++TaDeYw6iy+Wr/qCzF8yNG2DIV5rPZMXxHLDGtu8WgKGY2jl8OWtybvL5rDFFGwRBV8wb+Hr2Ep15oHIZ4vvXVYHuZM8BbGfHJSGilpso760VkKfSlPOHZIEu6oCIgRA9Ev757+WpI6qLOatQS1X0V86v1qAAAAALrs/WoAAAAADUSp60VIATkeAwAAAAAAAPnt0+04doHvmR0AAAAAAADqpOd2/S8sw4gdAAAAAAAAher9agAAAAC2hw7M+AEAAAAAAAAAAAAAfd4jGw8CAAAAAAAAAAAAACDEOgAAAAAA+1w9AAAAAAAAAAAAAAAAZc0dAAAAAAAAAAD+SFJHIFNQSUtFIDExMTgtMTgxMQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIgTAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+        "actualOut": "4725114",
+        "quotedOut": "4725114",
+        "relErr": 0,
+        "computeUnits": 378690,
+        "signature": "2F4BLvS5i4N4D7Yrx7FTYvsrUiqstNiFWVSKRzVzvH7FYcHwno1z6rdGWjVNt5eUwP7PWHydvZz7RRTUN6RZu2Xx"
+      },
+      {
+        "direction": "noToUsdc",
+        "amountIn": "9919094",
+        "now": 1795025551,
+        "marketDataBase64": "277VNwDjxprvcFzgGfUBLNTtuYsphdgJY4G9KQd3hbRnTVAHGIT8COK8jqbeGgAA6+3mMDBdXX+MPDcatEfD++TaDeYw6iy+Wr/qCzF8yNG2DIV5rPZMXxHLDGtu8WgKGY2jl8OWtybvL5rDFFGwRBV8wb+Hr2Ep15oHIZ4vvXVYHuZM8BbGfHJSGilpso760VkKfSlPOHZIEu6oCIgRA9Ev757+WpI6qLOatQS1X0V86v1qAAAAALrs/WoAAAAADUSp60VIATkeAwAAAAAAAI+zYENoIAF4wh0AAAAAAAA2Udxt/tWTqR0dAAAAAAAAiur9agAAAAAgBa12GQMAAAAAAAAAAAAAwSJKHi8DAAAAAAAAAAAAAA5fXAAAAAAAauReAAAAAAAAAAAAAAAAZc0dAAAAAAAAAAD+SFJHIFNQSUtFIDExMTgtMTgxMQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIgTAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+        "actualOut": "4878585",
+        "quotedOut": "4878585",
+        "relErr": 0,
+        "computeUnits": 393994,
+        "signature": "4145hk4NXSD5iE4FvxxVEdCfKTKqoKqAeAmfz6u3HPBMPBbuPuGkDqCXH7gVhG2mdCJcKyxBygoyCF3yejfMs6RU"
+      },
+      {
+        "direction": "yesToNo",
+        "amountIn": "7260209",
+        "now": 1795025556,
+        "marketDataBase64": "277VNwDjxprvcFzgGfUBLNTtuYsphdgJY4G9KQd3hbRnTVAHGIT8COK8jqbeGgAA6+3mMDBdXX+MPDcatEfD++TaDeYw6iy+Wr/qCzF8yNG2DIV5rPZMXxHLDGtu8WgKGY2jl8OWtybvL5rDFFGwRBV8wb+Hr2Ep15oHIZ4vvXVYHuZM8BbGfHJSGilpso760VkKfSlPOHZIEu6oCIgRA9Ev757+WpI6qLOatQS1X0V86v1qAAAAALrs/WoAAAAADUSp60VIATkeAwAAAAAAAK8CbsMVvsVrVB0AAAAAAAA5qC9FxjGUtEcdAAAAAAAAj+r9agAAAAAeh2NFPgQAAAAAAAAAAAAA9qx1l00EAAAAAAAAAAAAAGV1fgAAAAAA+z2AAAAAAAAAAAAAAAAAZc0dAAAAAAAAAAD+SFJHIFNQSUtFIDExMTgtMTgxMQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIgTAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+        "actualOut": "7184567",
+        "quotedOut": "7184567",
+        "relErr": 0,
+        "computeUnits": 469409,
+        "signature": "3erG5XHr1z7m4czNUqBuZdhjziAhoxrwAPR2DG7xrsFW1htpeZVK3D9gpZWvbwPnvANQHzS2ZmZJoqS6JE7pZdxP"
+      },
+      {
+        "direction": "noToYes",
+        "amountIn": "9235462",
+        "now": 1795025561,
+        "marketDataBase64": "277VNwDjxprvcFzgGfUBLNTtuYsphdgJY4G9KQd3hbRnTVAHGIT8COK8jqbeGgAA6+3mMDBdXX+MPDcatEfD++TaDeYw6iy+Wr/qCzF8yNG2DIV5rPZMXxHLDGtu8WgKGY2jl8OWtybvL5rDFFGwRBV8wb+Hr2Ep15oHIZ4vvXVYHuZM8BbGfHJSGilpso760VkKfSlPOHZIEu6oCIgRA9Ev757+WpI6qLOatQS1X0V86v1qAAAAALrs/WoAAAAADUSp60VIATkeAwAAAAAAAP3NgWbo7gNOoR0AAAAAAAB+von87k6cPLgcAAAAAAAAlOr9agAAAAA4CGZ0YQUAAAAAAAAAAAAALOA6SHAFAAAAAAAAAAAAAFdboAAAAAAAOxWiAAAAAAAAAAAAAAAAZc0dAAAAAAAAAAD+SFJHIFNQSUtFIDExMTgtMTgxMQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIgTAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+        "actualOut": "9307342",
+        "quotedOut": "9307341",
+        "relErr": 1.0744206025737531e-7,
+        "computeUnits": 483475,
+        "signature": "oyGdPQ6k4ebuP74QydnP613JHY26os47YUe79kec81McrvGZazh831rPggR84YMGujmXi2HF8Q7GFmVmCs9QYoa"
+      }
+    ],
+    "claimLpResidualsMidLife": {
+      "signature": "35wj5Sx6jKRyhxsFuJRNZWfmEW4Her9UCrCTZtu2Ah1jywJ9fMbd1bN1K1SkpQ6FpG2y3CbSfJSHTKUJNAjn4UcE",
+      "slot": 523716847,
+      "blockTime": 1795025683,
+      "computeUnits": 360154,
+      "feeLamports": 5000,
+      "sizeBytes": 531,
+      "maxInvokeDepth": 2
+    },
+    "withdrawAll": {
+      "signature": "WTtsSqpufLp9Ek4m2jkxpL1o2jVTcLvkMVk7tJjrggvEcZ8HvvabZRDHub574wZyXdM1sZmjL764dLtoXfpAYvL",
+      "slot": 523716861,
+      "blockTime": 1795025687,
+      "computeUnits": 333944,
+      "feeLamports": 5000,
+      "sizeBytes": 498,
+      "maxInvokeDepth": 2
+    },
+    "chainTimeAtResolve": 1795026107,
+    "resolve": {
+      "signature": "wf8PmjSs2cU7vXhJ4gvfjpcPK4NJDDiwv3er8B8tggoqXHC2MDDnxt2SVuZx1aegZeyzjwtYvioLJudQRZ88fWS",
+      "slot": 523718543,
+      "blockTime": 1795026107,
+      "computeUnits": 4536,
+      "feeLamports": 5000,
+      "sizeBytes": 252,
+      "maxInvokeDepth": 1
+    },
+    "trader.claim": {
+      "signature": "TCmzN9vYHAonpy64CjacyExvrmRJSnhVEJJv3RJGuiqEJYyGmCpX6Te9k55j9Ff7j5iAehovcbvFD6rDM6ZKjn4",
+      "slot": 523718559,
+      "blockTime": 1795026111,
+      "computeUnits": 21924,
+      "feeLamports": 5000,
+      "sizeBytes": 523,
+      "maxInvokeDepth": 2,
+      "yes": "31087970",
+      "paid": "31087970"
+    },
+    "creator.claim": {
+      "signature": "3unezhhGZdYVdxHoFDVPmjoRuS94Q7QtUyZZyWr4FnNj6SZutpvHfpD23e81DdmSHeDVLr5e9NnBvQA61N9QNtJC",
+      "slot": 523718575,
+      "blockTime": 1795026115,
+      "computeUnits": 21942,
+      "feeLamports": 5000,
+      "sizeBytes": 523,
+      "maxInvokeDepth": 2,
+      "yes": "498312335",
+      "paid": "498312335"
+    },
+    "claimLpResidualsAfterResolve": "MISSING_TOKEN_ACCOUNT 3012"
+  }
+}

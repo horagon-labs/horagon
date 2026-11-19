@@ -1,0 +1,91 @@
+import { HoragonError, type HoragonErrorCode } from '../errors'
+
+/** pm-AMM error names for the codes a market trader can hit (IDL `errors`, 6000+). */
+export const PM_AMM_ERROR_NAMES: Readonly<Record<number, string>> = {
+  6000: 'MarketAlreadyResolved',
+  6001: 'MarketNotResolved',
+  6002: 'MarketExpired',
+  6003: 'MarketNotExpired',
+  6004: 'InsufficientLiquidity',
+  6005: 'InsufficientOutput',
+  6006: 'InsufficientBalance',
+  6007: 'SlippageExceeded',
+  6008: 'Unauthorized',
+  6009: 'InvalidPrice',
+  6010: 'MathOverflow',
+  6011: 'NoResidualsToClaim',
+  6012: 'InvalidDuration',
+  6013: 'InvalidBudget',
+  6014: 'InvalidWinningMint',
+  6015: 'InsufficientVault',
+  6016: 'InvalidName',
+  6035: 'InvalidMarketDuration',
+}
+
+/** Anchor's AccountNotInitialized: in a swap, a missing YES or NO token account. */
+export const ANCHOR_ACCOUNT_NOT_INITIALIZED = 3012
+
+const PROGRAM_CODE_MAP: Readonly<Record<number, [HoragonErrorCode, string]>> = {
+  6000: ['MARKET_CLOSED', 'Market is already resolved'],
+  6002: ['MARKET_CLOSED', 'Market has expired'],
+  6004: ['MARKET_HALTED', 'Market has no liquidity (halted)'],
+  6005: ['INVALID_INPUT', 'Trade is too small: the output rounds to zero'],
+  6006: ['INSUFFICIENT_FUNDS', 'Not enough tokens for this trade'],
+  6007: ['SLIPPAGE_EXCEEDED', 'Price moved beyond the slippage limit'],
+  3012: ['MISSING_TOKEN_ACCOUNT', 'A required token account does not exist'],
+}
+
+function errorText(err: unknown): string {
+  const parts: string[] = []
+  if (err instanceof Error) parts.push(err.message)
+  else parts.push(String(err))
+  if (typeof err === 'object' && err !== null) {
+    const logs =
+      (err as { logs?: unknown; transactionLogs?: unknown }).logs ??
+      (err as { transactionLogs?: unknown }).transactionLogs
+    if (Array.isArray(logs)) parts.push(...logs.map(String))
+  }
+  return parts.join('\n')
+}
+
+/** The custom program error code in an error message or its logs, if any. */
+export function extractProgramErrorCode(text: string): number | undefined {
+  const hex = /custom program error: 0x([0-9a-f]+)/i.exec(text)
+  if (hex?.[1]) return Number.parseInt(hex[1], 16)
+  const json = /"Custom":\s*(\d+)/.exec(text)
+  if (json?.[1]) return Number.parseInt(json[1], 10)
+  const anchor = /Error Number: (\d+)/.exec(text)
+  if (anchor?.[1]) return Number.parseInt(anchor[1], 10)
+  return undefined
+}
+
+/** Map anything thrown while sending a pm-AMM transaction to a HoragonError. */
+export function fromProgramError(err: unknown): HoragonError {
+  if (err instanceof HoragonError) return err
+  const text = errorText(err)
+  if (/\b429\b|too many requests/i.test(text)) {
+    return new HoragonError('RATE_LIMITED', 'RPC rate limit hit', { cause: err })
+  }
+  const code = extractProgramErrorCode(text)
+  const mapped = code === undefined ? undefined : PROGRAM_CODE_MAP[code]
+  if (code !== undefined && mapped) {
+    return new HoragonError(mapped[0], mapped[1], { cause: err, programCode: code })
+  }
+  if (/insufficient funds|insufficient lamports|no record of a prior credit/i.test(text)) {
+    return new HoragonError('INSUFFICIENT_FUNDS', 'Not enough SOL or tokens', {
+      cause: err,
+      ...(code === undefined ? {} : { programCode: code }),
+    })
+  }
+  if (code !== undefined) {
+    const name = PM_AMM_ERROR_NAMES[code] ?? 'unknown program error'
+    return new HoragonError('PROGRAM_ERROR', `Program error ${code} (${name})`, {
+      cause: err,
+      programCode: code,
+    })
+  }
+  if (/fetch failed|ECONNREFUSED|ECONNRESET|ETIMEDOUT|ENOTFOUND|socket hang up/i.test(text)) {
+    return new HoragonError('NETWORK', 'Network error while talking to the RPC', { cause: err })
+  }
+  return new HoragonError('PROGRAM_ERROR', text.split('\n')[0] ?? 'Unknown error', { cause: err })
+}

@@ -1,0 +1,21 @@
+node_modules/
+dist/
+coverage/
+target/
+.turbo/
+*.log
+.DS_Store
+
+# Keypairs and secrets never enter git.
+.keys/
+.env
+.env.*
+!.env.example
+*-keypair.json
+
+# Spike outputs that stay local (results/ is committed; raw recordings are large).
+spikes/recordings/
+
+# Agent working notes and Vitest caches stay local.
+.superpowers/
+**/.vitest/

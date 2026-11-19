@@ -1,0 +1,33 @@
+{
+  "name": "@horagon/spikes",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Tier 0 feasibility spikes. Throwaway code: only the quote function and fixtures survive.",
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "s5": "tsx src/s5-faucet.ts",
+    "s1": "tsx src/s1-devnet.ts",
+    "s3b": "tsx src/s3b-surfpool.ts",
+    "s2": "tsx src/s2-cpi.ts",
+    "s3a": "tsx src/s3a-sponsor.ts",
+    "s4:probe": "tsx src/s4-probe.ts",
+    "s4:record": "tsx src/s4-record.ts",
+    "s4:compact": "tsx src/s4-compact.ts"
+  },
+  "dependencies": {
+    "@anchor-lang/core": "^1.2.2",
+    "@horagon/api": "workspace:*",
+    "@horagon/pm-amm-vendor": "workspace:*",
+    "@horagon/sdk": "workspace:*",
+    "@solana/spl-token": "^0.4.15",
+    "@solana/web3.js": "^1.98.4"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "tsx": "^4.23.15",
+    "typescript": "~5.9.3",
+    "vitest": "^5.1.0"
+  }
+}

@@ -1,0 +1,66 @@
+{
+  "spike": "s3a-sponsor",
+  "cluster": "devnet",
+  "startedAt": "2026-11-18T09:30:55.777Z",
+  "finishedAt": "2026-11-18T09:31:02.245Z",
+  "pass": true,
+  "checks": [
+    {
+      "name": "burner starts with 0 SOL",
+      "pass": true
+    },
+    {
+      "name": "sponsored burner swap confirmed",
+      "pass": true,
+      "detail": "{\"signature\":\"5Pu68wzGKErA74ggUXS5UwE4Aov73RpSEvrEueBKCtTHZb4x6geA6Y7tZmZ3NvKBkJLKQ8psKK8MJqGa86cY2jBV\"}"
+    },
+    {
+      "name": "burner still has 0 SOL",
+      "pass": true
+    },
+    {
+      "name": "burner received YES",
+      "pass": true,
+      "detail": "19023352 YES"
+    },
+    {
+      "name": "route refuses: SOL transfer out of the sponsor",
+      "pass": true,
+      "detail": "400 SPONSOR_MISUSE"
+    },
+    {
+      "name": "route refuses: deposit_liquidity",
+      "pass": true,
+      "detail": "400 PM_AMM_RULE"
+    },
+    {
+      "name": "route refuses: ATA for a stranger",
+      "pass": true,
+      "detail": "400 ATA_RULE"
+    },
+    {
+      "name": "route refuses: CU limit above the cap",
+      "pass": true,
+      "detail": "400 COMPUTE_BUDGET"
+    }
+  ],
+  "data": {
+    "market": "qpF2PseRguMvq4bK1jbWodfCapfCPFmrYcrNjMYj4AK",
+    "sponsoredSwap": {
+      "status": 200,
+      "body": {
+        "signature": "5Pu68wzGKErA74ggUXS5UwE4Aov73RpSEvrEueBKCtTHZb4x6geA6Y7tZmZ3NvKBkJLKQ8psKK8MJqGa86cY2jBV"
+      }
+    },
+    "sponsoredSwapStats": {
+      "signature": "5Pu68wzGKErA74ggUXS5UwE4Aov73RpSEvrEueBKCtTHZb4x6geA6Y7tZmZ3NvKBkJLKQ8psKK8MJqGa86cY2jBV",
+      "slot": 523585538,
+      "blockTime": 1794994260,
+      "computeUnits": 506088,
+      "feeLamports": 10000,
+      "sizeBytes": 864,
+      "maxInvokeDepth": 2
+    },
+    "sponsorCostLamports": 2986880
+  }
+}

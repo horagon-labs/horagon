@@ -1,0 +1,67 @@
+{
+  "spike": "s5-faucet",
+  "cluster": "devnet",
+  "startedAt": "2026-11-18T06:02:18.766Z",
+  "finishedAt": "2026-11-18T06:02:25.158Z",
+  "pass": true,
+  "checks": [
+    {
+      "name": "creator: faucet answers 200",
+      "pass": true,
+      "detail": "HTTP 200"
+    },
+    {
+      "name": "creator: balance grew by exactly 1,000 mUSDC",
+      "pass": true,
+      "detail": "0 -> 1000000000"
+    },
+    {
+      "name": "trader: faucet answers 200",
+      "pass": true,
+      "detail": "HTTP 200"
+    },
+    {
+      "name": "trader: balance grew by exactly 1,000 mUSDC",
+      "pass": true,
+      "detail": "0 -> 1000000000"
+    },
+    {
+      "name": "second claim within the hour is refused with 429 and Retry-After",
+      "pass": true,
+      "detail": "HTTP 429, Retry-After 3596"
+    }
+  ],
+  "data": {
+    "creator.wallet": "BpVRxrimzWvLcYr5tPDReybKKLJdgiJXXRRCZhn3f3dc",
+    "creator.faucet": {
+      "status": 200,
+      "body": {
+        "ok": true,
+        "signature": "4J2LBewD6hBoiBNejN89ocXR9Zafxn8MjSvx47P7xc7h2d89iVNft7aUETRRAYWePGXzb4kXFjvrLeX2Mz8UFpJQ",
+        "amount": 1000,
+        "sol": 0,
+        "solSkipped": "reserve"
+      }
+    },
+    "creator.sol": 0,
+    "trader.wallet": "BqwvXe6H4ZgCgg6D2dSDVFkCrN79X8C6ZC6RDXB5soo",
+    "trader.faucet": {
+      "status": 200,
+      "body": {
+        "ok": true,
+        "signature": "4jfigS2MFBhVnEfz44Yi89uxkStNCnnKeQTs8AVvwxfgXYBTRSkSZdUp7T7rru2dNxUnKweWGxpS8Tzm4KXARSLn",
+        "amount": 1000,
+        "sol": 0,
+        "solSkipped": "reserve"
+      }
+    },
+    "trader.sol": 0,
+    "creator.secondFaucet": {
+      "status": 429,
+      "retryAfterSecs": 3596,
+      "body": {
+        "error": "This wallet already used the faucet — try again in 60 min"
+      }
+    }
+  }
+}

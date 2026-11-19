@@ -1,0 +1,2107 @@
+{
+ "schema": "horagon.replay.v0",
+ "gameDate": "2026-11-18",
+ "home": "IND",
+ "away": "HOU",
+ "tipoffUtc": "2026-11-19T00:00Z",
+ "frames": [
+  {
+   "t": "2026-11-18T23:30:03.394Z",
+   "source": "espn",
+   "status": "pre",
+   "period": 0,
+   "clock": "0.0",
+   "homeScore": 0,
+   "awayScore": 0
+  },
+  {
+   "t": "2026-11-19T00:11:04.639Z",
+   "source": "espn",
+   "status": "live",
+   "period": 1,
+   "clock": "12:00",
+   "homeScore": 0,
+   "awayScore": 0
+  },
+  {
+   "t": "2026-11-19T00:11:19.652Z",
+   "source": "espn",
+   "status": "live",
+   "period": 1,
+   "clock": "11:42",
+   "homeScore": 0,
+   "awayScore": 0
+  },
+  {
+   "t": "2026-11-19T00:11:34.654Z",
+   "source": "espn",
+   "status": "live",
+   "period": 1,
+   "clock": "11:22",
+   "homeScore": 3,
+   "awayScore": 0
+  },
+  {
+   "t": "2026-11-19T00:11:49.669Z",
+   "source": "espn",
+   "status": "live",
+   "period": 1,
+   "clock": "11:19",
+   "homeScore": 3,
+   "awayScore": 0
+  },
+  {
+   "t": "2026-11-19T00:12:04.676Z",
+   "source": "espn",
+   "status": "live",
+   "period": 1,
+   "clock": "11:03",
+   "homeScore": 3,
+   "awayScore": 2
+  },
+  {
+   "t": "2026-11-19T00:12:19.684Z",
+   "source": "espn",
+   "status": "live",
+   "period": 1,
+   "clock": "10:35",
+   "homeScore": 6,
+   "awayScore": 2
+  },
+  {
+   "t": "2026-11-19T00:12:34.694Z",
+   "source": "espn",
+   "status": "live",
+   "period": 1,
+   "clock": "10:33",
+   "homeScore": 6,
+   "awayScore": 2
+  },
+  {
+   "t": "2026-11-19T00:13:04.703Z",
+   "source": "espn",
+   "status": "live",
+   "period": 1,
+   "clock": "10:19",
+   "homeScore": 6,
+   "awayScore": 4
+  },
+  {
+   "t": "2026-11-19T00:13:19.703Z",
+   "source": "espn",
+   "status": "live",
+   "period": 1,
+   "clock": "10:14",
+   "homeScore": 6,
+   "awayScore": 4
+  },
+  {
+   "t": "2026-11-19T00:13:34.718Z",
+   "source": "espn",
+   "status": "live",
+   "period": 1,
+   "clock": "10:10",
+   "homeScore": 6,
+   "awayScore": 4
+  },
+  {
+   "t": "2026-11-19T00:13:49.719Z",
+   "source": "espn",
+   "status": "live",
+   "period": 1,
+   "clock": "9:48",
+   "homeScore": 6,
+   "awayScore": 7
+  },
+  {
+   "t": "2026-11-19T00:14:04.723Z",
+   "source": "espn",
+   "status": "live",
+   "period": 1,
+   "clock": "9:26",
+   "homeScore": 8,
+   "awayScore": 7
+  },
+  {
+   "t": "2026-11-19T00:14:19.732Z",
+   "source": "espn",
+   "status": "live",
+   "period": 1,
+   "clock": "9:17",
+   "homeScore": 8,
+   "awayScore": 9
+  },
+  {
+   "t": "2026-11-19T00:14:34.733Z",
+   "source": "espn",
+   "status": "live",
+   "period": 1,
+   "clock": "9:04",
+   "homeScore": 8,
+   "awayScore": 9
+  },
+  {
+   "t": "2026-11-19T00:14:49.738Z",
+   "source": "espn",
+   "status": "live",
+   "period": 1,
+   "clock": "8:46",
+   "homeScore": 8,
+   "awayScore": 12
+  },
+  {
+   "t": "2026-11-19T00:15:04.743Z",
+   "source": "espn",
+   "status": "live",
+   "period": 1,
+   "clock": "8:26",
+   "homeScore": 10,
+   "awayScore": 12
+  },
+  {
+   "t": "2026-11-19T00:15:19.747Z",
+   "source": "espn",
+   "status": "live",
+   "period": 1,
+   "clock": "8:17",
+   "homeScore": 10,
+   "awayScore": 15
+  },
+  {
+   "t": "2026-11-19T00:16:04.780Z",
+   "source": "espn",
+   "status": "live",
+   "period": 1,
+   "clock": "7:53",
+   "homeScore": 10,
+   "awayScore": 15
+  },
+  {
+   "t": "2026-11-19T00:16:19.793Z",
+   "source": "espn",
+   "status": "live",
+   "period": 1,
+   "clock": "7:49",
+   "homeScore": 10,
+   "awayScore": 17
+  },
+  {
+   "t": "2026-11-19T00:19:49.906Z",
+   "source": "espn",
+   "status": "live",
+   "period": 1,
+   "clock": "7:34",
+   "homeScore": 10,
+   "awayScore": 17
+  },
+  {
+   "t": "2026-11-19T00:20:04.915Z",
+   "source": "espn",
+   "status": "live",
+   "period": 1,
+   "clock": "7:22",
+   "homeScore": 10,
+   "awayScore": 17
+  },
+  {
+   "t": "2026-11-19T00:20:19.921Z",
+   "source": "espn",
+   "status": "live",
+   "period": 1,
+   "clock": "7:11",
+   "homeScore": 10,
+   "awayScore": 17
+  },
+  {
+   "t": "2026-11-19T00:20:34.930Z",
+   "source": "espn",
+   "status": "live",
+   "period": 1,
+   "clock": "7:02",
+   "homeScore": 10,
+   "awayScore": 17
+  },
+  {
+   "t": "2026-11-19T00:21:04.952Z",
+   "source": "espn",
+   "status": "live",
+   "period": 1,
+   "clock": "6:48",
+   "homeScore": 10,
+   "awayScore": 17
+  },
+  {
+   "t": "2026-11-19T00:21:34.965Z",
+   "source": "espn",
+   "status": "live",
+   "period": 1,
+   "clock": "6:48",
+   "homeScore": 10,
+   "awayScore": 18
+  },
+  {
+   "t": "2026-11-19T00:21:49.967Z",
+   "source": "espn",
+   "status": "live",
+   "period": 1,
+   "clock": "6:46",
+   "homeScore": 10,
+   "awayScore": 18
+  },
+  {
+   "t": "2026-11-19T00:22:04.975Z",
+   "source": "espn",
+   "status": "live",
+   "period": 1,
+   "clock": "6:30",
+   "homeScore": 10,
+   "awayScore": 18
+  },
+  {
+   "t": "2026-11-19T00:22:19.980Z",
+   "source": "espn",
+   "status": "live",
+   "period": 1,
+   "clock": "6:17",
+   "homeScore": 10,
+   "awayScore": 21
+  },
+  {
+   "t": "2026-11-19T00:22:49.999Z",
+   "source": "espn",
+   "status": "live",
+   "period": 1,
+   "clock": "5:53",
+   "homeScore": 10,
+   "awayScore": 21
+  },
+  {
+   "t": "2026-11-19T00:23:05.011Z",
+   "source": "espn",
+   "status": "live",
+   "period": 1,
+   "clock": "5:47",
+   "homeScore": 10,
+   "awayScore": 21
+  },
+  {
+   "t": "2026-11-19T00:23:35.029Z",
+   "source": "espn",
+   "status": "live",
+   "period": 1,
+   "clock": "5:22",
+   "homeScore": 10,
+   "awayScore": 24
+  },
+  {
+   "t": "2026-11-19T00:23:50.042Z",
+   "source": "espn",
+   "status": "live",
+   "period": 1,
+   "clock": "5:12",
+   "homeScore": 10,
+   "awayScore": 27
+  },
+  {
+   "t": "2026-11-19T00:27:20.188Z",
+   "source": "espn",
+   "status": "live",
+   "period": 1,
+   "clock": "4:49",
+   "homeScore": 12,
+   "awayScore": 27
+  },
+  {
+   "t": "2026-11-19T00:27:35.189Z",
+   "source": "espn",
+   "status": "live",
+   "period": 1,
+   "clock": "4:30",
+   "homeScore": 12,
+   "awayScore": 27
+  },
+  {
+   "t": "2026-11-19T00:27:50.196Z",
+   "source": "espn",
+   "status": "live",
+   "period": 1,
+   "clock": "4:16",
+   "homeScore": 12,
+   "awayScore": 27
+  },
+  {
+   "t": "2026-11-19T00:28:05.196Z",
+   "source": "espn",
+   "status": "live",
+   "period": 1,
+   "clock": "3:59",
+   "homeScore": 12,
+   "awayScore": 29
+  },
+  {
+   "t": "2026-11-19T00:28:20.206Z",
+   "source": "espn",
+   "status": "live",
+   "period": 1,
+   "clock": "3:36",
+   "homeScore": 14,
+   "awayScore": 29
+  },
+  {
+   "t": "2026-11-19T00:28:35.219Z",
+   "source": "espn",
+   "status": "live",
+   "period": 1,
+   "clock": "3:32",
+   "homeScore": 14,
+   "awayScore": 29
+  },
+  {
+   "t": "2026-11-19T00:28:50.224Z",
+   "source": "espn",
+   "status": "live",
+   "period": 1,
+   "clock": "3:05",
+   "homeScore": 16,
+   "awayScore": 29
+  },
+  {
+   "t": "2026-11-19T00:29:20.242Z",
+   "source": "espn",
+   "status": "live",
+   "period": 1,
+   "clock": "2:40",
+   "homeScore": 18,
+   "awayScore": 29
+  },
+  {
+   "t": "2026-11-19T00:31:50.337Z",
+   "source": "espn",
+   "status": "live",
+   "period": 1,
+   "clock": "2:13",
+   "homeScore": 18,
+   "awayScore": 32
+  },
+  {
+   "t": "2026-11-19T00:32:05.348Z",
+   "source": "espn",
+   "status": "live",
+   "period": 1,
+   "clock": "1:57",
+   "homeScore": 21,
+   "awayScore": 32
+  },
+  {
+   "t": "2026-11-19T00:32:20.362Z",
+   "source": "espn",
+   "status": "live",
+   "period": 1,
+   "clock": "1:33",
+   "homeScore": 21,
+   "awayScore": 35
+  },
+  {
+   "t": "2026-11-19T00:32:35.362Z",
+   "source": "espn",
+   "status": "live",
+   "period": 1,
+   "clock": "1:23",
+   "homeScore": 21,
+   "awayScore": 35
+  },
+  {
+   "t": "2026-11-19T00:32:50.371Z",
+   "source": "espn",
+   "status": "live",
+   "period": 1,
+   "clock": "1:13",
+   "homeScore": 21,
+   "awayScore": 37
+  },
+  {
+   "t": "2026-11-19T00:33:20.389Z",
+   "source": "espn",
+   "status": "live",
+   "period": 1,
+   "clock": "1:13",
+   "homeScore": 22,
+   "awayScore": 37
+  },
+  {
+   "t": "2026-11-19T00:33:50.409Z",
+   "source": "espn",
+   "status": "live",
+   "period": 1,
+   "clock": "1:12",
+   "homeScore": 22,
+   "awayScore": 37
+  },
+  {
+   "t": "2026-11-19T00:34:05.412Z",
+   "source": "espn",
+   "status": "live",
+   "period": 1,
+   "clock": "55.8",
+   "homeScore": 24,
+   "awayScore": 37
+  },
+  {
+   "t": "2026-11-19T00:34:20.426Z",
+   "source": "espn",
+   "status": "live",
+   "period": 1,
+   "clock": "55.8",
+   "homeScore": 25,
+   "awayScore": 37
+  },
+  {
+   "t": "2026-11-19T00:34:35.437Z",
+   "source": "espn",
+   "status": "live",
+   "period": 1,
+   "clock": "54.2",
+   "homeScore": 25,
+   "awayScore": 37
+  },
+  {
+   "t": "2026-11-19T00:34:50.440Z",
+   "source": "espn",
+   "status": "live",
+   "period": 1,
+   "clock": "30.9",
+   "homeScore": 27,
+   "awayScore": 39
+  },
+  {
+   "t": "2026-11-19T00:35:05.447Z",
+   "source": "espn",
+   "status": "live",
+   "period": 1,
+   "clock": "29.2",
+   "homeScore": 27,
+   "awayScore": 39
+  },
+  {
+   "t": "2026-11-19T00:35:20.462Z",
+   "source": "espn",
+   "status": "live",
+   "period": 1,
+   "clock": "10.8",
+   "homeScore": 27,
+   "awayScore": 39
+  },
+  {
+   "t": "2026-11-19T00:36:35.500Z",
+   "source": "espn",
+   "status": "live",
+   "period": 1,
+   "clock": "6.2",
+   "homeScore": 28,
+   "awayScore": 39
+  },
+  {
+   "t": "2026-11-19T00:36:50.510Z",
+   "source": "espn",
+   "status": "live",
+   "period": 1,
+   "clock": "0.0",
+   "homeScore": 28,
+   "awayScore": 39
+  },
+  {
+   "t": "2026-11-19T00:39:20.614Z",
+   "source": "espn",
+   "status": "live",
+   "period": 2,
+   "clock": "12:00",
+   "homeScore": 28,
+   "awayScore": 39
+  },
+  {
+   "t": "2026-11-19T00:39:35.645Z",
+   "source": "espn",
+   "status": "live",
+   "period": 2,
+   "clock": "11:57",
+   "homeScore": 28,
+   "awayScore": 39
+  },
+  {
+   "t": "2026-11-19T00:39:50.650Z",
+   "source": "espn",
+   "status": "live",
+   "period": 2,
+   "clock": "11:29",
+   "homeScore": 28,
+   "awayScore": 39
+  },
+  {
+   "t": "2026-11-19T00:40:05.662Z",
+   "source": "espn",
+   "status": "live",
+   "period": 2,
+   "clock": "11:19",
+   "homeScore": 28,
+   "awayScore": 39
+  },
+  {
+   "t": "2026-11-19T00:40:20.673Z",
+   "source": "espn",
+   "status": "live",
+   "period": 2,
+   "clock": "11:00",
+   "homeScore": 28,
+   "awayScore": 39
+  },
+  {
+   "t": "2026-11-19T00:40:50.681Z",
+   "source": "espn",
+   "status": "live",
+   "period": 2,
+   "clock": "10:27",
+   "homeScore": 28,
+   "awayScore": 39
+  },
+  {
+   "t": "2026-11-19T00:41:05.688Z",
+   "source": "espn",
+   "status": "live",
+   "period": 2,
+   "clock": "10:15",
+   "homeScore": 30,
+   "awayScore": 39
+  },
+  {
+   "t": "2026-11-19T00:41:20.703Z",
+   "source": "espn",
+   "status": "live",
+   "period": 2,
+   "clock": "9:52",
+   "homeScore": 30,
+   "awayScore": 39
+  },
+  {
+   "t": "2026-11-19T00:41:35.714Z",
+   "source": "espn",
+   "status": "live",
+   "period": 2,
+   "clock": "9:41",
+   "homeScore": 30,
+   "awayScore": 39
+  },
+  {
+   "t": "2026-11-19T00:41:50.728Z",
+   "source": "espn",
+   "status": "live",
+   "period": 2,
+   "clock": "9:27",
+   "homeScore": 30,
+   "awayScore": 41
+  },
+  {
+   "t": "2026-11-19T00:42:20.742Z",
+   "source": "espn",
+   "status": "live",
+   "period": 2,
+   "clock": "9:19",
+   "homeScore": 30,
+   "awayScore": 41
+  },
+  {
+   "t": "2026-11-19T00:42:50.748Z",
+   "source": "espn",
+   "status": "live",
+   "period": 2,
+   "clock": "8:57",
+   "homeScore": 30,
+   "awayScore": 43
+  },
+  {
+   "t": "2026-11-19T00:43:05.754Z",
+   "source": "espn",
+   "status": "live",
+   "period": 2,
+   "clock": "8:56",
+   "homeScore": 30,
+   "awayScore": 43
+  },
+  {
+   "t": "2026-11-19T00:43:20.757Z",
+   "source": "espn",
+   "status": "live",
+   "period": 2,
+   "clock": "8:55",
+   "homeScore": 30,
+   "awayScore": 43
+  },
+  {
+   "t": "2026-11-19T00:43:35.768Z",
+   "source": "espn",
+   "status": "live",
+   "period": 2,
+   "clock": "8:45",
+   "homeScore": 30,
+   "awayScore": 43
+  },
+  {
+   "t": "2026-11-19T00:43:50.769Z",
+   "source": "espn",
+   "status": "live",
+   "period": 2,
+   "clock": "8:34",
+   "homeScore": 30,
+   "awayScore": 43
+  },
+  {
+   "t": "2026-11-19T00:44:05.782Z",
+   "source": "espn",
+   "status": "live",
+   "period": 2,
+   "clock": "8:29",
+   "homeScore": 30,
+   "awayScore": 43
+  },
+  {
+   "t": "2026-11-19T00:44:35.793Z",
+   "source": "espn",
+   "status": "live",
+   "period": 2,
+   "clock": "8:03",
+   "homeScore": 30,
+   "awayScore": 43
+  },
+  {
+   "t": "2026-11-19T00:44:50.805Z",
+   "source": "espn",
+   "status": "live",
+   "period": 2,
+   "clock": "7:48",
+   "homeScore": 30,
+   "awayScore": 43
+  },
+  {
+   "t": "2026-11-19T00:45:05.817Z",
+   "source": "espn",
+   "status": "live",
+   "period": 2,
+   "clock": "7:32",
+   "homeScore": 30,
+   "awayScore": 46
+  },
+  {
+   "t": "2026-11-19T00:45:20.823Z",
+   "source": "espn",
+   "status": "live",
+   "period": 2,
+   "clock": "7:21",
+   "homeScore": 30,
+   "awayScore": 46
+  },
+  {
+   "t": "2026-11-19T00:49:20.931Z",
+   "source": "espn",
+   "status": "live",
+   "period": 2,
+   "clock": "7:21",
+   "homeScore": 30,
+   "awayScore": 47
+  },
+  {
+   "t": "2026-11-19T00:50:05.937Z",
+   "source": "espn",
+   "status": "live",
+   "period": 2,
+   "clock": "6:53",
+   "homeScore": 30,
+   "awayScore": 49
+  },
+  {
+   "t": "2026-11-19T00:50:35.949Z",
+   "source": "espn",
+   "status": "live",
+   "period": 2,
+   "clock": "6:31",
+   "homeScore": 30,
+   "awayScore": 49
+  },
+  {
+   "t": "2026-11-19T00:51:05.958Z",
+   "source": "espn",
+   "status": "live",
+   "period": 2,
+   "clock": "5:57",
+   "homeScore": 30,
+   "awayScore": 49
+  },
+  {
+   "t": "2026-11-19T00:51:20.970Z",
+   "source": "espn",
+   "status": "live",
+   "period": 2,
+   "clock": "5:52",
+   "homeScore": 30,
+   "awayScore": 49
+  },
+  {
+   "t": "2026-11-19T00:51:35.971Z",
+   "source": "espn",
+   "status": "live",
+   "period": 2,
+   "clock": "5:28",
+   "homeScore": 33,
+   "awayScore": 49
+  },
+  {
+   "t": "2026-11-19T00:52:05.971Z",
+   "source": "espn",
+   "status": "live",
+   "period": 2,
+   "clock": "5:09",
+   "homeScore": 33,
+   "awayScore": 49
+  },
+  {
+   "t": "2026-11-19T00:52:35.986Z",
+   "source": "espn",
+   "status": "live",
+   "period": 2,
+   "clock": "4:41",
+   "homeScore": 33,
+   "awayScore": 51
+  },
+  {
+   "t": "2026-11-19T00:53:05.994Z",
+   "source": "espn",
+   "status": "live",
+   "period": 2,
+   "clock": "4:27",
+   "homeScore": 33,
+   "awayScore": 51
+  },
+  {
+   "t": "2026-11-19T00:53:21.004Z",
+   "source": "espn",
+   "status": "live",
+   "period": 2,
+   "clock": "4:16",
+   "homeScore": 33,
+   "awayScore": 51
+  },
+  {
+   "t": "2026-11-19T00:53:36.006Z",
+   "source": "espn",
+   "status": "live",
+   "period": 2,
+   "clock": "3:56",
+   "homeScore": 35,
+   "awayScore": 51
+  },
+  {
+   "t": "2026-11-19T00:53:51.007Z",
+   "source": "espn",
+   "status": "live",
+   "period": 2,
+   "clock": "3:52",
+   "homeScore": 35,
+   "awayScore": 51
+  },
+  {
+   "t": "2026-11-19T00:54:06.007Z",
+   "source": "espn",
+   "status": "live",
+   "period": 2,
+   "clock": "3:33",
+   "homeScore": 35,
+   "awayScore": 51
+  },
+  {
+   "t": "2026-11-19T00:54:36.025Z",
+   "source": "espn",
+   "status": "live",
+   "period": 2,
+   "clock": "3:33",
+   "homeScore": 37,
+   "awayScore": 51
+  },
+  {
+   "t": "2026-11-19T00:56:21.080Z",
+   "source": "espn",
+   "status": "live",
+   "period": 2,
+   "clock": "3:33",
+   "homeScore": 38,
+   "awayScore": 51
+  },
+  {
+   "t": "2026-11-19T00:57:51.100Z",
+   "source": "espn",
+   "status": "live",
+   "period": 2,
+   "clock": "3:33",
+   "homeScore": 37,
+   "awayScore": 51
+  },
+  {
+   "t": "2026-11-19T00:58:06.104Z",
+   "source": "espn",
+   "status": "live",
+   "period": 2,
+   "clock": "3:32",
+   "homeScore": 37,
+   "awayScore": 52
+  },
+  {
+   "t": "2026-11-19T00:58:21.114Z",
+   "source": "espn",
+   "status": "live",
+   "period": 2,
+   "clock": "3:20",
+   "homeScore": 37,
+   "awayScore": 52
+  },
+  {
+   "t": "2026-11-19T00:58:51.118Z",
+   "source": "espn",
+   "status": "live",
+   "period": 2,
+   "clock": "3:09",
+   "homeScore": 39,
+   "awayScore": 52
+  },
+  {
+   "t": "2026-11-19T00:59:21.134Z",
+   "source": "espn",
+   "status": "live",
+   "period": 2,
+   "clock": "2:42",
+   "homeScore": 39,
+   "awayScore": 52
+  },
+  {
+   "t": "2026-11-19T00:59:51.155Z",
+   "source": "espn",
+   "status": "live",
+   "period": 2,
+   "clock": "2:24",
+   "homeScore": 41,
+   "awayScore": 54
+  },
+  {
+   "t": "2026-11-19T01:00:21.167Z",
+   "source": "espn",
+   "status": "live",
+   "period": 2,
+   "clock": "2:00",
+   "homeScore": 41,
+   "awayScore": 57
+  },
+  {
+   "t": "2026-11-19T01:00:36.179Z",
+   "source": "espn",
+   "status": "live",
+   "period": 2,
+   "clock": "1:51",
+   "homeScore": 41,
+   "awayScore": 57
+  },
+  {
+   "t": "2026-11-19T01:01:06.185Z",
+   "source": "espn",
+   "status": "live",
+   "period": 2,
+   "clock": "1:42",
+   "homeScore": 41,
+   "awayScore": 57
+  },
+  {
+   "t": "2026-11-19T01:01:21.186Z",
+   "source": "espn",
+   "status": "live",
+   "period": 2,
+   "clock": "1:39",
+   "homeScore": 44,
+   "awayScore": 57
+  },
+  {
+   "t": "2026-11-19T01:01:51.193Z",
+   "source": "espn",
+   "status": "live",
+   "period": 2,
+   "clock": "1:11",
+   "homeScore": 46,
+   "awayScore": 57
+  },
+  {
+   "t": "2026-11-19T01:02:06.195Z",
+   "source": "espn",
+   "status": "live",
+   "period": 2,
+   "clock": "1:00",
+   "homeScore": 46,
+   "awayScore": 60
+  },
+  {
+   "t": "2026-11-19T01:02:21.209Z",
+   "source": "espn",
+   "status": "live",
+   "period": 2,
+   "clock": "39.8",
+   "homeScore": 46,
+   "awayScore": 60
+  },
+  {
+   "t": "2026-11-19T01:02:36.222Z",
+   "source": "espn",
+   "status": "live",
+   "period": 2,
+   "clock": "38.5",
+   "homeScore": 46,
+   "awayScore": 60
+  },
+  {
+   "t": "2026-11-19T01:02:51.232Z",
+   "source": "espn",
+   "status": "live",
+   "period": 2,
+   "clock": "31.9",
+   "homeScore": 46,
+   "awayScore": 60
+  },
+  {
+   "t": "2026-11-19T01:03:06.240Z",
+   "source": "espn",
+   "status": "live",
+   "period": 2,
+   "clock": "27.9",
+   "homeScore": 46,
+   "awayScore": 60
+  },
+  {
+   "t": "2026-11-19T01:03:21.242Z",
+   "source": "espn",
+   "status": "live",
+   "period": 2,
+   "clock": "7.2",
+   "homeScore": 46,
+   "awayScore": 60
+  },
+  {
+   "t": "2026-11-19T01:03:51.246Z",
+   "source": "espn",
+   "status": "live",
+   "period": 2,
+   "clock": "0.1",
+   "homeScore": 46,
+   "awayScore": 62
+  },
+  {
+   "t": "2026-11-19T01:04:06.256Z",
+   "source": "espn",
+   "status": "live",
+   "period": 2,
+   "clock": "0.0",
+   "homeScore": 46,
+   "awayScore": 62
+  },
+  {
+   "t": "2026-11-19T01:20:06.781Z",
+   "source": "espn",
+   "status": "live",
+   "period": 3,
+   "clock": "11:57",
+   "homeScore": 46,
+   "awayScore": 62
+  },
+  {
+   "t": "2026-11-19T01:20:36.805Z",
+   "source": "espn",
+   "status": "live",
+   "period": 3,
+   "clock": "11:52",
+   "homeScore": 46,
+   "awayScore": 62
+  },
+  {
+   "t": "2026-11-19T01:20:51.819Z",
+   "source": "espn",
+   "status": "live",
+   "period": 3,
+   "clock": "11:32",
+   "homeScore": 46,
+   "awayScore": 62
+  },
+  {
+   "t": "2026-11-19T01:21:06.827Z",
+   "source": "espn",
+   "status": "live",
+   "period": 3,
+   "clock": "11:15",
+   "homeScore": 46,
+   "awayScore": 64
+  },
+  {
+   "t": "2026-11-19T01:21:36.850Z",
+   "source": "espn",
+   "status": "live",
+   "period": 3,
+   "clock": "10:42",
+   "homeScore": 48,
+   "awayScore": 64
+  },
+  {
+   "t": "2026-11-19T01:21:51.861Z",
+   "source": "espn",
+   "status": "live",
+   "period": 3,
+   "clock": "10:33",
+   "homeScore": 51,
+   "awayScore": 64
+  },
+  {
+   "t": "2026-11-19T01:22:06.873Z",
+   "source": "espn",
+   "status": "live",
+   "period": 3,
+   "clock": "10:21",
+   "homeScore": 51,
+   "awayScore": 67
+  },
+  {
+   "t": "2026-11-19T01:22:21.877Z",
+   "source": "espn",
+   "status": "live",
+   "period": 3,
+   "clock": "10:08",
+   "homeScore": 51,
+   "awayScore": 67
+  },
+  {
+   "t": "2026-11-19T01:22:51.900Z",
+   "source": "espn",
+   "status": "live",
+   "period": 3,
+   "clock": "10:00",
+   "homeScore": 51,
+   "awayScore": 67
+  },
+  {
+   "t": "2026-11-19T01:23:06.902Z",
+   "source": "espn",
+   "status": "live",
+   "period": 3,
+   "clock": "9:49",
+   "homeScore": 53,
+   "awayScore": 67
+  },
+  {
+   "t": "2026-11-19T01:25:51.996Z",
+   "source": "espn",
+   "status": "live",
+   "period": 3,
+   "clock": "9:34",
+   "homeScore": 53,
+   "awayScore": 69
+  },
+  {
+   "t": "2026-11-19T01:26:07.001Z",
+   "source": "espn",
+   "status": "live",
+   "period": 3,
+   "clock": "9:15",
+   "homeScore": 53,
+   "awayScore": 69
+  },
+  {
+   "t": "2026-11-19T01:26:22.016Z",
+   "source": "espn",
+   "status": "live",
+   "period": 3,
+   "clock": "9:10",
+   "homeScore": 53,
+   "awayScore": 69
+  },
+  {
+   "t": "2026-11-19T01:26:37.022Z",
+   "source": "espn",
+   "status": "live",
+   "period": 3,
+   "clock": "8:56",
+   "homeScore": 53,
+   "awayScore": 69
+  },
+  {
+   "t": "2026-11-19T01:26:52.035Z",
+   "source": "espn",
+   "status": "live",
+   "period": 3,
+   "clock": "8:54",
+   "homeScore": 53,
+   "awayScore": 72
+  },
+  {
+   "t": "2026-11-19T01:27:07.036Z",
+   "source": "espn",
+   "status": "live",
+   "period": 3,
+   "clock": "8:30",
+   "homeScore": 56,
+   "awayScore": 72
+  },
+  {
+   "t": "2026-11-19T01:27:22.047Z",
+   "source": "espn",
+   "status": "live",
+   "period": 3,
+   "clock": "8:17",
+   "homeScore": 56,
+   "awayScore": 72
+  },
+  {
+   "t": "2026-11-19T01:31:22.159Z",
+   "source": "espn",
+   "status": "live",
+   "period": 3,
+   "clock": "8:03",
+   "homeScore": 56,
+   "awayScore": 72
+  },
+  {
+   "t": "2026-11-19T01:31:37.160Z",
+   "source": "espn",
+   "status": "live",
+   "period": 3,
+   "clock": "7:56",
+   "homeScore": 56,
+   "awayScore": 72
+  },
+  {
+   "t": "2026-11-19T01:31:52.168Z",
+   "source": "espn",
+   "status": "live",
+   "period": 3,
+   "clock": "7:55",
+   "homeScore": 56,
+   "awayScore": 72
+  },
+  {
+   "t": "2026-11-19T01:32:07.168Z",
+   "source": "espn",
+   "status": "live",
+   "period": 3,
+   "clock": "7:47",
+   "homeScore": 56,
+   "awayScore": 72
+  },
+  {
+   "t": "2026-11-19T01:32:22.184Z",
+   "source": "espn",
+   "status": "live",
+   "period": 3,
+   "clock": "7:43",
+   "homeScore": 56,
+   "awayScore": 72
+  },
+  {
+   "t": "2026-11-19T01:32:52.190Z",
+   "source": "espn",
+   "status": "live",
+   "period": 3,
+   "clock": "7:15",
+   "homeScore": 56,
+   "awayScore": 72
+  },
+  {
+   "t": "2026-11-19T01:33:07.197Z",
+   "source": "espn",
+   "status": "live",
+   "period": 3,
+   "clock": "7:06",
+   "homeScore": 58,
+   "awayScore": 72
+  },
+  {
+   "t": "2026-11-19T01:33:22.211Z",
+   "source": "espn",
+   "status": "live",
+   "period": 3,
+   "clock": "6:47",
+   "homeScore": 58,
+   "awayScore": 72
+  },
+  {
+   "t": "2026-11-19T01:33:37.212Z",
+   "source": "espn",
+   "status": "live",
+   "period": 3,
+   "clock": "6:35",
+   "homeScore": 61,
+   "awayScore": 72
+  },
+  {
+   "t": "2026-11-19T01:33:52.225Z",
+   "source": "espn",
+   "status": "live",
+   "period": 3,
+   "clock": "6:15",
+   "homeScore": 63,
+   "awayScore": 72
+  },
+  {
+   "t": "2026-11-19T01:37:22.263Z",
+   "source": "espn",
+   "status": "live",
+   "period": 3,
+   "clock": "5:51",
+   "homeScore": 63,
+   "awayScore": 72
+  },
+  {
+   "t": "2026-11-19T01:37:52.283Z",
+   "source": "espn",
+   "status": "live",
+   "period": 3,
+   "clock": "5:38",
+   "homeScore": 63,
+   "awayScore": 72
+  },
+  {
+   "t": "2026-11-19T01:38:07.290Z",
+   "source": "espn",
+   "status": "live",
+   "period": 3,
+   "clock": "5:37",
+   "homeScore": 63,
+   "awayScore": 72
+  },
+  {
+   "t": "2026-11-19T01:38:22.297Z",
+   "source": "espn",
+   "status": "live",
+   "period": 3,
+   "clock": "5:14",
+   "homeScore": 65,
+   "awayScore": 72
+  },
+  {
+   "t": "2026-11-19T01:38:37.312Z",
+   "source": "espn",
+   "status": "live",
+   "period": 3,
+   "clock": "4:58",
+   "homeScore": 65,
+   "awayScore": 74
+  },
+  {
+   "t": "2026-11-19T01:39:07.326Z",
+   "source": "espn",
+   "status": "live",
+   "period": 3,
+   "clock": "4:34",
+   "homeScore": 65,
+   "awayScore": 74
+  },
+  {
+   "t": "2026-11-19T01:39:22.330Z",
+   "source": "espn",
+   "status": "live",
+   "period": 3,
+   "clock": "4:17",
+   "homeScore": 65,
+   "awayScore": 76
+  },
+  {
+   "t": "2026-11-19T01:39:52.351Z",
+   "source": "espn",
+   "status": "live",
+   "period": 3,
+   "clock": "4:09",
+   "homeScore": 65,
+   "awayScore": 76
+  },
+  {
+   "t": "2026-11-19T01:40:52.385Z",
+   "source": "espn",
+   "status": "live",
+   "period": 3,
+   "clock": "4:09",
+   "homeScore": 65,
+   "awayScore": 77
+  },
+  {
+   "t": "2026-11-19T01:41:37.398Z",
+   "source": "espn",
+   "status": "live",
+   "period": 3,
+   "clock": "4:08",
+   "homeScore": 65,
+   "awayScore": 78
+  },
+  {
+   "t": "2026-11-19T01:41:52.416Z",
+   "source": "espn",
+   "status": "live",
+   "period": 3,
+   "clock": "3:54",
+   "homeScore": 67,
+   "awayScore": 78
+  },
+  {
+   "t": "2026-11-19T01:42:07.418Z",
+   "source": "espn",
+   "status": "live",
+   "period": 3,
+   "clock": "3:40",
+   "homeScore": 67,
+   "awayScore": 81
+  },
+  {
+   "t": "2026-11-19T01:42:22.428Z",
+   "source": "espn",
+   "status": "live",
+   "period": 3,
+   "clock": "3:19",
+   "homeScore": 69,
+   "awayScore": 81
+  },
+  {
+   "t": "2026-11-19T01:42:37.432Z",
+   "source": "espn",
+   "status": "live",
+   "period": 3,
+   "clock": "3:06",
+   "homeScore": 72,
+   "awayScore": 81
+  },
+  {
+   "t": "2026-11-19T01:42:52.446Z",
+   "source": "espn",
+   "status": "live",
+   "period": 3,
+   "clock": "2:47",
+   "homeScore": 72,
+   "awayScore": 81
+  },
+  {
+   "t": "2026-11-19T01:43:07.446Z",
+   "source": "espn",
+   "status": "live",
+   "period": 3,
+   "clock": "2:40",
+   "homeScore": 72,
+   "awayScore": 84
+  },
+  {
+   "t": "2026-11-19T01:44:07.474Z",
+   "source": "espn",
+   "status": "live",
+   "period": 3,
+   "clock": "2:31",
+   "homeScore": 72,
+   "awayScore": 84
+  },
+  {
+   "t": "2026-11-19T01:47:07.563Z",
+   "source": "espn",
+   "status": "live",
+   "period": 3,
+   "clock": "2:31",
+   "homeScore": 72,
+   "awayScore": 85
+  },
+  {
+   "t": "2026-11-19T01:47:37.580Z",
+   "source": "espn",
+   "status": "live",
+   "period": 3,
+   "clock": "2:15",
+   "homeScore": 72,
+   "awayScore": 86
+  },
+  {
+   "t": "2026-11-19T01:47:52.581Z",
+   "source": "espn",
+   "status": "live",
+   "period": 3,
+   "clock": "2:10",
+   "homeScore": 74,
+   "awayScore": 86
+  },
+  {
+   "t": "2026-11-19T01:48:22.594Z",
+   "source": "espn",
+   "status": "live",
+   "period": 3,
+   "clock": "1:37",
+   "homeScore": 76,
+   "awayScore": 86
+  },
+  {
+   "t": "2026-11-19T01:48:37.609Z",
+   "source": "espn",
+   "status": "live",
+   "period": 3,
+   "clock": "1:30",
+   "homeScore": 76,
+   "awayScore": 86
+  },
+  {
+   "t": "2026-11-19T01:49:22.621Z",
+   "source": "espn",
+   "status": "live",
+   "period": 3,
+   "clock": "1:20",
+   "homeScore": 76,
+   "awayScore": 87
+  },
+  {
+   "t": "2026-11-19T01:49:37.627Z",
+   "source": "espn",
+   "status": "live",
+   "period": 3,
+   "clock": "1:04",
+   "homeScore": 76,
+   "awayScore": 87
+  },
+  {
+   "t": "2026-11-19T01:50:07.644Z",
+   "source": "espn",
+   "status": "live",
+   "period": 3,
+   "clock": "1:04",
+   "homeScore": 76,
+   "awayScore": 88
+  },
+  {
+   "t": "2026-11-19T01:50:37.658Z",
+   "source": "espn",
+   "status": "live",
+   "period": 3,
+   "clock": "1:04",
+   "homeScore": 76,
+   "awayScore": 89
+  },
+  {
+   "t": "2026-11-19T01:51:07.680Z",
+   "source": "espn",
+   "status": "live",
+   "period": 3,
+   "clock": "44.1",
+   "homeScore": 76,
+   "awayScore": 90
+  },
+  {
+   "t": "2026-11-19T01:51:22.680Z",
+   "source": "espn",
+   "status": "live",
+   "period": 3,
+   "clock": "36.0",
+   "homeScore": 76,
+   "awayScore": 90
+  },
+  {
+   "t": "2026-11-19T01:51:37.682Z",
+   "source": "espn",
+   "status": "live",
+   "period": 3,
+   "clock": "27.0",
+   "homeScore": 76,
+   "awayScore": 93
+  },
+  {
+   "t": "2026-11-19T01:51:52.690Z",
+   "source": "espn",
+   "status": "live",
+   "period": 3,
+   "clock": "7.3",
+   "homeScore": 76,
+   "awayScore": 93
+  },
+  {
+   "t": "2026-11-19T01:52:07.723Z",
+   "source": "espn",
+   "status": "live",
+   "period": 3,
+   "clock": "0.1",
+   "homeScore": 76,
+   "awayScore": 93
+  },
+  {
+   "t": "2026-11-19T01:54:52.774Z",
+   "source": "espn",
+   "status": "live",
+   "period": 4,
+   "clock": "12:00",
+   "homeScore": 76,
+   "awayScore": 93
+  },
+  {
+   "t": "2026-11-19T01:55:07.780Z",
+   "source": "espn",
+   "status": "live",
+   "period": 4,
+   "clock": "11:48",
+   "homeScore": 76,
+   "awayScore": 93
+  },
+  {
+   "t": "2026-11-19T01:55:22.790Z",
+   "source": "espn",
+   "status": "live",
+   "period": 4,
+   "clock": "11:41",
+   "homeScore": 78,
+   "awayScore": 93
+  },
+  {
+   "t": "2026-11-19T01:55:37.792Z",
+   "source": "espn",
+   "status": "live",
+   "period": 4,
+   "clock": "11:18",
+   "homeScore": 78,
+   "awayScore": 96
+  },
+  {
+   "t": "2026-11-19T01:55:52.796Z",
+   "source": "espn",
+   "status": "live",
+   "period": 4,
+   "clock": "11:16",
+   "homeScore": 80,
+   "awayScore": 96
+  },
+  {
+   "t": "2026-11-19T01:56:07.797Z",
+   "source": "espn",
+   "status": "live",
+   "period": 4,
+   "clock": "11:01",
+   "homeScore": 80,
+   "awayScore": 99
+  },
+  {
+   "t": "2026-11-19T01:56:22.810Z",
+   "source": "espn",
+   "status": "live",
+   "period": 4,
+   "clock": "10:47",
+   "homeScore": 80,
+   "awayScore": 99
+  },
+  {
+   "t": "2026-11-19T01:57:07.822Z",
+   "source": "espn",
+   "status": "live",
+   "period": 4,
+   "clock": "10:47",
+   "homeScore": 81,
+   "awayScore": 99
+  },
+  {
+   "t": "2026-11-19T01:57:22.825Z",
+   "source": "espn",
+   "status": "live",
+   "period": 4,
+   "clock": "10:46",
+   "homeScore": 81,
+   "awayScore": 99
+  },
+  {
+   "t": "2026-11-19T01:57:37.825Z",
+   "source": "espn",
+   "status": "live",
+   "period": 4,
+   "clock": "10:20",
+   "homeScore": 81,
+   "awayScore": 99
+  },
+  {
+   "t": "2026-11-19T01:57:52.835Z",
+   "source": "espn",
+   "status": "live",
+   "period": 4,
+   "clock": "10:08",
+   "homeScore": 81,
+   "awayScore": 99
+  },
+  {
+   "t": "2026-11-19T01:58:07.835Z",
+   "source": "espn",
+   "status": "live",
+   "period": 4,
+   "clock": "9:47",
+   "homeScore": 81,
+   "awayScore": 99
+  },
+  {
+   "t": "2026-11-19T01:58:22.835Z",
+   "source": "espn",
+   "status": "live",
+   "period": 4,
+   "clock": "9:44",
+   "homeScore": 81,
+   "awayScore": 101
+  },
+  {
+   "t": "2026-11-19T01:58:37.850Z",
+   "source": "espn",
+   "status": "live",
+   "period": 4,
+   "clock": "9:35",
+   "homeScore": 81,
+   "awayScore": 101
+  },
+  {
+   "t": "2026-11-19T01:58:52.855Z",
+   "source": "espn",
+   "status": "live",
+   "period": 4,
+   "clock": "9:26",
+   "homeScore": 81,
+   "awayScore": 101
+  },
+  {
+   "t": "2026-11-19T01:59:07.867Z",
+   "source": "espn",
+   "status": "live",
+   "period": 4,
+   "clock": "9:24",
+   "homeScore": 81,
+   "awayScore": 101
+  },
+  {
+   "t": "2026-11-19T01:59:22.882Z",
+   "source": "espn",
+   "status": "live",
+   "period": 4,
+   "clock": "9:06",
+   "homeScore": 81,
+   "awayScore": 101
+  },
+  {
+   "t": "2026-11-19T01:59:52.883Z",
+   "source": "espn",
+   "status": "live",
+   "period": 4,
+   "clock": "8:58",
+   "homeScore": 81,
+   "awayScore": 101
+  },
+  {
+   "t": "2026-11-19T02:00:07.888Z",
+   "source": "espn",
+   "status": "live",
+   "period": 4,
+   "clock": "8:56",
+   "homeScore": 81,
+   "awayScore": 101
+  },
+  {
+   "t": "2026-11-19T02:00:22.897Z",
+   "source": "espn",
+   "status": "live",
+   "period": 4,
+   "clock": "8:45",
+   "homeScore": 81,
+   "awayScore": 101
+  },
+  {
+   "t": "2026-11-19T02:00:37.910Z",
+   "source": "espn",
+   "status": "live",
+   "period": 4,
+   "clock": "8:44",
+   "homeScore": 81,
+   "awayScore": 101
+  },
+  {
+   "t": "2026-11-19T02:00:52.911Z",
+   "source": "espn",
+   "status": "live",
+   "period": 4,
+   "clock": "8:34",
+   "homeScore": 83,
+   "awayScore": 101
+  },
+  {
+   "t": "2026-11-19T02:01:07.922Z",
+   "source": "espn",
+   "status": "live",
+   "period": 4,
+   "clock": "8:13",
+   "homeScore": 83,
+   "awayScore": 101
+  },
+  {
+   "t": "2026-11-19T02:01:22.923Z",
+   "source": "espn",
+   "status": "live",
+   "period": 4,
+   "clock": "7:49",
+   "homeScore": 83,
+   "awayScore": 104
+  },
+  {
+   "t": "2026-11-19T02:01:37.930Z",
+   "source": "espn",
+   "status": "live",
+   "period": 4,
+   "clock": "7:39",
+   "homeScore": 83,
+   "awayScore": 104
+  },
+  {
+   "t": "2026-11-19T02:01:52.931Z",
+   "source": "espn",
+   "status": "live",
+   "period": 4,
+   "clock": "7:19",
+   "homeScore": 85,
+   "awayScore": 104
+  },
+  {
+   "t": "2026-11-19T02:02:07.946Z",
+   "source": "espn",
+   "status": "live",
+   "period": 4,
+   "clock": "7:17",
+   "homeScore": 85,
+   "awayScore": 104
+  },
+  {
+   "t": "2026-11-19T02:02:22.949Z",
+   "source": "espn",
+   "status": "live",
+   "period": 4,
+   "clock": "7:10",
+   "homeScore": 85,
+   "awayScore": 104
+  },
+  {
+   "t": "2026-11-19T02:02:52.963Z",
+   "source": "espn",
+   "status": "live",
+   "period": 4,
+   "clock": "6:58",
+   "homeScore": 87,
+   "awayScore": 104
+  },
+  {
+   "t": "2026-11-19T02:03:22.978Z",
+   "source": "espn",
+   "status": "live",
+   "period": 4,
+   "clock": "6:35",
+   "homeScore": 87,
+   "awayScore": 106
+  },
+  {
+   "t": "2026-11-19T02:07:23.091Z",
+   "source": "espn",
+   "status": "live",
+   "period": 4,
+   "clock": "6:35",
+   "homeScore": 87,
+   "awayScore": 107
+  },
+  {
+   "t": "2026-11-19T02:07:38.092Z",
+   "source": "espn",
+   "status": "live",
+   "period": 4,
+   "clock": "6:35",
+   "homeScore": 87,
+   "awayScore": 108
+  },
+  {
+   "t": "2026-11-19T02:07:53.098Z",
+   "source": "espn",
+   "status": "live",
+   "period": 4,
+   "clock": "6:08",
+   "homeScore": 89,
+   "awayScore": 108
+  },
+  {
+   "t": "2026-11-19T02:08:08.115Z",
+   "source": "espn",
+   "status": "live",
+   "period": 4,
+   "clock": "6:05",
+   "homeScore": 89,
+   "awayScore": 108
+  },
+  {
+   "t": "2026-11-19T02:08:23.117Z",
+   "source": "espn",
+   "status": "live",
+   "period": 4,
+   "clock": "5:53",
+   "homeScore": 92,
+   "awayScore": 108
+  },
+  {
+   "t": "2026-11-19T02:08:38.121Z",
+   "source": "espn",
+   "status": "live",
+   "period": 4,
+   "clock": "5:32",
+   "homeScore": 92,
+   "awayScore": 108
+  },
+  {
+   "t": "2026-11-19T02:08:53.123Z",
+   "source": "espn",
+   "status": "live",
+   "period": 4,
+   "clock": "5:10",
+   "homeScore": 94,
+   "awayScore": 108
+  },
+  {
+   "t": "2026-11-19T02:09:08.124Z",
+   "source": "espn",
+   "status": "live",
+   "period": 4,
+   "clock": "5:06",
+   "homeScore": 94,
+   "awayScore": 108
+  },
+  {
+   "t": "2026-11-19T02:12:23.191Z",
+   "source": "espn",
+   "status": "live",
+   "period": 4,
+   "clock": "4:46",
+   "homeScore": 94,
+   "awayScore": 108
+  },
+  {
+   "t": "2026-11-19T02:12:53.210Z",
+   "source": "espn",
+   "status": "live",
+   "period": 4,
+   "clock": "4:22",
+   "homeScore": 94,
+   "awayScore": 110
+  },
+  {
+   "t": "2026-11-19T02:13:08.212Z",
+   "source": "espn",
+   "status": "live",
+   "period": 4,
+   "clock": "4:07",
+   "homeScore": 94,
+   "awayScore": 110
+  },
+  {
+   "t": "2026-11-19T02:13:23.215Z",
+   "source": "espn",
+   "status": "live",
+   "period": 4,
+   "clock": "3:55",
+   "homeScore": 94,
+   "awayScore": 112
+  },
+  {
+   "t": "2026-11-19T02:13:38.218Z",
+   "source": "espn",
+   "status": "live",
+   "period": 4,
+   "clock": "3:50",
+   "homeScore": 96,
+   "awayScore": 112
+  },
+  {
+   "t": "2026-11-19T02:14:08.225Z",
+   "source": "espn",
+   "status": "live",
+   "period": 4,
+   "clock": "3:50",
+   "homeScore": 97,
+   "awayScore": 112
+  },
+  {
+   "t": "2026-11-19T02:14:23.231Z",
+   "source": "espn",
+   "status": "live",
+   "period": 4,
+   "clock": "3:35",
+   "homeScore": 97,
+   "awayScore": 112
+  },
+  {
+   "t": "2026-11-19T02:14:53.252Z",
+   "source": "espn",
+   "status": "live",
+   "period": 4,
+   "clock": "3:27",
+   "homeScore": 97,
+   "awayScore": 112
+  },
+  {
+   "t": "2026-11-19T02:15:23.258Z",
+   "source": "espn",
+   "status": "live",
+   "period": 4,
+   "clock": "3:10",
+   "homeScore": 97,
+   "awayScore": 114
+  },
+  {
+   "t": "2026-11-19T02:15:38.258Z",
+   "source": "espn",
+   "status": "live",
+   "period": 4,
+   "clock": "2:57",
+   "homeScore": 99,
+   "awayScore": 114
+  },
+  {
+   "t": "2026-11-19T02:15:53.265Z",
+   "source": "espn",
+   "status": "live",
+   "period": 4,
+   "clock": "2:39",
+   "homeScore": 99,
+   "awayScore": 116
+  },
+  {
+   "t": "2026-11-19T02:16:08.285Z",
+   "source": "espn",
+   "status": "live",
+   "period": 4,
+   "clock": "2:23",
+   "homeScore": 99,
+   "awayScore": 116
+  },
+  {
+   "t": "2026-11-19T02:18:08.341Z",
+   "source": "espn",
+   "status": "live",
+   "period": 4,
+   "clock": "2:05",
+   "homeScore": 99,
+   "awayScore": 116
+  },
+  {
+   "t": "2026-11-19T02:18:23.353Z",
+   "source": "espn",
+   "status": "live",
+   "period": 4,
+   "clock": "1:59",
+   "homeScore": 101,
+   "awayScore": 116
+  },
+  {
+   "t": "2026-11-19T02:18:38.361Z",
+   "source": "espn",
+   "status": "live",
+   "period": 4,
+   "clock": "1:59",
+   "homeScore": 102,
+   "awayScore": 116
+  },
+  {
+   "t": "2026-11-19T02:18:53.377Z",
+   "source": "espn",
+   "status": "live",
+   "period": 4,
+   "clock": "1:53",
+   "homeScore": 102,
+   "awayScore": 116
+  },
+  {
+   "t": "2026-11-19T02:19:08.390Z",
+   "source": "espn",
+   "status": "live",
+   "period": 4,
+   "clock": "1:30",
+   "homeScore": 102,
+   "awayScore": 116
+  },
+  {
+   "t": "2026-11-19T02:19:23.390Z",
+   "source": "espn",
+   "status": "live",
+   "period": 4,
+   "clock": "1:20",
+   "homeScore": 102,
+   "awayScore": 116
+  },
+  {
+   "t": "2026-11-19T02:19:38.394Z",
+   "source": "espn",
+   "status": "live",
+   "period": 4,
+   "clock": "1:07",
+   "homeScore": 102,
+   "awayScore": 116
+  },
+  {
+   "t": "2026-11-19T02:23:23.536Z",
+   "source": "espn",
+   "status": "live",
+   "period": 4,
+   "clock": "1:06",
+   "homeScore": 102,
+   "awayScore": 116
+  },
+  {
+   "t": "2026-11-19T02:23:38.554Z",
+   "source": "espn",
+   "status": "live",
+   "period": 4,
+   "clock": "54.1",
+   "homeScore": 102,
+   "awayScore": 118
+  },
+  {
+   "t": "2026-11-19T02:24:08.578Z",
+   "source": "espn",
+   "status": "live",
+   "period": 4,
+   "clock": "52.5",
+   "homeScore": 102,
+   "awayScore": 119
+  },
+  {
+   "t": "2026-11-19T02:24:53.613Z",
+   "source": "espn",
+   "status": "live",
+   "period": 4,
+   "clock": "31.5",
+   "homeScore": 102,
+   "awayScore": 119
+  },
+  {
+   "t": "2026-11-19T02:25:08.616Z",
+   "source": "espn",
+   "status": "live",
+   "period": 4,
+   "clock": "0.1",
+   "homeScore": 104,
+   "awayScore": 119
+  },
+  {
+   "t": "2026-11-19T02:25:23.616Z",
+   "source": "espn",
+   "status": "final",
+   "period": 4,
+   "clock": "0.0",
+   "homeScore": 104,
+   "awayScore": 119
+  },
+  {
+   "t": "2026-11-19T03:11:39.940Z",
+   "source": "espn",
+   "status": "final",
+   "period": 4,
+   "clock": "12:00",
+   "homeScore": 104,
+   "awayScore": 119
+  }
+ ],
+ "espnEventId": "401910008"
+}

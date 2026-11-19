@@ -1,0 +1,96 @@
+{
+  "spike": "s4-probe-github-actions",
+  "cluster": "n/a",
+  "startedAt": "2026-11-18T10:13:07.656Z",
+  "finishedAt": "2026-11-18T10:13:08.117Z",
+  "pass": false,
+  "checks": [
+    {
+      "name": "nba-scoreboard answers 200 with JSON",
+      "pass": false,
+      "detail": "HTTP 403, 154 ms"
+    },
+    {
+      "name": "nba-schedule answers 200 with JSON",
+      "pass": false,
+      "detail": "HTTP 403, 41 ms"
+    },
+    {
+      "name": "espn-scoreboard answers 200 with JSON",
+      "pass": true,
+      "detail": "HTTP 200, 213 ms"
+    },
+    {
+      "name": "espn-summary answers 200 with JSON",
+      "pass": true,
+      "detail": "HTTP 200, 50 ms"
+    }
+  ],
+  "data": {
+    "nba-scoreboard": {
+      "status": 403,
+      "ms": 154,
+      "bytes": 445,
+      "headers": {
+        "content-type": "text/html"
+      },
+      "topLevelKeys": []
+    },
+    "nba-games": [],
+    "nba-schedule": {
+      "status": 403,
+      "ms": 41,
+      "bytes": 425,
+      "headers": {
+        "content-type": "text/html"
+      },
+      "topLevelKeys": []
+    },
+    "espn-scoreboard": {
+      "status": 200,
+      "ms": 213,
+      "bytes": 95159,
+      "headers": {
+        "content-type": "application/json;charset=UTF-8",
+        "cache-control": "max-age=8"
+      },
+      "topLevelKeys": [
+        "leagues",
+        "season",
+        "day",
+        "events",
+        "provider"
+      ]
+    },
+    "espn-events": [
+      "401910002 NY@TOR post",
+      "401910003 POR@MIN post",
+      "401910004 DET@SA post",
+      "401910006 UTAH@LAC post",
+      "401910005 CHA@LAL post"
+    ],
+    "espn-summary": {
+      "status": 200,
+      "ms": 50,
+      "bytes": 412214,
+      "headers": {
+        "content-type": "application/json;charset=UTF-8",
+        "cache-control": "max-age=9"
+      },
+      "topLevelKeys": [
+        "boxscore",
+        "format",
+        "gameInfo",
+        "leaders",
+        "seasonseries",
+        "injuries",
+        "broadcasts",
+        "pickcenter",
+        "odds",
+        "againstTheSpread",
+        "news",
+        "plays"
+      ]
+    }
+  }
+}

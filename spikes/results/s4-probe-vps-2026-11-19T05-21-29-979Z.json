@@ -1,0 +1,103 @@
+{
+  "spike": "s4-probe-vps",
+  "cluster": "n/a",
+  "startedAt": "2026-11-19T05:21:29.979Z",
+  "finishedAt": "2026-11-19T05:21:30.735Z",
+  "pass": false,
+  "checks": [
+    {
+      "name": "nba-scoreboard answers 200 with JSON",
+      "pass": false,
+      "detail": "HTTP 403, 317 ms"
+    },
+    {
+      "name": "nba-schedule answers 200 with JSON",
+      "pass": false,
+      "detail": "HTTP 403, 132 ms"
+    },
+    {
+      "name": "espn-scoreboard answers 200 with JSON",
+      "pass": true,
+      "detail": "HTTP 200, 130 ms"
+    },
+    {
+      "name": "espn-summary answers 200 with JSON",
+      "pass": true,
+      "detail": "HTTP 200, 162 ms"
+    }
+  ],
+  "data": {
+    "nba-scoreboard": {
+      "status": 403,
+      "ms": 317,
+      "bytes": 445,
+      "headers": {
+        "content-type": "text/html"
+      },
+      "topLevelKeys": []
+    },
+    "nba-games": [],
+    "nba-schedule": {
+      "status": 403,
+      "ms": 132,
+      "bytes": 425,
+      "headers": {
+        "content-type": "text/html"
+      },
+      "topLevelKeys": []
+    },
+    "espn-scoreboard": {
+      "status": 200,
+      "ms": 130,
+      "bytes": 254177,
+      "headers": {
+        "content-type": "application/json;charset=UTF-8",
+        "cache-control": "max-age=4"
+      },
+      "topLevelKeys": [
+        "leagues",
+        "season",
+        "day",
+        "events",
+        "provider"
+      ]
+    },
+    "espn-events": [
+      "401910007 MEM@CLE post",
+      "401910008 HOU@IND post",
+      "401910009 MIL@MIA post",
+      "401910010 PHI@ORL post",
+      "401910011 CHI@BKN post",
+      "401910012 WSH@TOR post",
+      "401910013 DET@NO post",
+      "401910014 ATL@OKC post",
+      "401910016 GS@DAL post",
+      "401910015 BOS@DEN post",
+      "401910017 UTAH@LAL in",
+      "401910018 PHX@SAC post"
+    ],
+    "espn-summary": {
+      "status": 200,
+      "ms": 162,
+      "bytes": 458693,
+      "headers": {
+        "content-type": "application/json;charset=UTF-8",
+        "cache-control": "max-age=9"
+      },
+      "topLevelKeys": [
+        "boxscore",
+        "format",
+        "gameInfo",
+        "leaders",
+        "seasonseries",
+        "injuries",
+        "broadcasts",
+        "pickcenter",
+        "odds",
+        "againstTheSpread",
+        "news",
+        "header"
+      ]
+    }
+  }
+}
