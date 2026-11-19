@@ -137,6 +137,17 @@ describe('quoteSwap errors', () => {
     ).toBe('INVALID_INPUT')
   })
 
+  it.each([Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY])(
+    'rejects now = %d',
+    (now) => {
+      expect(
+        codeOf(() =>
+          quoteSwap({ pool: POOL_A, direction: 'usdcToYes', amountIn: 1_000_000n, now }),
+        ),
+      ).toBe('INVALID_INPUT')
+    },
+  )
+
   it.each([-1, 10_001, 1.5])('rejects slippageBps %d', (slippageBps) => {
     expect(
       codeOf(() =>
@@ -197,6 +208,16 @@ describe('quoteSwap at the edges of a game', () => {
     expect(q.amountOut > 0n).toBe(true)
     expect(Number.isFinite(q.priceAfter) && q.priceAfter >= 0 && q.priceAfter <= 1).toBe(true)
   })
+
+  // A client clock behind the chain must not quote a larger L_eff than the program swaps on.
+  it.each(SWAP_DIRECTIONS)(
+    '%s with a clock 5 s behind the last accrual quotes as at the last accrual',
+    (direction) => {
+      const amountIn = direction.startsWith('usdc') ? 10_000_000n : 1_000_000n
+      const at = (now: number) => quoteSwap({ pool: POOL_A, direction, amountIn, now })
+      expect(at(POOL_A.lastAccrualTs - 5)).toEqual(at(POOL_A.lastAccrualTs))
+    },
+  )
 
   it('never quotes a whale buy above what the pool holds', () => {
     fc.assert(

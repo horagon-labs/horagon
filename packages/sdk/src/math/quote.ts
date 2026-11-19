@@ -10,7 +10,7 @@ export interface QuoteSwapInput {
   direction: SwapDirection
   /** Raw units the user sends: micro-USDC when buying, raw shares when selling or converting. */
   amountIn: bigint
-  /** Unix seconds at which the swap is expected to execute. */
+  /** Unix seconds at which the swap is expected to execute; a time before `pool.lastAccrualTs` quotes as at `lastAccrualTs`. */
   now: number
   slippageBps?: number
 }
@@ -53,14 +53,19 @@ export function quoteSwap(input: QuoteSwapInput): SwapQuote {
       `amountIn must be in [1, 2^53 - 1] raw units, got ${amountIn}`,
     )
   }
+  if (!Number.isFinite(now)) {
+    throw new HoragonError('INVALID_INPUT', `now must be finite Unix seconds, got ${now}`)
+  }
   if (pool.resolved) throw new HoragonError('MARKET_CLOSED', 'Market is resolved')
-  const remaining = pool.endTs - Math.floor(now)
+  // The program never swaps before the last accrual: quote a lagging client clock at that time.
+  const t = Math.max(Math.floor(now), pool.lastAccrualTs)
+  const remaining = pool.endTs - t
   if (remaining <= 0) throw new HoragonError('MARKET_CLOSED', 'Market has expired')
   if (pool.lZero === 0 || !pool.hasLiquidity) {
     throw new HoragonError('MARKET_HALTED', 'Market has no liquidity')
   }
 
-  const reserves = rescaleReserves(pool, now)
+  const reserves = rescaleReserves(pool, t)
   const lEff = lEffective(pool.lZero, remaining)
   const feeIn = isUsdcIn(direction) ? feeOf(amountIn) : 0n
   const swapIn = amountIn - feeIn
