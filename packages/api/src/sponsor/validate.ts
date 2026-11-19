@@ -6,6 +6,7 @@ import {
 } from '@solana/spl-token'
 import {
   ComputeBudgetProgram,
+  type MessageCompiledInstruction,
   type PublicKey,
   SystemProgram,
   type VersionedTransaction,
@@ -59,6 +60,7 @@ function checkAta(
   accounts: Array<PublicKey | undefined>,
   data: Uint8Array,
   user: PublicKey,
+  tradedMarkets: readonly PublicKey[],
   policy: SponsorPolicy,
 ): void {
   if (data.length !== 1 || data[0] !== ATA_CREATE_IDEMPOTENT || accounts.length !== 6) {
@@ -74,7 +76,14 @@ function checkAta(
     reject('ATA_RULE', 'ATA address does not match owner and mint')
   }
   const isCollateral = mint.equals(policy.collateralMint)
-  const userAta = owner.equals(user) && (isCollateral || policy.isOutcomeMint(mint))
+  const outcomeOf = owner.equals(user) && !isCollateral ? policy.outcomeMintMarket(mint) : undefined
+  if (outcomeOf && !tradedMarkets.some((m) => m.equals(outcomeOf))) {
+    reject(
+      'ATA_RULE',
+      `Mint ${mint.toBase58()} belongs to market ${outcomeOf.toBase58()}, which this transaction does not trade`,
+    )
+  }
+  const userAta = owner.equals(user) && (isCollateral || outcomeOf !== undefined)
   const feeAta = isCollateral && policy.feeOwners.some((f) => f.equals(owner))
   if (!userAta && !feeAta) {
     reject(
@@ -121,7 +130,26 @@ function sponsorSlotAllowed(program: PublicKey, position: number): boolean {
   return false
 }
 
-function validate(tx: VersionedTransaction, policy: SponsorPolicy): PublicKey {
+/**
+ * First pass: the markets the transaction's own pm-AMM instructions name, at the position
+ * `checkPmAmm` reads. Nothing is checked here; the second pass rejects any bad pm-AMM instruction.
+ */
+function tradedMarkets(
+  keys: readonly PublicKey[],
+  instructions: readonly MessageCompiledInstruction[],
+): PublicKey[] {
+  const markets: PublicKey[] = []
+  for (const ix of instructions) {
+    const [, market] = ix.accountKeyIndexes.map((i) => keys[i])
+    if (same(keys[ix.programIdIndex], PM_AMM_PROGRAM_ID) && market) markets.push(market)
+  }
+  return markets
+}
+
+function validate(
+  tx: VersionedTransaction,
+  policy: SponsorPolicy,
+): { user: PublicKey; ataCreates: number } {
   const msg = tx.message
   if (msg.addressTableLookups.length > 0) {
     reject('LOOKUP_TABLES', 'Address lookup tables are not allowed')
@@ -137,6 +165,7 @@ function validate(tx: VersionedTransaction, policy: SponsorPolicy): PublicKey {
     reject('TOO_MANY_INSTRUCTIONS', `More than ${policy.limits.maxInstructions} instructions`)
   }
 
+  const traded = tradedMarkets(keys, instructions)
   let trades = 0
   let ataCreates = 0
   for (const ix of instructions) {
@@ -153,7 +182,7 @@ function validate(tx: VersionedTransaction, policy: SponsorPolicy): PublicKey {
       if (++ataCreates > policy.limits.maxAtaCreates) {
         reject('ATA_RULE', `More than ${policy.limits.maxAtaCreates} ATA creates`)
       }
-      checkAta(accounts, ix.data, user, policy)
+      checkAta(accounts, ix.data, user, traded, policy)
     } else if (program.equals(PM_AMM_PROGRAM_ID)) {
       checkPmAmm(accounts, ix.data, user, policy)
       trades++
@@ -161,7 +190,7 @@ function validate(tx: VersionedTransaction, policy: SponsorPolicy): PublicKey {
     else reject('PROGRAM_NOT_ALLOWED', `Program ${program.toBase58()} is not allowed`)
   }
   if (trades === 0) reject('NO_TRADE', 'A sponsored transaction must contain a pm-AMM instruction')
-  return user
+  return { user, ataCreates }
 }
 
 /**
@@ -173,7 +202,7 @@ export function validateSponsoredTransaction(
   policy: SponsorPolicy,
 ): SponsorVerdict {
   try {
-    return { ok: true, user: validate(tx, policy) }
+    return { ok: true, ...validate(tx, policy) }
   } catch (e) {
     if (e instanceof Rejected) return { ok: false, reason: e.reason, detail: e.detail }
     throw e

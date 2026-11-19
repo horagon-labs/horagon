@@ -28,8 +28,8 @@ export interface SponsorPolicy {
   feeOwners: readonly PublicKey[]
   /** True when the market is listed in Horagon's `markets` table. */
   isHoragonMarket(market: PublicKey): boolean
-  /** True for the YES or NO mint of a Horagon market. */
-  isOutcomeMint(mint: PublicKey): boolean
+  /** The Horagon market whose YES or NO mint this is; undefined for any other mint. */
+  outcomeMintMarket(mint: PublicKey): PublicKey | undefined
   limits: SponsorLimits
 }
 
@@ -47,5 +47,6 @@ export type SponsorRejection =
   | 'NO_TRADE'
 
 export type SponsorVerdict =
-  | { ok: true; user: PublicKey }
+  /** `ataCreates`: the CreateIdempotent instructions approved, each an ATA's rent for the sponsor. */
+  | { ok: true; user: PublicKey; ataCreates: number }
   | { ok: false; reason: SponsorRejection; detail: string }

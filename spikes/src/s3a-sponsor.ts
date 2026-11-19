@@ -175,7 +175,7 @@ await runSpike(run, async () => {
     collateralMint: DEVNET_MUSDC_MINT,
     feeOwners: [PROTOCOL_DAO, creator.publicKey],
     isHoragonMarket: (m) => m.equals(market),
-    isOutcomeMint: (m) => m.equals(yesMint) || m.equals(noMint),
+    outcomeMintMarket: (m) => (m.equals(yesMint) || m.equals(noMint) ? market : undefined),
     limits: DEFAULT_SPONSOR_LIMITS,
   }
   const server = createServer(sponsorRoute(connection, sponsor, policy))

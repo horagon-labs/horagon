@@ -39,14 +39,24 @@ const yesMint = key(6)
 const noMint = key(7)
 const authority = key(8)
 const randomMint = key(9)
+const otherMarket = key(10)
+const otherYesMint = key(11)
+const otherNoMint = key(12)
 const usdc = DEVNET_MUSDC_MINT
+
+const outcomeMints = new Map([
+  [yesMint.toBase58(), market],
+  [noMint.toBase58(), market],
+  [otherYesMint.toBase58(), otherMarket],
+  [otherNoMint.toBase58(), otherMarket],
+])
 
 const policy: SponsorPolicy = {
   sponsor,
   collateralMint: usdc,
   feeOwners: [PROTOCOL_DAO, authority],
-  isHoragonMarket: (m) => m.equals(market),
-  isOutcomeMint: (m) => m.equals(yesMint) || m.equals(noMint),
+  isHoragonMarket: (m) => m.equals(market) || m.equals(otherMarket),
+  outcomeMintMarket: (m) => outcomeMints.get(m.toBase58()),
   limits: DEFAULT_SPONSOR_LIMITS,
 }
 
@@ -106,7 +116,7 @@ const BUY = [
 describe('validateSponsoredTransaction accepts', () => {
   it('a typical sponsored buy and reports the user', () => {
     const verdict = validateSponsoredTransaction(build(BUY), policy)
-    expect(verdict).toEqual({ ok: true, user })
+    expect(verdict).toEqual({ ok: true, user, ataCreates: 5 })
   })
 
   it('a claim that closes the emptied ATA back to the sponsor', () => {
@@ -291,7 +301,7 @@ describe('validateSponsoredTransaction rejects', () => {
       ]),
       'PROGRAM_NOT_ALLOWED',
     ],
-    ['no pm-AMM instruction at all', build([ata(user, yesMint), close()]), 'NO_TRADE'],
+    ['no pm-AMM instruction at all', build([ata(user, usdc), close()]), 'NO_TRADE'],
     [
       'a pm-AMM instruction whose first account is not the user',
       build([
@@ -314,6 +324,67 @@ describe('validateSponsoredTransaction rejects', () => {
   })
 })
 
+// Each outcome ATA costs the sponsor rent the user can later reclaim: it must serve a market the
+// transaction itself trades, or one tiny swap could farm creates for every Horagon market.
+describe('validateSponsoredTransaction ties outcome ATAs to the traded markets', () => {
+  const verdictOf = (instructions: TransactionInstruction[]) =>
+    validateSponsoredTransaction(build(instructions), policy)
+
+  it('accepts the YES and NO ATAs of the market a swap trades', () => {
+    expect(verdictOf([ata(user, yesMint), ata(user, noMint), pmAmm('swap')])).toEqual({
+      ok: true,
+      user,
+      ataCreates: 2,
+    })
+  })
+
+  it.each(['redeemPair', 'claimWinnings'] as const)(
+    'accepts the outcome ATAs of the market a %s touches',
+    (name) => {
+      expect(verdictOf([ata(user, yesMint), ata(user, noMint), pmAmm(name)])).toEqual({
+        ok: true,
+        user,
+        ataCreates: 2,
+      })
+    },
+  )
+
+  it('accepts outcome ATAs of each market the transaction trades', () => {
+    const tx = [
+      ata(user, yesMint),
+      ata(user, otherNoMint),
+      pmAmm('swap'),
+      pmAmm('swap', { market: otherMarket }),
+    ]
+    expect(verdictOf(tx)).toEqual({ ok: true, user, ataCreates: 2 })
+  })
+
+  it('counts the ATA creates of the S3a sponsored swap', () => {
+    const s3a = [
+      ComputeBudgetProgram.setComputeUnitLimit({ units: 800_000 }),
+      ata(user, yesMint),
+      ata(user, noMint),
+      ata(PROTOCOL_DAO, usdc),
+      ata(authority, usdc),
+      pmAmm('swap'),
+    ]
+    expect(verdictOf(s3a)).toEqual({ ok: true, user, ataCreates: 4 })
+  })
+
+  it.each([
+    ['a swap on another market', [ata(user, otherYesMint), pmAmm('swap')], otherMarket],
+    ['no pm-AMM instruction', [ata(user, yesMint), close()], market],
+  ])('refuses an outcome ATA with %s and names its market', (_label, instructions, mintMarket) => {
+    const verdict = verdictOf(instructions)
+    expect(verdict.ok).toBe(false)
+    if (!verdict.ok) {
+      expect(verdict.reason).toBe('ATA_RULE')
+      expect(verdict.detail).toContain(`market ${mintMarket.toBase58()}`)
+      expect(verdict.detail).toContain('does not trade')
+    }
+  })
+})
+
 // Review Focus: wallets may still produce legacy (non-v0) messages.
 describe('validateSponsoredTransaction on legacy messages', () => {
   const legacy = (instructions: TransactionInstruction[]) =>
@@ -326,7 +397,11 @@ describe('validateSponsoredTransaction on legacy messages', () => {
     )
 
   it('applies the same allowlist as to v0 messages', () => {
-    expect(validateSponsoredTransaction(legacy(BUY), policy)).toEqual({ ok: true, user })
+    expect(validateSponsoredTransaction(legacy(BUY), policy)).toEqual({
+      ok: true,
+      user,
+      ataCreates: 5,
+    })
     const verdict = validateSponsoredTransaction(legacy([pmAmm('depositLiquidity')]), policy)
     expect(verdict.ok ? undefined : verdict.reason).toBe('PM_AMM_RULE')
   })
