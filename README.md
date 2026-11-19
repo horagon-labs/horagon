@@ -2,7 +2,7 @@
 
 # Horagon
 
-**Game-day prediction markets for the NBA, built on pm-AMM on Solana. Horagon will give each game one market, "will the home team win?". It opens an hour before tip-off and closes before the game can end, and while it is open its liquidity shrinks on pm-AMM's √(time left) schedule. A fan will see every position they hold tonight on one screen, and bots and AI agents will trade the same markets through a typed SDK and API.**
+**Game-day prediction markets for the NBA, built on pm-AMM on Solana. Horagon will give each game one market, "will the home team win?". It opens an hour before tip-off and closes 2 h 10 min after the scheduled tip-off, before the final buzzer in 219 of 220 games measured, and while it is open its liquidity shrinks on pm-AMM's √(time left) schedule. A fan will see every position they hold tonight on one screen, and bots and AI agents will trade the same markets through a typed SDK and API.**
 
 [![CI](https://github.com/horagon-labs/horagon/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/horagon-labs/horagon/actions/workflows/ci.yml)
 [![Play money on devnet](https://img.shields.io/badge/money-play%20money%20on%20devnet-b45309?style=flat-square)](#play-money)
@@ -61,7 +61,7 @@ It answers the "Game-day mode for prediction markets" entry in Solana's
 experience around the positions a fan already holds."
 
 **Where it stands on 2026-11-19.** The foundation is in place: a TypeScript SDK with a pm-AMM quote
-engine and a validator for sponsored transactions, 246 tests and CI. Five spikes (S1 to S5)
+engine and a validator for sponsored transactions, 259 tests and CI. Five spikes (S1 to S5)
 answered whether the plan is feasible, against the real pm-AMM program on devnet or on Surfpool,
 a local fork of devnet:
 
@@ -74,6 +74,9 @@ a local fork of devnet:
 - **S4:** the NBA's own data feed refused every server tried, and ESPN's answered. All 12 NBA
   games of 2026-11-18 ET were recorded for replay.
 - **S5:** the pm-AMM faucet paid 1,000 mUSDC per wallet to a script, once an hour.
+
+A sixth measurement, end-ts, set when markets close: S + 2 h 10 min, from the play-by-play of
+220 games.
 
 The Horagon program, the keeper, the API and the web app are not built yet; Tier 1 builds them
 by 2026-11-23.
@@ -126,7 +129,7 @@ quotes the swap with `quoteSwap` and requires it to land within 0.1% of what the
 engine accrues the reserves to the swap's time, takes the 2% fee on the USDC leg, solves the
 curve and floors to raw units, as the program does.
 
-**4. Run the full check:** `pnpm check` runs Biome, the TypeScript type check, 246 tests with
+**4. Run the full check:** `pnpm check` runs Biome, the TypeScript type check, 259 tests with
 coverage floors, and the build. CI runs it on Node 22 and on Node 24.
 
 ## Why the pm-AMM
@@ -148,10 +151,10 @@ that deposit. Prices move continuously, and a fan can sell at any time before th
 
 **Where the fit is imperfect.** pm-AMM has no pause and no early resolution:
 
-- **The close comes early.** A market still open after the result is known gets sniped. So
-  `end_ts` must come before the earliest time a game can end, and on 2026-11-18 that would
-  have closed every market in the third or early fourth quarter (see
-  [Limits](#limits-stated-plainly)).
+- **The close comes early.** A market still open after the result is known gets sniped, and
+  `end_ts` is fixed when the market is created. Horagon closes at S + 2 h 10 min (S is the
+  scheduled tip-off): over 220 games, that came before the final buzzer in 219, with a median
+  4.4 of the fourth quarter's 12 minutes played (see [Limits](#limits-stated-plainly)).
 - **The only stop is withdrawing liquidity.** The one emergency stop is for the sole LP to
   withdraw everything, which makes the next swap fail with `InsufficientLiquidity` (6004). S1
   measured exactly that.
@@ -262,20 +265,22 @@ They are summarized in [`docs/spikes.md`](docs/spikes.md):
 
 ## Tested, in numbers
 
-Counted on 2026-11-19 at commit `b513e65` on `main`.
+Counted on 2026-11-19. Coverage, the devnet figures and the recorded night are from commit
+`b513e65` on `main`; the test count and the `end_ts` row add the end-ts measurement.
 
-| What                                       | Figure                                                                                                                                                                                                                                     | Source                                                                                                                             |
-| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------- |
-| Automated tests                            | **246 passed, 0 failed**: 183 in `@horagon/sdk`, 40 in the sponsor validator, 23 in the spike helpers                                                                                                                                      | `pnpm check`; [CI](.github/workflows/ci.yml) runs the same on Node 22 and 24                                                       |
-| Line coverage                              | `@horagon/sdk` 98.65% (the `math` directory 100%); sponsor validator 98.94%. CI fails below 90% for `math`, `evidence`, `model` and the validator, and below 70% elsewhere                                                                 | [`packages/sdk/vitest.config.ts`](packages/sdk/vitest.config.ts), [`packages/api/vitest.config.ts`](packages/api/vitest.config.ts) |
-| Quote against the chain                    | 6 of 6 devnet swaps within 0.1%. 4 match exactly; the worst is off by 0.0011%                                                                                                                                                              | [`quote-s1.test.ts`](packages/sdk/test/math/quote-s1.test.ts), [`s1-swaps.json`](packages/sdk/test/fixtures/s1-swaps.json)         |
-| Devnet claims                              | 14 of 14 hold, read live from public devnet RPC                                                                                                                                                                                            | [`scripts/check-claims.mjs`](scripts/check-claims.mjs)                                                                             |
-| Cost of one market                         | 0.03538216 SOL (rent and fee), not recoverable: pm-AMM has no instruction that closes a market                                                                                                                                             | S1                                                                                                                                 |
-| Cost of a player's first trade on a market | 2,986,880 lamports paid by the sponsor (fee plus two token-account rents), when the player's mUSDC account and the fee accounts already exist; 1,488,440 more if the sponsor also creates the mUSDC account. About 10,000 for later trades | S3a                                                                                                                                |
-| Compute                                    | Swaps used 391,187 to 506,088 CU. The sponsored swap set an 800,000 limit (the validator allows at most 1,000,000); S1's swaps set 1,400,000. Market creation through a program PDA used 577,046 CU, against 1,400,000                     | S1, S3a, S2                                                                                                                        |
-| Faucet                                     | 1,000 mUSDC per wallet per hour; no SOL on 2026-11-18, because its SOL reserve was empty                                                                                                                                                   | S5                                                                                                                                 |
-| Recorded NBA night                         | 12 games of 2026-11-18 ET, 4,890 raw lines (1.25 GB), from 23:30 UTC to 05:41 UTC, compacted into 12 replay fixtures of 233 to 308 frames                                                                                                  | S4, [`tests/fixtures/replay`](tests/fixtures/replay)                                                                               |
-| Feed reachability                          | The NBA CDN answered 403 from a home connection, GitHub Actions and a rented Linux server. ESPN answered 200 from all three                                                                                                                | [`spikes/results`](spikes/results)                                                                                                 |
+| What                                       | Figure                                                                                                                                                                                                                                          | Source                                                                                                                             |
+| ------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| Automated tests                            | **259 passed, 0 failed**: 183 in `@horagon/sdk`, 40 in the sponsor validator, 36 in the spike helpers (13 of them for end-ts)                                                                                                                   | `pnpm check`; [CI](.github/workflows/ci.yml) runs the same on Node 22 and 24                                                       |
+| Line coverage                              | `@horagon/sdk` 98.65% (the `math` directory 100%); sponsor validator 98.94%. CI fails below 90% for `math`, `evidence`, `model` and the validator, and below 70% elsewhere                                                                      | [`packages/sdk/vitest.config.ts`](packages/sdk/vitest.config.ts), [`packages/api/vitest.config.ts`](packages/api/vitest.config.ts) |
+| Quote against the chain                    | 6 of 6 devnet swaps within 0.1%. 4 match exactly; the worst is off by 0.0011%                                                                                                                                                                   | [`quote-s1.test.ts`](packages/sdk/test/math/quote-s1.test.ts), [`s1-swaps.json`](packages/sdk/test/fixtures/s1-swaps.json)         |
+| Devnet claims                              | 14 of 14 hold, read live from public devnet RPC                                                                                                                                                                                                 | [`scripts/check-claims.mjs`](scripts/check-claims.mjs)                                                                             |
+| Cost of one market                         | 0.03538216 SOL (rent and fee), not recoverable: pm-AMM has no instruction that closes a market                                                                                                                                                  | S1                                                                                                                                 |
+| Cost of a player's first trade on a market | 2,986,880 lamports paid by the sponsor (fee plus two token-account rents), when the player's mUSDC account and the fee accounts already exist; 1,488,440 more if the sponsor also creates the mUSDC account. About 10,000 for later trades      | S3a                                                                                                                                |
+| Compute                                    | Swaps used 391,187 to 506,088 CU. The sponsored swap set an 800,000 limit (the validator allows at most 1,000,000); S1's swaps set 1,400,000. Market creation through a program PDA used 577,046 CU, against 1,400,000                          | S1, S3a, S2                                                                                                                        |
+| Faucet                                     | 1,000 mUSDC per wallet per hour; no SOL on 2026-11-18, because its SOL reserve was empty                                                                                                                                                        | S5                                                                                                                                 |
+| Recorded NBA night                         | 12 games of 2026-11-18 ET, 4,890 raw lines (1.25 GB), from 23:30 UTC to 05:41 UTC, compacted into 12 replay fixtures of 233 to 308 frames                                                                                                       | S4, [`tests/fixtures/replay`](tests/fixtures/replay)                                                                               |
+| Market close (`end_ts`)                    | S + 2 h 10 min. Of 220 regular-season games of 2026-10-20 to 2026-11-18, 1 ended before it; by then a median 4.4 of the fourth quarter's 12 minutes had been played. At S + 2 h 20 min, 17 games would have ended first. Measured on 2026-11-19 | [`spikes/src/end-ts.ts`](spikes/src/end-ts.ts), [`spikes/data`](spikes/data)                                                       |
+| Feed reachability                          | The NBA CDN answered 403 from a home connection, GitHub Actions and a rented Linux server. ESPN answered 200 from all three                                                                                                                     | [`spikes/results`](spikes/results)                                                                                                 |
 
 ## How a game night works
 
@@ -292,7 +297,7 @@ sequenceDiagram
     H->>P: initialize_market + deposit_liquidity (the PDA signs)
     F->>P: swap, sponsored, from a wallet with 0 SOL
     Note over P: liquidity shrinks as L₀·√(end_ts − t)
-    Note over P: end_ts = S + 1 h 55 min, trading stops
+    Note over P: end_ts = S + 2 h 10 min, trading stops
     K->>G: draft result and evidence, after the final
     G->>H: propose_result with the evidence hash, after checking the box score
     G-->>H: challenge within 15 min if wrong
@@ -312,7 +317,8 @@ sequenceDiagram
    - the game is final while the market is still open;
    - the game is postponed or canceled;
    - the game has not started 24 hours after S;
-   - the feed goes silent for over 2 minutes in the fourth quarter or overtime.
+   - the feed goes silent for over 10 minutes in the fourth quarter or overtime. After 2 minutes
+     it only alerts the guardian, who can halt by hand, because a halt cannot be undone.
 4. **After the final.** ESPN must report Final with the same score for at least 60 seconds.
    The keeper then drafts the result and its evidence JSON:
    - the score and the score of each period;
@@ -407,12 +413,18 @@ interfaces it uses are tested.
 - **Devnet and play money only.** mUSDC is free from a faucet, so devnet activity costs little
   to fake. The design answers with engaged-wallet counts and separate reporting for bots, but a
   judge may still weigh devnet numbers below mainnet ones.
-- **Markets close well before the final buzzer.** pm-AMM cannot pause or resolve early, so
-  `end_ts` is set at S + 1 h 55 min, before the earliest time a game can end. On 2026-11-18,
-  ESPN first reported Final 138 to 176 minutes after S. At S + 1 h 55 min, 7 of the 12 games
-  were in the third quarter and 5 early in the fourth. That is 23 to 61 minutes before the
-  final, so most of each fourth quarter is not tradable. Moving `end_ts` later trades more of
-  the game for more exposure to sniping, and the halt rule only narrows that gap.
+- **Markets close before the end of the fourth quarter.** pm-AMM cannot pause or resolve
+  early, so `end_ts` is fixed at creation, at S + 2 h 10 min. It was set from ESPN's
+  play-by-play wallclock for the 220 regular-season games of 2026-10-20 to 2026-11-18
+  ([`spikes/src/end-ts.ts`](spikes/src/end-ts.ts), data in [`spikes/data`](spikes/data)):
+  - 1 game ended before that close, a 37-point blowout. At S + 2 h 20 min, 17 would have.
+  - At the close, 192 of the 220 games were in the fourth quarter and 1 had ended. At the
+    median, 4.4 of the quarter's 12 minutes had been played; the rest of it, and overtime, is
+    not tradable.
+  - The fourth quarter trades on thin liquidity: depth follows √(time left), so with 11
+    minutes to the close it is about a quarter of the opening depth.
+  - A game that ends before the close is halted on ESPN's first Final, which on 2026-11-18
+    came 25 to 148 seconds after the buzzer. Until then the market can be sniped.
 - **Sniping between the score and the halt.** A trader who sees the score before the feed does,
   for example at the arena, can trade against the pool until the market closes or is halted.
   The shrinking liquidity limits the loss, and in play money Horagon accepts it.
@@ -443,8 +455,9 @@ Here is the argument against building it:
 - **Devnet traction is easy to discount.** Play-money markets on devnet prove less than real
   money would, and a real-money sports market run by a small team is legally hard almost
   everywhere. So the product may never leave devnet.
-- **The tradable window misses the part fans care about most.** Closing before the end means
-  most of each fourth quarter is not tradable.
+- **The tradable window misses the part fans care about most.** At the median, the close
+  comes with 7.6 minutes of the fourth quarter left, so the final minutes and overtime are
+  not tradable.
 - **The integrity of the result rests on one feed and one person.** It depends on an unofficial
   ESPN feed and one guardian until the watcher ships.
 - **There is no proof yet that anyone wants it.** The core loop has not run in front of a user.
@@ -453,7 +466,8 @@ Of these, the design answers some in part:
 
 - the dispute window, the published evidence hash and the second guardian;
 - engaged-wallet metrics, with bot wallets reported apart;
-- an `end_ts` that can be tuned with real game data.
+- an `end_ts` set from 220 games of play-by-play, which the keeper can move by config as more
+  games come in.
 
 Legal status and demand are not answered by code.
 
