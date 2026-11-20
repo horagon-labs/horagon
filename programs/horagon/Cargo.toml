@@ -1,0 +1,32 @@
+[package]
+name = "horagon"
+version = "0.1.0"
+description = "Horagon: a PDA that is the authority and sole LP of every Horagon pm-AMM market"
+edition = "2021"
+license = "MIT"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "horagon"
+
+[features]
+default = []
+cpi = ["no-entrypoint"]
+no-entrypoint = []
+no-idl = []
+no-log-ix-name = []
+# anchor-spl 1.2.2's idl-build names `token_interface` without gating it on `token_2022`.
+idl-build = ["anchor-lang/idl-build", "anchor-spl/idl-build", "anchor-spl/token_2022"]
+anchor-debug = []
+custom-heap = []
+custom-panic = []
+
+[dependencies]
+# Keep both equal to `anchor --version` (1.2.2). With default features off, anchor-spl needs
+# a Solana cohort named; `solana-v3` matches anchor-lang's default.
+anchor-lang = "1.2.2"
+anchor-spl = { version = "1.2.2", default-features = false, features = ["token", "solana-v3"] }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("solana"))'] }

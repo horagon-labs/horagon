@@ -1,0 +1,1636 @@
+{
+  "address": "HtDJ3vfx8vtFSmskm2Ks39kBMuDmFZH3H2B173BB9qHF",
+  "metadata": {
+    "name": "horagon",
+    "version": "0.1.0",
+    "spec": "0.1.0",
+    "description": "Horagon: a PDA that is the authority and sole LP of every Horagon pm-AMM market"
+  },
+  "instructions": [
+    {
+      "name": "challenge",
+      "docs": [
+        "A guardian strikes the proposal while the window is open."
+      ],
+      "discriminator": [
+        16,
+        107,
+        14,
+        39,
+        244,
+        150,
+        81,
+        187
+      ],
+      "accounts": [
+        {
+          "name": "signer",
+          "signer": true
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "game_market",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  97,
+                  109,
+                  101,
+                  95,
+                  109,
+                  97,
+                  114,
+                  107,
+                  101,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "game_market.market_id",
+                "account": "GameMarket"
+              }
+            ]
+          }
+        },
+        {
+          "name": "market",
+          "relations": [
+            "game_market"
+          ]
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "create_game_market",
+      "docs": [
+        "CPI `initialize_market` (the Authority signs and pays the rent), then CPI",
+        "`deposit_liquidity(seed_amount)` from the treasury, then record the GameMarket."
+      ],
+      "discriminator": [
+        148,
+        192,
+        129,
+        123,
+        150,
+        214,
+        44,
+        103
+      ],
+      "accounts": [
+        {
+          "name": "attestor",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  117,
+                  116,
+                  104,
+                  111,
+                  114,
+                  105,
+                  116,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "game_market",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  97,
+                  109,
+                  101,
+                  95,
+                  109,
+                  97,
+                  114,
+                  107,
+                  101,
+                  116
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "args.market_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "market",
+          "writable": true
+        },
+        {
+          "name": "collateral_mint"
+        },
+        {
+          "name": "yes_mint",
+          "writable": true
+        },
+        {
+          "name": "no_mint",
+          "writable": true
+        },
+        {
+          "name": "vault",
+          "writable": true
+        },
+        {
+          "name": "yes_metadata",
+          "writable": true
+        },
+        {
+          "name": "no_metadata",
+          "writable": true
+        },
+        {
+          "name": "treasury",
+          "writable": true
+        },
+        {
+          "name": "lp_position",
+          "writable": true
+        },
+        {
+          "name": "token_metadata_program"
+        },
+        {
+          "name": "pm_amm_program",
+          "address": "GV1FMGHRYBjQLaghE5fnGuYCuCcpdt3GD5xEX3TwN16y"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "rent",
+          "address": "SysvarRent111111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "args",
+          "type": {
+            "defined": {
+              "name": "CreateGameMarketArgs"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "finalize",
+      "docs": [
+        "Anyone, once the window has passed: CPI `resolve_market` signed by the Authority."
+      ],
+      "discriminator": [
+        171,
+        61,
+        218,
+        56,
+        127,
+        115,
+        12,
+        217
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  117,
+                  116,
+                  104,
+                  111,
+                  114,
+                  105,
+                  116,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "game_market",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  97,
+                  109,
+                  101,
+                  95,
+                  109,
+                  97,
+                  114,
+                  107,
+                  101,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "game_market.market_id",
+                "account": "GameMarket"
+              }
+            ]
+          }
+        },
+        {
+          "name": "market",
+          "writable": true,
+          "relations": [
+            "game_market"
+          ]
+        },
+        {
+          "name": "pm_amm_program",
+          "address": "GV1FMGHRYBjQLaghE5fnGuYCuCcpdt3GD5xEX3TwN16y"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "halt",
+      "docs": [
+        "The only kill switch: withdraw all of the Authority's liquidity, so swaps fail with",
+        "InsufficientLiquidity. YES and NO land in the Authority's ATAs. An external LP's share",
+        "stays in the pool (spec section 5.2)."
+      ],
+      "discriminator": [
+        24,
+        156,
+        8,
+        121,
+        65,
+        3,
+        5,
+        82
+      ],
+      "accounts": [
+        {
+          "name": "signer",
+          "signer": true
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  117,
+                  116,
+                  104,
+                  111,
+                  114,
+                  105,
+                  116,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "game_market",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  97,
+                  109,
+                  101,
+                  95,
+                  109,
+                  97,
+                  114,
+                  107,
+                  101,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "game_market.market_id",
+                "account": "GameMarket"
+              }
+            ]
+          }
+        },
+        {
+          "name": "market",
+          "writable": true,
+          "relations": [
+            "game_market"
+          ]
+        },
+        {
+          "name": "collateral_mint"
+        },
+        {
+          "name": "yes_mint",
+          "writable": true
+        },
+        {
+          "name": "no_mint",
+          "writable": true
+        },
+        {
+          "name": "lp_position",
+          "writable": true
+        },
+        {
+          "name": "authority_yes",
+          "writable": true
+        },
+        {
+          "name": "authority_no",
+          "writable": true
+        },
+        {
+          "name": "pm_amm_program",
+          "address": "GV1FMGHRYBjQLaghE5fnGuYCuCcpdt3GD5xEX3TwN16y"
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "initialize_config",
+      "docs": [
+        "Once, by the program's upgrade authority, who becomes `admin`."
+      ],
+      "discriminator": [
+        208,
+        127,
+        21,
+        1,
+        194,
+        190,
+        196,
+        70
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "program",
+          "address": "HtDJ3vfx8vtFSmskm2Ks39kBMuDmFZH3H2B173BB9qHF"
+        },
+        {
+          "name": "program_data"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "args",
+          "type": {
+            "defined": {
+              "name": "InitializeConfigArgs"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "propose_result",
+      "docs": [
+        "Record the result and its evidence. Guardians may propose too, so that after a",
+        "challenge the right result goes in at once (spec section 5.2)."
+      ],
+      "discriminator": [
+        7,
+        96,
+        132,
+        38,
+        128,
+        145,
+        133,
+        242
+      ],
+      "accounts": [
+        {
+          "name": "signer",
+          "signer": true
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "game_market",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  97,
+                  109,
+                  101,
+                  95,
+                  109,
+                  97,
+                  114,
+                  107,
+                  101,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "game_market.market_id",
+                "account": "GameMarket"
+              }
+            ]
+          }
+        },
+        {
+          "name": "market",
+          "docs": [
+            "`getSignaturesForAddress(market)`, which is what the indexer scans."
+          ],
+          "relations": [
+            "game_market"
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "args",
+          "type": {
+            "defined": {
+              "name": "ProposeResultArgs"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "recycle",
+      "docs": [
+        "Anyone, after finalize: claim the Authority's LP residuals (if its LpPosition still",
+        "exists), then claim its winning tokens; the mUSDC lands in the treasury."
+      ],
+      "discriminator": [
+        189,
+        68,
+        138,
+        58,
+        52,
+        146,
+        33,
+        17
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  117,
+                  116,
+                  104,
+                  111,
+                  114,
+                  105,
+                  116,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "game_market",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  97,
+                  109,
+                  101,
+                  95,
+                  109,
+                  97,
+                  114,
+                  107,
+                  101,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "game_market.market_id",
+                "account": "GameMarket"
+              }
+            ]
+          }
+        },
+        {
+          "name": "market",
+          "writable": true,
+          "relations": [
+            "game_market"
+          ]
+        },
+        {
+          "name": "collateral_mint"
+        },
+        {
+          "name": "yes_mint",
+          "writable": true
+        },
+        {
+          "name": "no_mint",
+          "writable": true
+        },
+        {
+          "name": "vault",
+          "writable": true
+        },
+        {
+          "name": "lp_position",
+          "writable": true
+        },
+        {
+          "name": "authority_yes",
+          "writable": true
+        },
+        {
+          "name": "authority_no",
+          "writable": true
+        },
+        {
+          "name": "treasury",
+          "writable": true
+        },
+        {
+          "name": "pm_amm_program",
+          "address": "GV1FMGHRYBjQLaghE5fnGuYCuCcpdt3GD5xEX3TwN16y"
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "update_config",
+      "discriminator": [
+        29,
+        158,
+        252,
+        191,
+        10,
+        83,
+        219,
+        99
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "args",
+          "type": {
+            "defined": {
+              "name": "UpdateConfigArgs"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "withdraw_treasury",
+      "docs": [
+        "Admin moves mUSDC out of the treasury (spec section 5.2)."
+      ],
+      "discriminator": [
+        40,
+        63,
+        122,
+        158,
+        144,
+        216,
+        83,
+        96
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  117,
+                  116,
+                  104,
+                  111,
+                  114,
+                  105,
+                  116,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "treasury",
+          "writable": true
+        },
+        {
+          "name": "destination",
+          "writable": true
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ]
+    }
+  ],
+  "accounts": [
+    {
+      "name": "Config",
+      "discriminator": [
+        155,
+        12,
+        170,
+        224,
+        30,
+        250,
+        204,
+        130
+      ]
+    },
+    {
+      "name": "GameMarket",
+      "discriminator": [
+        35,
+        41,
+        40,
+        135,
+        35,
+        216,
+        218,
+        90
+      ]
+    }
+  ],
+  "events": [
+    {
+      "name": "GameMarketCreated",
+      "discriminator": [
+        182,
+        38,
+        8,
+        139,
+        180,
+        210,
+        94,
+        15
+      ]
+    },
+    {
+      "name": "MarketFinalized",
+      "discriminator": [
+        83,
+        62,
+        66,
+        204,
+        37,
+        76,
+        234,
+        179
+      ]
+    },
+    {
+      "name": "MarketHalted",
+      "discriminator": [
+        229,
+        177,
+        26,
+        186,
+        171,
+        224,
+        162,
+        233
+      ]
+    },
+    {
+      "name": "MarketRecycled",
+      "discriminator": [
+        10,
+        191,
+        175,
+        83,
+        27,
+        245,
+        36,
+        110
+      ]
+    },
+    {
+      "name": "ResultChallenged",
+      "discriminator": [
+        221,
+        74,
+        171,
+        75,
+        157,
+        103,
+        164,
+        252
+      ]
+    },
+    {
+      "name": "ResultProposed",
+      "discriminator": [
+        216,
+        229,
+        56,
+        182,
+        48,
+        192,
+        53,
+        251
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "Unauthorized",
+      "msg": "Signer is not allowed to call this instruction"
+    },
+    {
+      "code": 6001,
+      "name": "CreationPaused",
+      "msg": "Market creation is paused"
+    },
+    {
+      "code": 6002,
+      "name": "PriceOutOfRange",
+      "msg": "initial_price_bps must be in [500, 9500]"
+    },
+    {
+      "code": 6003,
+      "name": "EndTooSoon",
+      "msg": "end_ts must be at least 300 seconds away"
+    },
+    {
+      "code": 6004,
+      "name": "InsufficientTreasury",
+      "msg": "Treasury holds less than the seed amount"
+    },
+    {
+      "code": 6005,
+      "name": "BadStatus",
+      "msg": "Market status does not allow this instruction"
+    },
+    {
+      "code": 6006,
+      "name": "TooEarly",
+      "msg": "Too early: the market has not reached end_ts"
+    },
+    {
+      "code": 6007,
+      "name": "WindowOpen",
+      "msg": "The dispute window is still open"
+    },
+    {
+      "code": 6008,
+      "name": "WindowClosed",
+      "msg": "The dispute window has closed"
+    },
+    {
+      "code": 6009,
+      "name": "InvalidArgument",
+      "msg": "Invalid argument"
+    },
+    {
+      "code": 6010,
+      "name": "BadLpPosition",
+      "msg": "LP position account is not a pm-AMM LpPosition of the Authority"
+    }
+  ],
+  "types": [
+    {
+      "name": "Config",
+      "docs": [
+        "Program-wide settings, one account at `[\"config\"]`."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "admin",
+            "docs": [
+              "Changes the config and withdraws the treasury. The program's upgrade authority at init."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "attestor",
+            "docs": [
+              "The keeper's key: creates markets, proposes results, halts."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "guardians",
+            "docs": [
+              "Guardian 1 is the operator; guardian 2 is the watcher bot (Tier 2)."
+            ],
+            "type": {
+              "array": [
+                "pubkey",
+                2
+              ]
+            }
+          },
+          {
+            "name": "dispute_window_secs",
+            "docs": [
+              "How long a proposal stays open to a challenge (spec default 900 s)."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "collateral_mint",
+            "docs": [
+              "mUSDC on devnet; a local mint on Surfpool."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "creation_paused",
+            "type": "bool"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "CreateGameMarketArgs",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "market_id",
+            "type": "u64"
+          },
+          {
+            "name": "kind",
+            "type": "u8"
+          },
+          {
+            "name": "league",
+            "type": {
+              "array": [
+                "u8",
+                8
+              ]
+            }
+          },
+          {
+            "name": "external_game_id",
+            "type": "string"
+          },
+          {
+            "name": "home",
+            "type": {
+              "array": [
+                "u8",
+                4
+              ]
+            }
+          },
+          {
+            "name": "away",
+            "type": {
+              "array": [
+                "u8",
+                4
+              ]
+            }
+          },
+          {
+            "name": "scheduled_tipoff",
+            "type": "i64"
+          },
+          {
+            "name": "end_ts",
+            "type": "i64"
+          },
+          {
+            "name": "name",
+            "type": "string"
+          },
+          {
+            "name": "initial_price_bps",
+            "type": "u16"
+          },
+          {
+            "name": "seed_amount",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "GameMarket",
+      "docs": [
+        "Horagon's record of one pm-AMM market, at `[\"game_market\", market_id (u64 LE)]`.",
+        "Field order is the wire format `@horagon/sdk/program` decodes."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "market",
+            "docs": [
+              "The pm-AMM market (`[\"market\", market_id]` of pm-AMM)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "market_id",
+            "type": "u64"
+          },
+          {
+            "name": "kind",
+            "docs": [
+              "0 = game winner, 1 = second half."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "league",
+            "docs": [
+              "ASCII, zero-padded, e.g. \"NBA\"."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                8
+              ]
+            }
+          },
+          {
+            "name": "external_game_id",
+            "docs": [
+              "The feed's game id (ESPN event id in Tier 1)."
+            ],
+            "type": "string"
+          },
+          {
+            "name": "home",
+            "docs": [
+              "Team tricodes, ASCII, zero-padded."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                4
+              ]
+            }
+          },
+          {
+            "name": "away",
+            "type": {
+              "array": [
+                "u8",
+                4
+              ]
+            }
+          },
+          {
+            "name": "scheduled_tipoff",
+            "type": "i64"
+          },
+          {
+            "name": "end_ts",
+            "type": "i64"
+          },
+          {
+            "name": "seed_amount",
+            "type": "u64"
+          },
+          {
+            "name": "status",
+            "type": {
+              "defined": {
+                "name": "MarketStatus"
+              }
+            }
+          },
+          {
+            "name": "proposed_outcome",
+            "type": {
+              "option": {
+                "defined": {
+                  "name": "Outcome"
+                }
+              }
+            }
+          },
+          {
+            "name": "evidence_hash",
+            "docs": [
+              "sha256 of the RFC 8785 evidence JSON; zero until proposed."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "evidence_uri",
+            "type": "string"
+          },
+          {
+            "name": "proposed_at",
+            "type": "i64"
+          },
+          {
+            "name": "proposer",
+            "type": "pubkey"
+          },
+          {
+            "name": "challenge_count",
+            "type": "u8"
+          },
+          {
+            "name": "finalized_at",
+            "type": "i64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "GameMarketCreated",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "game_market",
+            "type": "pubkey"
+          },
+          {
+            "name": "market",
+            "type": "pubkey"
+          },
+          {
+            "name": "market_id",
+            "type": "u64"
+          },
+          {
+            "name": "kind",
+            "type": "u8"
+          },
+          {
+            "name": "end_ts",
+            "type": "i64"
+          },
+          {
+            "name": "seed_amount",
+            "type": "u64"
+          },
+          {
+            "name": "initial_price_bps",
+            "type": "u16"
+          }
+        ]
+      }
+    },
+    {
+      "name": "InitializeConfigArgs",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "attestor",
+            "type": "pubkey"
+          },
+          {
+            "name": "guardians",
+            "type": {
+              "array": [
+                "pubkey",
+                2
+              ]
+            }
+          },
+          {
+            "name": "dispute_window_secs",
+            "type": "u32"
+          },
+          {
+            "name": "collateral_mint",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "MarketFinalized",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "game_market",
+            "type": "pubkey"
+          },
+          {
+            "name": "market",
+            "type": "pubkey"
+          },
+          {
+            "name": "outcome",
+            "type": {
+              "defined": {
+                "name": "Outcome"
+              }
+            }
+          },
+          {
+            "name": "finalized_at",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "MarketHalted",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "game_market",
+            "type": "pubkey"
+          },
+          {
+            "name": "market",
+            "type": "pubkey"
+          },
+          {
+            "name": "by",
+            "type": "pubkey"
+          },
+          {
+            "name": "shares",
+            "type": "u128"
+          }
+        ]
+      }
+    },
+    {
+      "name": "MarketRecycled",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "game_market",
+            "type": "pubkey"
+          },
+          {
+            "name": "market",
+            "type": "pubkey"
+          },
+          {
+            "name": "recovered",
+            "docs": [
+              "mUSDC that came back to the treasury in this instruction."
+            ],
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "MarketStatus",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Open"
+          },
+          {
+            "name": "Halted"
+          },
+          {
+            "name": "Proposed"
+          },
+          {
+            "name": "Challenged"
+          },
+          {
+            "name": "Finalized"
+          },
+          {
+            "name": "Recycled"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Outcome",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Yes"
+          },
+          {
+            "name": "No"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ProposeResultArgs",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "outcome",
+            "type": {
+              "defined": {
+                "name": "Outcome"
+              }
+            }
+          },
+          {
+            "name": "evidence_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "evidence_uri",
+            "type": "string"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ResultChallenged",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "game_market",
+            "type": "pubkey"
+          },
+          {
+            "name": "market",
+            "type": "pubkey"
+          },
+          {
+            "name": "by",
+            "type": "pubkey"
+          },
+          {
+            "name": "challenge_count",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ResultProposed",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "game_market",
+            "type": "pubkey"
+          },
+          {
+            "name": "market",
+            "type": "pubkey"
+          },
+          {
+            "name": "outcome",
+            "type": {
+              "defined": {
+                "name": "Outcome"
+              }
+            }
+          },
+          {
+            "name": "evidence_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "proposer",
+            "type": "pubkey"
+          },
+          {
+            "name": "proposed_at",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "UpdateConfigArgs",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "attestor",
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "guardians",
+            "type": {
+              "option": {
+                "array": [
+                  "pubkey",
+                  2
+                ]
+              }
+            }
+          },
+          {
+            "name": "dispute_window_secs",
+            "type": {
+              "option": "u32"
+            }
+          },
+          {
+            "name": "creation_paused",
+            "type": {
+              "option": "bool"
+            }
+          }
+        ]
+      }
+    }
+  ]
+}
