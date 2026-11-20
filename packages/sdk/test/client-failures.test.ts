@@ -258,3 +258,44 @@ describe('trade.waitFor', () => {
     await expect(c.trade.waitFor(SIG, { pollMs: 1 })).rejects.toMatchObject({ code: 'NOT_FOUND' })
   })
 })
+
+describe('round 2 guards', () => {
+  it('N1: a null body on a keyed GET is a shape error, not a TypeError', async () => {
+    const { c } = client([json(null)], { retries: 0 })
+    await expect(c.games.list()).rejects.toMatchObject({
+      code: 'NETWORK',
+      message: expect.stringContaining('unexpected response shape'),
+    })
+  })
+
+  it('N2: waitFor rethrows a shape error at once', async () => {
+    const { c, s } = client([json({ nope: 1 }), json(status('confirmed'))])
+    await expect(c.trade.waitFor(SIG, { pollMs: 1 })).rejects.toMatchObject({
+      message: expect.stringContaining('unexpected response shape'),
+    })
+    expect(s.calls).toHaveLength(1)
+  })
+
+  it('N2: the deadline error carries the last transient error as cause', async () => {
+    const boom = new TypeError('down')
+    const c = new HoragonClient({
+      baseUrl: 'https://h.test',
+      fetch: (async () => {
+        throw boom
+      }) as typeof fetch,
+    })
+    const err = (await c.trade
+      .waitFor(SIG, { timeoutMs: 30, pollMs: 5 })
+      .catch((e: unknown) => e)) as Error
+    expect(err.message).toContain('not confirmed in time')
+    expect((err.cause as Error).cause).toBe(boom)
+  })
+
+  it('N3: timeoutMs 0 still polls once', async () => {
+    const { c, s } = client([json(status('confirmed'))])
+    await expect(c.trade.waitFor(SIG, { timeoutMs: 0 })).resolves.toMatchObject({
+      status: 'confirmed',
+    })
+    expect(s.calls).toHaveLength(1)
+  })
+})

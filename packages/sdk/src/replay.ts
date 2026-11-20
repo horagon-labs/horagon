@@ -11,11 +11,27 @@ import { z } from 'zod'
 
 const ISO_UTC = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,9})?)?Z$/
 
+/** Date.parse rolls impossible dates over (Feb 30, 24:00), so compare the fields back. */
+function isRealUtcTime(s: string): boolean {
+  const ms = Date.parse(s)
+  if (Number.isNaN(ms)) return false
+  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(s)
+  if (!m) return false
+  const d = new Date(ms)
+  return (
+    d.getUTCFullYear() === Number(m[1]) &&
+    d.getUTCMonth() + 1 === Number(m[2]) &&
+    d.getUTCDate() === Number(m[3]) &&
+    d.getUTCHours() === Number(m[4]) &&
+    d.getUTCMinutes() === Number(m[5])
+  )
+}
+
 /** An ISO time in UTC, with or without seconds, normalised to `Date#toISOString`. */
 const UtcTimeSchema = z
   .string()
   .regex(ISO_UTC, 'must be an ISO time in UTC')
-  .refine((s) => !Number.isNaN(Date.parse(s)), 'must be a real date and time')
+  .refine(isRealUtcTime, 'must be a real date and time')
   .transform((s) => new Date(s).toISOString())
 
 export const ReplayFrameSchema = z.object({
@@ -58,7 +74,10 @@ export function clockToSecs(clock: string): number {
     return Number.isFinite(secs) ? secs : 0
   }
   const mmss = /^(\d+):(\d{2})$/.exec(clock)
-  if (mmss) return Number(mmss[1]) * 60 + Number(mmss[2])
+  if (mmss) {
+    const secs = Number(mmss[1]) * 60 + Number(mmss[2])
+    return Number.isFinite(secs) ? secs : 0
+  }
   const secs = Number(clock)
   return Number.isFinite(secs) && secs >= 0 ? Math.round(secs) : 0
 }

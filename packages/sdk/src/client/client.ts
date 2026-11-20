@@ -125,9 +125,12 @@ export class HoragonClient {
       opts: { timeoutMs?: number; pollMs?: number } = {},
     ): Promise<TxStatus> => {
       const deadline = Date.now() + (opts.timeoutMs ?? 60_000)
+      let first = true
+      let lastErr: unknown
       for (;;) {
         const left = deadline - Date.now()
-        if (left > 0) {
+        if (first || left > 0) {
+          first = false
           try {
             // One attempt, capped by the time left; a transient failure just means poll again.
             const s = await this.get(
@@ -135,18 +138,22 @@ export class HoragonClient {
               {},
               TxStatusSchema,
               undefined,
-              { timeoutMs: left, retries: 0 },
+              { ...(left > 0 ? { timeoutMs: left } : {}), retries: 0 },
             )
             if (s.status === 'confirmed' || s.status === 'finalized' || s.status === 'failed') {
               return s
             }
           } catch (err) {
-            if (!(isHoragonError(err) && err.code === 'NETWORK')) throw err
+            // A shape error is version skew: polling on cannot fix it.
+            if (!(isHoragonError(err) && err.code === 'NETWORK') || err.hint === SHAPE_HINT)
+              throw err
+            lastErr = err
           }
         }
         if (Date.now() >= deadline) {
           throw new HoragonError('NETWORK', `${signature} not confirmed in time`, {
             hint: 'The transaction may still land; check its status again before resending.',
+            ...(lastErr === undefined ? {} : { cause: lastErr }),
           })
         }
         await sleep(Math.min(opts.pollMs ?? 1_000, Math.max(deadline - Date.now(), 0)))
@@ -208,6 +215,7 @@ export class HoragonClient {
       undefined,
       override,
     )
+    if (key && (body === null || typeof body !== 'object')) throw shapeError(path, 'not an object')
     return parse(schema, key ? (body as Record<string, unknown>)[key] : body, path)
   }
 
@@ -322,16 +330,18 @@ async function problemError(res: Response, what: string): Promise<HoragonError> 
   )
 }
 
+const SHAPE_HINT = 'The API and this SDK version disagree; upgrade @horagon/sdk.'
+
+function shapeError(what: string, why: string): HoragonError {
+  return new HoragonError('NETWORK', `${what}: unexpected response shape (${why})`, {
+    hint: SHAPE_HINT,
+  })
+}
+
 function parse<S extends z.ZodType>(schema: S, value: unknown, what: string): z.infer<S> {
   const r = schema.safeParse(value)
   if (!r.success) {
-    throw new HoragonError(
-      'NETWORK',
-      `${what}: unexpected response shape (${r.error.issues[0]?.message ?? 'invalid'})`,
-      {
-        hint: 'The API and this SDK version disagree; upgrade @horagon/sdk.',
-      },
-    )
+    throw shapeError(what, r.error.issues[0]?.message ?? 'invalid')
   }
   return r.data
 }

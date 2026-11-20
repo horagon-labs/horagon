@@ -48,6 +48,8 @@ describe('ReplayGameSchema', () => {
     { home: 'cle' },
     { frames: [] },
     { tipoffUtc: '2026-13-45T25:99Z' },
+    { tipoffUtc: '2026-02-30T00:00Z' },
+    { tipoffUtc: '2026-11-19T24:00Z' },
   ])('refuses %o', (patch) => {
     expect(ReplayGameSchema.safeParse(game(patch)).success).toBe(false)
   })
@@ -65,6 +67,7 @@ describe('clockToSecs', () => {
     ['PT00M00.00S', 0],
     ['PT1.2.3S', 0],
     ['', 0],
+    [`${'9'.repeat(400)}:00`, 0],
     ['garbage', 0],
     ['-3', 0],
   ])('%s is %d s', (clock, secs) => {
