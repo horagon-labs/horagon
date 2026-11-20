@@ -4,6 +4,7 @@
 // compacted into replay fixtures with `s4:compact`.
 import { appendFile, mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
+import { errorSummary } from '@horagon/sdk'
 import { z } from 'zod'
 import { easternDate, type Feed, type FeedGame, type FeedSnapshot, type FeedStatus } from './types'
 
@@ -66,12 +67,13 @@ export function espnStatus(type: { name: string; state: string; completed: boole
 }
 
 /**
- * A score as a whole number, or null when it is missing or unreadable. ESPN sends "0" for both
- * sides before tip-off (checked in the recording); a scheduled game with no score at all also
- * reads 0-0, anything else unreadable makes the event malformed.
+ * A score as a whole number, or null when it is unreadable. ESPN sends "0" for both sides
+ * before tip-off (checked in the recording). Scores only matter for live and final games, so a
+ * missing score reads 0 for the other statuses (a postponed or canceled game must keep its
+ * status); a score that is present but malformed is always unreadable.
  */
-function points(score: string | undefined, scheduled: boolean): number | null {
-  if (score === undefined) return scheduled ? 0 : null
+function points(score: string | undefined, optional: boolean): number | null {
+  if (score === undefined) return optional ? 0 : null
   if (!/^\d{1,3}$/.test(score)) return null
   return Number(score)
 }
@@ -104,8 +106,9 @@ export function parseEspnScoreboard(body: unknown): ParseResult {
       continue
     }
     const status = espnStatus(c.status.type)
-    const homeScore = points(home.score, status === 'scheduled')
-    const awayScore = points(away.score, status === 'scheduled')
+    const scoreOptional = status !== 'live' && status !== 'final'
+    const homeScore = points(home.score, scoreOptional)
+    const awayScore = points(away.score, scoreOptional)
     if (homeScore === null || awayScore === null) {
       skipped++
       continue
@@ -178,7 +181,8 @@ function assertGameDate(gameDate: string): void {
 /**
  * ESPN's scoreboard as a feed. Errors are FeedError with a fixed message (never the response
  * body) and the original error as `cause`. A failed archive write does not lose the snapshot:
- * it is returned and the failure goes to `opts.onArchiveError`.
+ * it is returned and the failure goes to `opts.onArchiveError`, or by default to one
+ * `console.warn` line (message only, never the URL or the body).
  */
 export function espnFeed(opts: EspnFeedOptions = {}): Feed {
   const fetchImpl = opts.fetchImpl ?? fetch
@@ -206,13 +210,18 @@ export function espnFeed(opts: EspnFeedOptions = {}): Feed {
       try {
         body = await res.json()
       } catch (cause) {
-        throw new FeedError('espn: body is not JSON', { cause })
+        const name = (cause as Error | undefined)?.name
+        const timeout = name === 'TimeoutError' || name === 'AbortError'
+        throw new FeedError(timeout ? 'espn: request timed out' : 'espn: body is not JSON', {
+          cause,
+        })
       }
       const fetchedAt = now()
       try {
         await opts.archive?.write(gameDate, url, body, fetchedAt)
       } catch (cause) {
-        opts.onArchiveError?.(cause)
+        if (opts.onArchiveError) opts.onArchiveError(cause)
+        else console.warn(`espn: archive write failed: ${errorSummary(cause).message}`)
       }
       const { games, skipped } = parseEspnScoreboard(body)
       return { source: 'espn', url, fetchedAt, games, skipped }

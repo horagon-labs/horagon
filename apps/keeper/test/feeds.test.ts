@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { clockToSecs, type ReplayGame } from '@horagon/sdk/replay'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { espnFeed, espnStatus, FeedError, parseEspnScoreboard, RawArchive } from '../src/feeds/espn'
 import { loadReplayDir, rebuildPeriods, replayFeed } from '../src/feeds/replay'
 import { type FeedGame, periodsConsistent } from '../src/feeds/types'
@@ -192,6 +192,69 @@ describe('ESPN scoreboard', () => {
     })
     expect((await feed.fetchDay('2026-11-18')).games).toHaveLength(3)
     expect(causes).toHaveLength(1)
+  })
+
+  it('warns once by default when the archive cannot be written', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const feed = espnFeed({
+        archive: {
+          write: async () => Promise.reject(new Error('disk full')),
+        } as unknown as RawArchive,
+        fetchImpl: (async () => new Response(JSON.stringify(scoreboard))) as typeof fetch,
+      })
+      expect((await feed.fetchDay('2026-11-18')).games).toHaveLength(3)
+      expect(warn).toHaveBeenCalledTimes(1)
+      const line = String(warn.mock.calls[0]?.[0])
+      expect(line).toBe('espn: archive write failed: disk full')
+      expect(line).not.toContain('http')
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
+  it('keeps a postponed or canceled event without scores; skips a final one', () => {
+    type Ev = {
+      competitions: Array<{
+        status: { type: { name: string; state: string; completed: boolean } }
+        competitors: Array<{ score?: string }>
+      }>
+    }
+    const make = (name: string, state: string, completed: boolean) => {
+      const body = structuredClone(scoreboard)
+      const c = (body.events[0] as Ev).competitions[0]
+      if (!c) throw new Error('fixture')
+      c.status.type = { name, state, completed }
+      for (const t of c.competitors) delete t.score
+      return parseEspnScoreboard(body)
+    }
+    for (const [name, status] of [
+      ['STATUS_POSTPONED', 'postponed'],
+      ['STATUS_CANCELED', 'canceled'],
+    ] as const) {
+      const r = make(name, 'post', false)
+      expect(r.skipped).toBe(0)
+      expect(r.games[0]).toMatchObject({ status, homeScore: 0, awayScore: 0 })
+    }
+    const fin = make('STATUS_FINAL', 'post', true)
+    expect(fin.skipped).toBe(1)
+    expect(fin.games).toHaveLength(2)
+  })
+
+  it('labels a timeout while reading the body as a timeout, not as invalid JSON', async () => {
+    const feed = espnFeed({
+      fetchImpl: (async () => ({
+        ok: true,
+        status: 200,
+        json: async () => {
+          throw new DOMException('too slow', 'TimeoutError')
+        },
+      })) as unknown as typeof fetch,
+    })
+    const err = await feed.fetchDay('2026-11-18').catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(FeedError)
+    expect((err as FeedError).message).toBe('espn: request timed out')
+    expect((err as FeedError).cause).toBeInstanceOf(DOMException)
   })
 
   it('refuses a game date that is not a real calendar date', async () => {
