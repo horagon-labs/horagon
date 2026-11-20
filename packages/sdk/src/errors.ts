@@ -82,7 +82,7 @@ export function isHoragonError(value: unknown): value is HoragonError {
 /** Cuts URL paths and query strings (where RPC providers put API keys) and `api-key` values. */
 export function redactUrls(text: string): string {
   return text
-    .replace(/\b(https?|wss?):\/\/(?:[^\s/?#@]*@)?([^\s/?#]+)[^\s"']*/gi, '$1://$2/…')
+    .replace(/\b(https?|wss?):\/\/(?:[^\s/?#]*@)?([^\s/?#]+)[^\s"']*/gi, '$1://$2/…')
     .replace(/(api[-_]?key|token)=[^&\s"']+/gi, '$1=…')
 }
 

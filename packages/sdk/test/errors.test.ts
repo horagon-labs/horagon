@@ -68,6 +68,15 @@ describe('redactUrls userinfo', () => {
     expect(redactUrls('wss://tok@rpc.example.com:8900/ws')).toBe('wss://rpc.example.com:8900/…')
   })
 
+  it('drops userinfo up to the last @ before the path', () => {
+    expect(redactUrls('https://user:p@ss@rpc.example.com/v1')).toBe('https://rpc.example.com/…')
+  })
+
+  it('does not mistake an @ in the path or query for userinfo', () => {
+    expect(redactUrls('https://rpc.example.com/v1?q=a@b')).toBe('https://rpc.example.com/…')
+    expect(redactUrls('https://h/path@x')).toBe('https://h/…')
+  })
+
   it('keeps the password out of an error summary', () => {
     const s = errorSummary(new Error('fetch failed: https://user:s3cret@rpc.example.com/v1'))
     expect(s.message).toContain('https://rpc.example.com/…')
