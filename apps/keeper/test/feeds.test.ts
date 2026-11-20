@@ -1,9 +1,9 @@
-import { mkdtemp, readFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { clockToSecs, type ReplayGame } from '@horagon/sdk/replay'
 import { describe, expect, it } from 'vitest'
-import { espnFeed, espnStatus, parseEspnScoreboard, RawArchive } from '../src/feeds/espn'
+import { espnFeed, espnStatus, FeedError, parseEspnScoreboard, RawArchive } from '../src/feeds/espn'
 import { loadReplayDir, rebuildPeriods, replayFeed } from '../src/feeds/replay'
 import { type FeedGame, periodsConsistent } from '../src/feeds/types'
 
@@ -30,17 +30,43 @@ describe('ESPN scoreboard', () => {
   })
 
   it('maps GS, NY, NO, SA, UTAH and WSH to NBA tricodes', () => {
-    const body = structuredClone(scoreboard)
-    const c = (
-      body.events[0] as {
-        competitions: Array<{ competitors: Array<{ team: { abbreviation: string } }> }>
-      }
-    ).competitions[0]
-    if (!c?.competitors[0] || !c.competitors[1]) throw new Error('fixture')
-    c.competitors[0].team.abbreviation = 'GS'
-    c.competitors[1].team.abbreviation = 'UTAH'
-    const g = parseEspnScoreboard(body).games[0]
-    expect([g?.home, g?.away].sort()).toEqual(['GSW', 'UTA'])
+    const pairs = [
+      ['GS', 'GSW'],
+      ['NY', 'NYK'],
+      ['NO', 'NOP'],
+      ['SA', 'SAS'],
+      ['UTAH', 'UTA'],
+      ['WSH', 'WAS'],
+    ] as const
+    for (const [espn, nba] of pairs) {
+      const body = structuredClone(scoreboard)
+      const c = (
+        body.events[0] as {
+          competitions: Array<{ competitors: Array<{ team: { abbreviation: string } }> }>
+        }
+      ).competitions[0]
+      if (!c?.competitors[0]) throw new Error('fixture')
+      c.competitors[0].team.abbreviation = espn
+      expect(parseEspnScoreboard(body).games[0]?.home).toBe(nba)
+    }
+  })
+
+  it('skips a live event with a missing or unreadable score, keeps a scheduled one at 0-0', () => {
+    type Ev = { competitions: Array<{ competitors: Array<{ score?: string }> }> }
+    const live = structuredClone(scoreboard)
+    delete (live.events[0] as Ev).competitions[0]?.competitors[0]?.score
+    expect(parseEspnScoreboard(live).skipped).toBe(1)
+    const garbled = structuredClone(scoreboard)
+    const c = (garbled.events[0] as Ev).competitions[0]?.competitors[1]
+    if (c) c.score = '7x'
+    expect(parseEspnScoreboard(garbled).skipped).toBe(1)
+    const pre = structuredClone(scoreboard)
+    for (const t of (pre.events[2] as Ev).competitions[0]?.competitors ?? []) {
+      delete t.score
+    }
+    const r = parseEspnScoreboard(pre)
+    expect(r.skipped).toBe(0)
+    expect(r.games[2]).toMatchObject({ status: 'scheduled', homeScore: 0, awayScore: 0 })
   })
 
   it('only reads post + completed as final; postponed and canceled from the name', () => {
@@ -55,6 +81,12 @@ describe('ESPN scoreboard', () => {
       'canceled',
     )
     expect(espnStatus({ name: 'STATUS_DELAYED', state: 'pre', completed: false })).toBe('scheduled')
+    expect(espnStatus({ name: 'STATUS_SUSPENDED', state: 'in', completed: false })).toBe(
+      'postponed',
+    )
+    expect(espnStatus({ name: 'STATUS_POSTPONED', state: 'post', completed: true })).toBe(
+      'postponed',
+    )
     expect(espnStatus({ name: 'STATUS_WHATEVER', state: 'post', completed: false })).toBe(
       'postponed',
     )
@@ -76,26 +108,101 @@ describe('ESPN scoreboard', () => {
     expect(parseEspnScoreboard(body).games[0]?.cup).toBe(true)
   })
 
-  it('fetches with a dated URL, archives the raw body, and reports HTTP errors', async () => {
+  it('fetches with a dated URL, archives the raw body, and sends only our headers', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'espn-'))
-    const urls: string[] = []
-    const ok = espnFeed({
-      archive: new RawArchive(dir),
-      fetchImpl: (async (url: string) => {
-        urls.push(url)
-        return new Response(JSON.stringify(scoreboard), { status: 200 })
+    try {
+      const urls: string[] = []
+      const headers: unknown[] = []
+      const ok = espnFeed({
+        archive: new RawArchive(dir),
+        fetchImpl: (async (url: string, init?: RequestInit) => {
+          urls.push(url)
+          headers.push(init?.headers)
+          return new Response(JSON.stringify(scoreboard), { status: 200 })
+        }) as typeof fetch,
+      })
+      const snap = await ok.fetchDay('2026-11-18')
+      expect(urls[0]).toMatch(/scoreboard\?dates=20261118$/)
+      expect(headers[0]).toEqual({ 'user-agent': 'horagon-keeper/0.1', accept: 'application/json' })
+      expect(snap.games).toHaveLength(3)
+      expect(snap.skipped).toBe(0)
+      const archived = (await readFile(join(dir, '2026-11-18.ndjson'), 'utf8')).trim().split('\n')
+      expect(JSON.parse(archived[0] ?? '{}')).toMatchObject({
+        src: 'espn-scoreboard',
+        url: urls[0],
+      })
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('reports the skipped events of a 200 answer', async () => {
+    const feed = espnFeed({
+      fetchImpl: (async () =>
+        new Response(JSON.stringify({ events: [...scoreboard.events, { id: 'x' }] }), {
+          status: 200,
+        })) as typeof fetch,
+    })
+    const snap = await feed.fetchDay('2026-11-18')
+    expect(snap.games).toHaveLength(3)
+    expect(snap.skipped).toBe(1)
+  })
+
+  it('throws FeedError for HTTP errors, network failures, timeouts and invalid JSON', async () => {
+    const feedOf = (impl: () => Promise<Response>) =>
+      espnFeed({ fetchImpl: impl as unknown as typeof fetch })
+    const http = await feedOf(async () => new Response('secret body', { status: 403 }))
+      .fetchDay('2026-11-18')
+      .catch((e: unknown) => e)
+    expect(http).toBeInstanceOf(FeedError)
+    expect(http).toMatchObject({ message: 'espn answered 403', status: 403 })
+
+    const boom = new TypeError('fetch failed')
+    const net = await feedOf(async () => {
+      throw boom
+    })
+      .fetchDay('2026-11-18')
+      .catch((e: unknown) => e)
+    expect(net).toBeInstanceOf(FeedError)
+    expect(net).toMatchObject({ message: 'espn: network error', cause: boom })
+
+    const late = await feedOf(async () => {
+      throw new DOMException('too slow', 'TimeoutError')
+    })
+      .fetchDay('2026-11-18')
+      .catch((e: unknown) => e)
+    expect(late).toBeInstanceOf(FeedError)
+    expect((late as FeedError).message).toBe('espn: request timed out')
+
+    const junk = await feedOf(async () => new Response('<html>nope</html>', { status: 200 }))
+      .fetchDay('2026-11-18')
+      .catch((e: unknown) => e)
+    expect(junk).toBeInstanceOf(FeedError)
+    expect((junk as FeedError).message).toBe('espn: body is not JSON')
+  })
+
+  it('returns the snapshot when the archive cannot be written, and reports it', async () => {
+    const causes: unknown[] = []
+    const feed = espnFeed({
+      archive: {
+        write: async () => Promise.reject(new Error('disk full')),
+      } as unknown as RawArchive,
+      onArchiveError: (c) => causes.push(c),
+      fetchImpl: (async () => new Response(JSON.stringify(scoreboard))) as typeof fetch,
+    })
+    expect((await feed.fetchDay('2026-11-18')).games).toHaveLength(3)
+    expect(causes).toHaveLength(1)
+  })
+
+  it('refuses a game date that is not a real calendar date', async () => {
+    const feed = espnFeed({
+      fetchImpl: (async () => {
+        throw new Error('must not be called')
       }) as typeof fetch,
     })
-    const snap = await ok.fetchDay('2026-11-18')
-    expect(urls[0]).toMatch(/scoreboard\?dates=20261118$/)
-    expect(snap.games).toHaveLength(3)
-    const archived = (await readFile(join(dir, '2026-11-18.ndjson'), 'utf8')).trim().split('\n')
-    expect(JSON.parse(archived[0] ?? '{}')).toMatchObject({ src: 'espn-scoreboard', url: urls[0] })
-
-    const down = espnFeed({
-      fetchImpl: (async () => new Response('', { status: 403 })) as typeof fetch,
-    })
-    await expect(down.fetchDay('2026-11-18')).rejects.toThrow('espn answered 403')
+    for (const bad of ['../../etc/passwd', '2026-13-01', '2026-02-30', '20261118', '']) {
+      await expect(feed.fetchDay(bad)).rejects.toBeInstanceOf(FeedError)
+    }
   })
 })
 
@@ -232,10 +339,49 @@ describe('replay feed', () => {
     ).toThrow(/speed/)
   })
 
+  it('never shows a later frame early when a fixture is unsorted', async () => {
+    const unsorted: ReplayGame = { ...fixture, frames: [...fixture.frames].reverse() }
+    const feed = replayFeed([unsorted], {
+      tag: 'u1',
+      tipoff: new Date('2026-11-25T12:00:00Z'),
+      now: () => new Date('2026-11-25T13:25:00Z'),
+    })
+    expect((await feed.fetchDay('2026-11-25')).games[0]).toMatchObject({
+      status: 'live',
+      period: 3,
+      homeScore: 70,
+    })
+  })
+
+  it('shifts relative to the earliest tip-off, whatever the file order', async () => {
+    const later: ReplayGame = {
+      ...fixture,
+      espnEventId: '1',
+      tipoffUtc: '2026-11-19T02:30:00.000Z',
+      frames: fixture.frames.map((f) => ({
+        ...f,
+        t: new Date(new Date(f.t).getTime() + 9_000_000).toISOString(),
+      })),
+    }
+    const feed = replayFeed([later, fixture], {
+      tag: 'o1',
+      tipoff: new Date('2026-11-25T12:00:00Z'),
+      now: () => new Date(0),
+    })
+    const games = (await feed.fetchDay('2026-11-25')).games
+    const early = games.find((g) => g.externalId === '401910007o1')
+    const lateGame = games.find((g) => g.externalId === '1o1')
+    expect(early?.tipoff).toEqual(new Date('2026-11-25T12:00:00Z'))
+    expect(lateGame?.tipoff).toEqual(new Date('2026-11-25T14:30:00Z'))
+  })
+
   it('refuses a tag that would make the game id too long or unsafe', () => {
     expect(() =>
       replayFeed([fixture], { tag: 'bad-tag', tipoff: new Date(), now: () => new Date() }),
     ).toThrow()
+    expect(() =>
+      replayFeed([fixture], { tag: '123', tipoff: new Date(), now: () => new Date() }),
+    ).toThrow(/letter/)
     const longId = { ...fixture, espnEventId: '40191000712345' }
     expect(() =>
       replayFeed([longId], { tag: 'abc', tipoff: new Date(), now: () => new Date() }),
@@ -247,8 +393,8 @@ describe('replay feed', () => {
 const RECORDED = join(import.meta.dirname, '../../../tests/fixtures/replay')
 
 describe('replay of the 2026-11-18 recording', () => {
-  // The first file (ATL at OKC, 01:00Z) lands at 01:00Z on 2026-12-02, so every game falls on
-  // the ET date 2026-12-01, like the recorded night.
+  // The earliest recorded tip-off lands at 01:00Z on 2026-12-02, so every game falls on the ET
+  // date 2026-12-01, like the recorded night.
   const TIPOFF = new Date('2026-12-02T01:00:00Z')
   const DATE = '2026-12-01'
 
@@ -256,7 +402,7 @@ describe('replay of the 2026-11-18 recording', () => {
     const games = await loadReplayDir(RECORDED)
     let now = new Date(0)
     const feed = replayFeed(games, { tag: 't', tipoff: TIPOFF, now: () => now })
-    const origin = new Date(games[0]?.tipoffUtc ?? 0).getTime()
+    const origin = Math.min(...games.map((g) => new Date(g.tipoffUtc).getTime()))
     const at = (iso: string) => new Date(TIPOFF.getTime() + new Date(iso).getTime() - origin)
     const state = async (game: ReplayGame, time: Date): Promise<FeedGame | undefined> => {
       now = time

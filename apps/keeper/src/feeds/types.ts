@@ -14,7 +14,7 @@ export interface FeedGame {
   tipoff: Date
   status: FeedStatus
   period: number
-  /** Seconds left in the current period; null before tip-off. */
+  /** Seconds left in the current period; null unless live. */
   clockSecs: number | null
   homeScore: number
   awayScore: number
@@ -29,6 +29,11 @@ export interface FeedSnapshot {
   url: string
   fetchedAt: Date
   games: FeedGame[]
+  /**
+   * Events the feed answered but could not read (format change, bad score). The planner alerts
+   * when this is above 0, so a silent ESPN change cannot make games disappear.
+   */
+  skipped?: number
 }
 
 export interface Feed {
@@ -50,3 +55,7 @@ export function periodsConsistent(
   const away = f.periods.reduce((n, p) => n + p[1], 0)
   return home === f.homeScore && away === f.awayScore
 }
+
+/** The league's calendar date (US Eastern, YYYY-MM-DD) of an instant. */
+export const easternDate = (d: Date) =>
+  new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' }).format(d)

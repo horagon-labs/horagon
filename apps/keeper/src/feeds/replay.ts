@@ -10,7 +10,7 @@ import {
   type ReplayGame,
   ReplayGameSchema,
 } from '@horagon/sdk/replay'
-import type { Feed, FeedGame, FeedSnapshot, FeedStatus } from './types'
+import { easternDate, type Feed, type FeedGame, type FeedSnapshot, type FeedStatus } from './types'
 
 export async function loadReplayDir(dir: string): Promise<ReplayGame[]> {
   const names = (await readdir(dir)).filter((n) => n.endsWith('.json')).sort()
@@ -46,13 +46,10 @@ export function rebuildPeriods(frames: readonly ReplayFrame[]): Array<[number, n
   return out
 }
 
-const easternDate = (d: Date) =>
-  new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' }).format(d)
-
 export interface ReplayOptions {
-  /** Appended to the recorded event id, e.g. "r1"; letters and digits only. */
+  /** Appended to the recorded event id, e.g. "r1"; starts with a letter, so never all digits. */
   tag: string
-  /** Where the first fixture's tip-off lands; the others keep their offsets to it. */
+  /** Where the earliest recorded tip-off lands; the others keep their offsets to it. */
   tipoff: Date
   now: () => Date
   /**
@@ -63,12 +60,12 @@ export interface ReplayOptions {
 }
 
 export function replayFeed(fixtures: readonly ReplayGame[], opts: ReplayOptions): Feed {
-  if (!/^[A-Za-z0-9]{1,6}$/.test(opts.tag)) throw new Error('replay tag: 1-6 letters or digits')
-  const first = fixtures[0]
-  if (!first) throw new Error('replay: no fixtures')
+  if (!/^[A-Za-z][A-Za-z0-9]{0,5}$/.test(opts.tag))
+    throw new Error('replay tag: 1-6 letters or digits, starting with a letter')
+  if (fixtures.length === 0) throw new Error('replay: no fixtures')
   const speed = opts.speed ?? 1
   if (!(speed >= 1 && speed <= 60)) throw new Error('replay speed: 1 to 60')
-  const origin = new Date(first.tipoffUtc).getTime()
+  const origin = Math.min(...fixtures.map((f) => new Date(f.tipoffUtc).getTime()))
   const at = (iso: string) => opts.tipoff.getTime() + (new Date(iso).getTime() - origin) / speed
   const games = fixtures.map((f) => {
     const source = f.frames.some((x) => x.source === 'espn') ? 'espn' : 'nba'
@@ -80,7 +77,10 @@ export function replayFeed(fixtures: readonly ReplayGame[], opts: ReplayOptions)
       externalId: id,
       tipoff,
       gameDate: easternDate(tipoff),
-      frames: f.frames.filter((x) => x.source === source).map((x) => ({ ...x, at: at(x.t) })),
+      frames: f.frames
+        .filter((x) => x.source === source)
+        .map((x) => ({ ...x, at: at(x.t) }))
+        .sort((a, b) => a.at - b.at),
     }
   })
 
@@ -113,6 +113,7 @@ export function replayFeed(fixtures: readonly ReplayGame[], opts: ReplayOptions)
         source: 'replay',
         url: `https://horagon.invalid/replay/${opts.tag}/${gameDate}`,
         fetchedAt: now,
+        skipped: 0,
         games: games.filter((g) => g.gameDate === gameDate).map((g) => stateAt(g, now.getTime())),
       }
     },
