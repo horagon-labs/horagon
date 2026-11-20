@@ -1,0 +1,32 @@
+{
+  "name": "@horagon/keeper",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "horagon-ops": "./src/ops/cli.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --coverage",
+    "start": "tsx src/main.ts",
+    "ops": "tsx src/ops/cli.ts",
+    "elo:build": "tsx scripts/elo-build.ts",
+    "local:fund": "tsx scripts/local-fund.ts"
+  },
+  "dependencies": {
+    "@horagon/db": "workspace:*",
+    "@horagon/sdk": "workspace:*",
+    "@solana/spl-token": "^0.4.15",
+    "@solana/web3.js": "^1.98.4",
+    "pino": "10.4.0",
+    "tsx": "4.23.15",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "@vitest/coverage-v8": "^5.1.0",
+    "typescript": "~5.9.3",
+    "vitest": "^5.1.0"
+  }
+}
