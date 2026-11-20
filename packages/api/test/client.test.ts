@@ -1,8 +1,9 @@
 // The SDK's HoragonClient against the real API app in-process: the wire contract both sides
 // share, end to end, without a network.
+
+import { Buffer } from 'node:buffer'
 import { HoragonClient, HoragonError } from '@horagon/sdk'
 import { VersionedTransaction } from '@solana/web3.js'
-import { Buffer } from 'buffer'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { createApp } from '../src/app'
 import { GAME_ID, makeEnv, type TestEnv } from './helpers'

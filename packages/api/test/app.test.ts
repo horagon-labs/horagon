@@ -1,9 +1,11 @@
+import { Buffer } from 'node:buffer'
 import {
   heartbeat,
   insertTrades,
   markAtaClosed,
   putEvidence,
   recordSponsoredAtas,
+  schema,
   sponsorSpentSince,
   updateMarket,
 } from '@horagon/db'
@@ -11,6 +13,7 @@ import {
   ataAddress,
   DEVNET_MUSDC_MINT,
   formatAmount,
+  MAINNET_GENESIS_HASH,
   PM_AMM_PROGRAM_ID,
   PROTOCOL_DAO,
   parseAmount,
@@ -20,11 +23,11 @@ import {
 } from '@horagon/sdk'
 import { ASSOCIATED_TOKEN_PROGRAM_ID } from '@solana/spl-token'
 import { ComputeBudgetProgram, Keypair, VersionedTransaction } from '@solana/web3.js'
-import { Buffer } from 'buffer'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createApp } from '../src/app'
+import { pmAmmFaucet } from '../src/faucet'
 import { DEFAULT_SPONSOR_LIMITS } from '../src/sponsor/policy'
-import { MarketSet } from '../src/sponsor/submit'
+import { hashIp, MarketSet } from '../src/sponsor/submit'
 import { validateSponsoredTransaction } from '../src/sponsor/validate'
 import { GAME_ID, makeEnv, program, type TestEnv, tokenAccount } from './helpers'
 
@@ -38,6 +41,17 @@ beforeEach(async () => {
 afterEach(async () => {
   await env.h.close()
 })
+
+/** An env with other limits; the current one is closed first, so no PGlite instance leaks. */
+async function replaceEnv(opts: Parameters<typeof makeEnv>[0]) {
+  await env.h.close()
+  env = await makeEnv(opts)
+  app = createApp(env.deps)
+}
+
+/** JSON of DB rows, bigints as text. */
+const rowsText = (rows: unknown) =>
+  JSON.stringify(rows, (_, v) => (typeof v === 'bigint' ? v.toString() : v))
 
 const get = (path: string, headers: Record<string, string> = {}) =>
   app.request(`/api/v1${path}`, { headers })
@@ -111,6 +125,7 @@ describe('reads', () => {
 
   it('serves a weak ETag on a game and 304 on a match', async () => {
     const first = await get(`/games/${GAME_ID}`)
+    expect(first.headers.get('cache-control')).toBe('s-maxage=1, stale-while-revalidate=5')
     const tag = first.headers.get('etag')
     expect(tag).toMatch(/^W\//)
     const again = await get(`/games/${GAME_ID}`, { 'if-none-match': tag ?? '' })
@@ -260,8 +275,7 @@ describe('POST /tx/submit', () => {
   })
 
   it('rate-limits per wallet with retry-after', async () => {
-    env = await makeEnv({ txPerHour: 1 })
-    app = createApp(env.deps)
+    await replaceEnv({ txPerHour: 1 })
     const first = await builtTrade()
     expect((await post('/tx/submit', { tx: signAsUser(first.tx) })).status).toBe(200)
     const second = await builtTrade('10')
@@ -281,25 +295,112 @@ describe('POST /tx/submit', () => {
   })
 
   it('answers 429 when the daily cap is used up', async () => {
-    env = await makeEnv({ capSol: 0.000001 })
-    app = createApp(env.deps)
+    await replaceEnv({ capSol: 0.000001 })
     const built = await builtTrade()
     const res = await post('/tx/submit', { tx: signAsUser(built.tx) })
     expect(res.status).toBe(429)
     expect(env.chain.simulated).toBe(0)
   })
 
-  it('never echoes the RPC error, never logs its key or stack, and releases the reservation', async () => {
+  it('answers a failed send with its signature and keeps the reservation, never echoing the RPC error', async () => {
     env.chain.sendFails = true
     const built = await builtTrade()
     const res = await post('/tx/submit', { tx: signAsUser(built.tx) })
     expect(res.status).toBe(502)
-    expect(await res.text()).not.toContain('secret-rpc')
-    expect(await sponsorSpentSince(env.h.db, new Date(0))).toBe(0n)
+    const text = await res.text()
+    expect(text).not.toContain('secret-rpc')
+    const problem = JSON.parse(text) as { code: string; signature: string; hint: string }
+    expect(problem.code).toBe('NETWORK')
+    expect(problem.signature.length).toBeGreaterThan(80)
+    expect(problem.hint).toContain(`/tx/${problem.signature}`)
+    // The node may have taken it before the error: the spend stays reserved.
+    expect(await sponsorSpentSince(env.h.db, new Date(0))).toBeGreaterThan(0n)
     const logs = env.logs.join('\n')
     expect(logs).toContain('sponsor send failed')
     expect(logs).not.toContain('XYZ')
     expect(logs).not.toContain('"stack"')
+  })
+
+  it('releases the reservation when the simulation cannot reach the RPC', async () => {
+    env.chain.simulateFails = true
+    const res = await post('/tx/submit', { tx: signAsUser((await builtTrade()).tx) })
+    expect(res.status).toBe(502)
+    expect(await res.text()).not.toContain('secret-rpc')
+    expect(env.chain.sent).toHaveLength(0)
+    expect(await sponsorSpentSince(env.h.db, new Date(0))).toBe(0n)
+    expect(env.logs.join('\n')).not.toContain('XYZ')
+  })
+
+  it('answers the same signed transaction twice with one signature, simulating and sending once', async () => {
+    const signed = signAsUser((await builtTrade()).tx)
+    const first = await post('/tx/submit', { tx: signed })
+    const again = await post('/tx/submit', { tx: signed })
+    expect(first.status).toBe(200)
+    expect(again.status).toBe(200)
+    expect(await again.json()).toEqual(await first.json())
+    expect(env.chain.simulated).toBe(1)
+    expect(env.chain.sent).toHaveLength(1)
+    expect(await env.h.db.select().from(schema.sponsorLog)).toHaveLength(1)
+  })
+
+  it('signs nothing for an RPC whose genesis hash is mainnet', async () => {
+    env.chain.genesisHash = MAINNET_GENESIS_HASH
+    const signed = signAsUser((await builtTrade()).tx)
+    const sign = vi.spyOn(VersionedTransaction.prototype, 'sign')
+    try {
+      const res = await post('/tx/submit', { tx: signed })
+      expect(res.status).toBe(400)
+      expect(await res.json()).toMatchObject({ code: 'MAINNET_DISABLED' })
+      expect(sign).not.toHaveBeenCalled()
+    } finally {
+      sign.mockRestore()
+    }
+    expect(env.chain.simulated).toBe(0)
+    expect(env.chain.sent).toHaveLength(0)
+    expect(await sponsorSpentSince(env.h.db, new Date(0))).toBe(0n)
+  })
+
+  it('fails closed when the genesis hash cannot be read, and checks again next time', async () => {
+    env.chain.genesisFails = true
+    const signed = signAsUser((await builtTrade()).tx)
+    const sign = vi.spyOn(VersionedTransaction.prototype, 'sign')
+    try {
+      const res = await post('/tx/submit', { tx: signed })
+      expect(res.status).toBe(502)
+      expect(await res.json()).toMatchObject({ code: 'NETWORK' })
+      expect(sign).not.toHaveBeenCalled()
+    } finally {
+      sign.mockRestore()
+    }
+    expect(env.chain.simulated).toBe(0)
+    env.chain.genesisFails = false
+    expect((await post('/tx/submit', { tx: signed })).status).toBe(200)
+    expect(env.chain.genesisCalls).toBe(2)
+  })
+
+  it('checks the genesis hash once across submits', async () => {
+    expect((await post('/tx/submit', { tx: signAsUser((await builtTrade()).tx) })).status).toBe(200)
+    const second = signAsUser((await builtTrade('10')).tx)
+    expect((await post('/tx/submit', { tx: second })).status).toBe(200)
+    expect(env.chain.sent).toHaveLength(2)
+    expect(env.chain.genesisCalls).toBe(1)
+  })
+
+  it('keys the per-IP limit on the left-most x-forwarded-for and stores only its hash', async () => {
+    const res = await post(
+      '/tx/submit',
+      { tx: signAsUser((await builtTrade()).tx) },
+      { 'x-forwarded-for': '203.0.113.7, 10.0.0.1' },
+    )
+    expect(res.status).toBe(200)
+    const ipHash = await hashIp('203.0.113.7', env.deps.ipSalt)
+    const log = await env.h.db.select().from(schema.sponsorLog)
+    expect(log.map((r) => r.ipHash)).toEqual([ipHash])
+    const limits = await env.h.db.select().from(schema.rateLimits)
+    expect(limits.map((r) => r.key)).toContain(`sponsor:ip:${ipHash}`)
+    for (const text of [rowsText(log), rowsText(limits), env.logs.join('\n')]) {
+      expect(text).not.toContain('203.0.113.7')
+    }
   })
 
   it('counts the rent of every ATA it creates as spend at once', async () => {
@@ -315,8 +416,7 @@ describe('POST /tx/submit', () => {
   it('caps the token accounts it opens for a wallet in a day', async () => {
     const first = await builtTrade()
     const { ataCreates } = inspect(first.tx)
-    env = await makeEnv({ atasPerWalletDay: ataCreates })
-    app = createApp(env.deps)
+    await replaceEnv({ atasPerWalletDay: ataCreates })
     expect((await post('/tx/submit', { tx: signAsUser((await builtTrade()).tx) })).status).toBe(200)
     const res = await post('/tx/submit', { tx: signAsUser((await builtTrade('10')).tx) })
     expect(res.status).toBe(429)
@@ -477,6 +577,61 @@ describe('status, claim, positions, faucet, health', () => {
     expect(env.faucetCalls).toEqual([wallet])
   })
 
+  it('limits the faucet per IP by x-forwarded-for, giving the refused wallet its token back', async () => {
+    const ip = { 'x-forwarded-for': '198.51.100.9' }
+    const wallets = Array.from({ length: 6 }, () => Keypair.generate().publicKey.toBase58())
+    for (const wallet of wallets.slice(0, 5)) {
+      expect((await post('/faucet', { wallet }, ip)).status).toBe(200)
+    }
+    const last = wallets[5] ?? ''
+    expect((await post('/faucet', { wallet: last }, ip)).status).toBe(429)
+    const elsewhere = await post(
+      '/faucet',
+      { wallet: last },
+      { 'x-forwarded-for': '198.51.100.10' },
+    )
+    expect(elsewhere.status).toBe(200)
+    expect(env.faucetCalls).toEqual(wallets)
+  })
+
+  const upstream = (status: number, body: unknown, headers: Record<string, string> = {}) =>
+    new Response(JSON.stringify(body), {
+      status,
+      headers: { 'content-type': 'application/json', ...headers },
+    })
+  const claimed = { ok: true, signature: '5'.repeat(88), amount: 1000 }
+
+  it('gives the allowance back when the upstream faucet fails, so a retry works', async () => {
+    const replies = [upstream(500, { error: 'down' }), upstream(200, claimed)]
+    let calls = 0
+    env.deps.faucet = pmAmmFaucet('https://faucet.test/api/faucet', (async () => {
+      calls++
+      return replies.shift() ?? upstream(500, {})
+    }) as unknown as typeof fetch)
+    const wallet = env.user.publicKey.toBase58()
+    const failed = await post('/faucet', { wallet })
+    expect(failed.status).toBe(502)
+    expect(await failed.json()).toMatchObject({ code: 'NETWORK' })
+    const retry = await post('/faucet', { wallet })
+    expect(retry.status).toBe(200)
+    expect(await retry.json()).toEqual({ signature: claimed.signature, amountUsdc: '1000' })
+    expect(calls).toBe(2)
+  })
+
+  it('keeps the allowance spent when the upstream faucet says the wallet already claimed', async () => {
+    let calls = 0
+    env.deps.faucet = pmAmmFaucet('https://faucet.test/api/faucet', (async () => {
+      calls++
+      return upstream(429, { error: 'once an hour' }, { 'retry-after': '1200' })
+    }) as unknown as typeof fetch)
+    const wallet = env.user.publicKey.toBase58()
+    const first = await post('/faucet', { wallet })
+    expect(first.status).toBe(429)
+    expect(first.headers.get('retry-after')).toBe('1200')
+    expect((await post('/faucet', { wallet })).status).toBe(429)
+    expect(calls).toBe(1)
+  })
+
   it('is degraded until the keeper heartbeats', async () => {
     expect((await get('/health')).status).toBe(503)
     await heartbeat(env.h.db, 'keeper', { tick: 1 })
@@ -484,6 +639,54 @@ describe('status, claim, positions, faucet, health', () => {
     const res = await get('/health')
     expect(res.status).toBe(200)
     expect(res.headers.get('cache-control')).toBe('no-store')
+  })
+})
+
+describe('bad requests and failures', () => {
+  const json = (text: string) => new TextEncoder().encode(text)
+
+  it.each([
+    ['malformed JSON', { 'content-type': 'application/json' }, '{"market":', 400],
+    ['no content type', {}, '{}', 415],
+    ['a wrong content type', { 'content-type': 'text/plain' }, '{}', 415],
+  ])('answers %s with a 4xx problem, not a 500', async (_, headers, body, status) => {
+    const res = await app.request('/api/v1/tx/trade', {
+      method: 'POST',
+      headers: headers as Record<string, string>,
+      body: json(body as string),
+    })
+    expect(res.status).toBe(status)
+    expect(res.headers.get('content-type')).toContain('application/problem+json')
+    expect(res.headers.get('x-request-id')).toBeTruthy()
+    expect(await res.json()).toMatchObject({ code: 'INVALID_INPUT', status })
+    expect(env.logs.join('\n')).not.toContain('unhandled')
+  })
+
+  it('labels validation issues by where they are: body, query or params', async () => {
+    const detail = async (res: Response | Promise<Response>) =>
+      ((await (await res).json()) as { detail: string }).detail
+    const market = env.market.pubkey.toBase58()
+    expect(await detail(get(`/quote?market=${market}&side=up&action=buy&amount=1`))).toMatch(
+      /^query\.side: /,
+    )
+    const trade = { market: 'x', side: 'home', action: 'buy', amount: '1' }
+    expect(
+      await detail(post('/tx/trade', { ...trade, wallet: env.user.publicKey.toBase58() })),
+    ).toMatch(/^body\.market: /)
+    expect(await detail(get('/games/NOT A GAME'))).toMatch(/^params\.id: /)
+  })
+
+  it('logs the cause of an RPC failure once, at warn, summarized', async () => {
+    env.chain.accountsFail = true
+    const market = env.market.pubkey.toBase58()
+    const res = await get(`/quote?market=${market}&side=home&action=buy&amount=20`)
+    expect(res.status).toBe(502)
+    expect(await res.text()).not.toContain('secret-rpc')
+    const warns = env.logs.filter((l) => (JSON.parse(l) as { level: number }).level === 40)
+    expect(warns).toHaveLength(1)
+    expect(warns[0]).toContain('fetch failed')
+    expect(warns[0]).not.toContain('XYZ')
+    expect(warns[0]).not.toContain('"stack"')
   })
 })
 
@@ -504,5 +707,19 @@ describe('CORS', () => {
     expect(tx.headers.get('access-control-allow-origin')).toBe('*')
     const faucet = await preflight('/faucet')
     expect(faucet.headers.get('access-control-allow-methods')).toBe('GET')
+  })
+
+  it('lets other origins read the useful headers, on a 304 too', async () => {
+    const origin = { origin: 'https://bot.example' }
+    const first = await get(`/games/${GAME_ID}`, origin)
+    expect(first.headers.get('access-control-allow-origin')).toBe('*')
+    expect(first.headers.get('access-control-expose-headers')).toContain('x-request-id')
+    const again = await get(`/games/${GAME_ID}`, {
+      ...origin,
+      'if-none-match': first.headers.get('etag') ?? '',
+    })
+    expect(again.status).toBe(304)
+    expect(again.headers.get('access-control-allow-origin')).toBe('*')
+    expect(again.headers.get('access-control-expose-headers')).toContain('retry-after')
   })
 })

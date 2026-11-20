@@ -28,26 +28,35 @@ $$;
 --> statement-breakpoint
 -- Daily SOL cap (spec 9): reserve `p_lamports` for signature `p_sig` unless today's (UTC)
 -- reservations plus this one would pass `p_cap`. The advisory lock serialises concurrent
--- callers, so two requests cannot both squeeze under the cap.
+-- callers, so two requests cannot both squeeze under the cap. Returns 'reserved', 'over_cap', or
+-- 'duplicate' when `p_sig` already holds a reservation (the same signed transaction submitted
+-- again: the sponsor's signature is deterministic), which is never counted twice.
 CREATE OR REPLACE FUNCTION sponsor_reserve(
   p_sig text,
   p_wallet text,
   p_ip_hash text,
   p_lamports bigint,
   p_cap bigint
-) RETURNS boolean
+) RETURNS text
 LANGUAGE plpgsql AS $$
 DECLARE
   v_spent bigint;
 BEGIN
   PERFORM pg_advisory_xact_lock(724001);
+  IF EXISTS (SELECT 1 FROM sponsor_log WHERE sig = p_sig) THEN
+    RETURN 'duplicate';
+  END IF;
   SELECT coalesce(sum(lamports), 0) INTO v_spent FROM sponsor_log
     WHERE ts >= date_trunc('day', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC';
   IF v_spent + p_lamports > p_cap THEN
-    RETURN false;
+    RETURN 'over_cap';
   END IF;
   INSERT INTO sponsor_log (sig, wallet, ip_hash, lamports, ts)
-    VALUES (p_sig, p_wallet, p_ip_hash, p_lamports, now());
-  RETURN true;
+    VALUES (p_sig, p_wallet, p_ip_hash, p_lamports, now())
+    ON CONFLICT (sig) DO NOTHING;
+  IF NOT FOUND THEN
+    RETURN 'duplicate';
+  END IF;
+  RETURN 'reserved';
 END
 $$;

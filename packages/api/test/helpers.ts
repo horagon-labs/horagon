@@ -1,5 +1,7 @@
 // Test doubles for the API: an in-memory "chain" (just the RPC methods the API calls), a
 // PGlite DB seeded with one game and the market recorded in spike S1, and ApiDeps around them.
+
+import { Buffer } from 'node:buffer'
 import { readFileSync } from 'node:fs'
 import { type DbHandle, upsertMarket, upsertScheduledGames } from '@horagon/db'
 import { createTestDb } from '@horagon/db/testing'
@@ -19,7 +21,6 @@ import {
   type PublicKey,
   type SignatureStatus,
 } from '@solana/web3.js'
-import { Buffer } from 'buffer'
 import pino from 'pino'
 import type { ApiDeps, FaucetClient } from '../src/deps'
 
@@ -36,6 +37,10 @@ export const S1 = JSON.parse(
 ) as { swaps: SwapFixture[] }
 
 export const program = new HoragonProgram({ collateralMint: DEVNET_MUSDC_MINT })
+
+export const DEVNET_GENESIS_HASH = 'EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG'
+/** What a failing fake RPC call throws: a keyed URL that must never reach a client or a log. */
+export const RPC_FAILURE = 'fetch failed: https://secret-rpc.example/?api-key=XYZ'
 
 /** The S1 market account as of its first swap, re-pointed at Horagon's Authority PDA. */
 export function s1Market(index = 0) {
@@ -65,8 +70,13 @@ export class FakeChain {
   accounts = new Map<string, AccountInfo<Buffer>>()
   statuses = new Map<string, SignatureStatus>()
   simulateErr: unknown = null
+  simulateFails = false
   sendFails = false
+  /** getAccountInfo and getMultipleAccountsInfo throw. */
   accountsFail = false
+  genesisHash = DEVNET_GENESIS_HASH
+  genesisFails = false
+  genesisCalls = 0
   sent: Buffer[] = []
   simulated = 0
 
@@ -78,10 +88,11 @@ export class FakeChain {
     const self = this
     return {
       async getAccountInfo(k: PublicKey) {
+        if (self.accountsFail) throw new Error(RPC_FAILURE)
         return self.accounts.get(k.toBase58()) ?? null
       },
       async getMultipleAccountsInfo(ks: PublicKey[]) {
-        if (self.accountsFail) throw new Error('fetch failed')
+        if (self.accountsFail) throw new Error(RPC_FAILURE)
         return ks.map((k) => self.accounts.get(k.toBase58()) ?? null)
       },
       async getLatestBlockhash() {
@@ -93,12 +104,18 @@ export class FakeChain {
       async getSignatureStatuses(sigs: string[]) {
         return { context: { slot: 1 }, value: sigs.map((s) => self.statuses.get(s) ?? null) }
       },
+      async getGenesisHash() {
+        self.genesisCalls++
+        if (self.genesisFails) throw new Error(RPC_FAILURE)
+        return self.genesisHash
+      },
       async simulateTransaction() {
+        if (self.simulateFails) throw new Error(RPC_FAILURE)
         self.simulated++
         return { context: { slot: 1 }, value: { err: self.simulateErr, logs: [] } }
       },
       async sendRawTransaction(raw: Uint8Array) {
-        if (self.sendFails) throw new Error('fetch failed: https://secret-rpc.example/?api-key=XYZ')
+        if (self.sendFails) throw new Error(RPC_FAILURE)
         self.sent.push(Buffer.from(raw))
         return 'sent'
       },

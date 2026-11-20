@@ -1,4 +1,5 @@
-import { sql } from 'drizzle-orm'
+import { type SQL, sql } from 'drizzle-orm'
+import { PgDialect } from 'drizzle-orm/pg-core'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import {
   atasClosedAway,
@@ -21,6 +22,7 @@ import {
   marketsByPubkeys,
   marketsByStatus,
   putEvidence,
+  rateLimitRefund,
   rateLimitTake,
   recordSponsoredAtas,
   rowsOf,
@@ -392,19 +394,57 @@ describe('sponsor_reserve', () => {
   const r = { wallet: 'W', ipHash: 'h', lamports: 3_000_000n, capLamports: 7_000_000n }
 
   it('reserves under the daily cap, refuses past it, and frees on release', async () => {
-    expect(await sponsorReserve(h.db, { ...r, sig: 'a' })).toBe(true)
-    expect(await sponsorReserve(h.db, { ...r, sig: 'b' })).toBe(true)
-    expect(await sponsorReserve(h.db, { ...r, sig: 'c' })).toBe(false)
+    expect(await sponsorReserve(h.db, { ...r, sig: 'a' })).toBe('reserved')
+    expect(await sponsorReserve(h.db, { ...r, sig: 'b' })).toBe('reserved')
+    expect(await sponsorReserve(h.db, { ...r, sig: 'c' })).toBe('over_cap')
     await sponsorRelease(h.db, 'b')
-    expect(await sponsorReserve(h.db, { ...r, sig: 'c' })).toBe(true)
+    expect(await sponsorReserve(h.db, { ...r, sig: 'c' })).toBe('reserved')
     const startOfDay = new Date(new Date().toISOString().slice(0, 10))
     expect(await sponsorSpentSince(h.db, startOfDay)).toBe(6_000_000n)
   })
 
   it('does not count yesterday', async () => {
-    expect(await sponsorReserve(h.db, { ...r, lamports: 7_000_000n, sig: 'old' })).toBe(true)
+    expect(await sponsorReserve(h.db, { ...r, lamports: 7_000_000n, sig: 'old' })).toBe('reserved')
     await h.db.execute(sql`update sponsor_log set ts = now() - interval '2 days'`)
-    expect(await sponsorReserve(h.db, { ...r, lamports: 7_000_000n, sig: 'd' })).toBe(true)
+    expect(await sponsorReserve(h.db, { ...r, lamports: 7_000_000n, sig: 'd' })).toBe('reserved')
+  })
+
+  it('reports a signature already reserved as a duplicate and counts it once, even at the cap', async () => {
+    expect(await sponsorReserve(h.db, { ...r, sig: 'a' })).toBe('reserved')
+    expect(await sponsorReserve(h.db, { ...r, sig: 'a' })).toBe('duplicate')
+    expect(await sponsorReserve(h.db, { ...r, sig: 'b' })).toBe('reserved')
+    expect(await sponsorReserve(h.db, { ...r, sig: 'b' })).toBe('duplicate')
+    expect(await sponsorSpentSince(h.db, new Date(0))).toBe(6_000_000n)
+  })
+
+  it('throws instead of guessing when the function returns something unexpected', async () => {
+    const fake = { execute: async () => ({ rows: [{ result: 't' }] }) } as unknown as DbHandle['db']
+    await expect(sponsorReserve(fake, { ...r, sig: 'x' })).rejects.toThrow(/unexpected/)
+  })
+})
+
+describe('rateLimitRefund', () => {
+  const opts = { capacity: 2, refillPerSec: 2 / 3600 }
+  const tokens = async (key: string) =>
+    rowsOf<{ tokens: number }>(
+      await h.db.execute(sql`select tokens from rate_limits where key = ${key}`),
+    )[0]?.tokens
+
+  it('gives tokens back, never above capacity', async () => {
+    expect(await rateLimitTake(h.db, 'k:r', opts)).toBe(0)
+    expect(await rateLimitTake(h.db, 'k:r', opts)).toBe(0)
+    expect(await rateLimitTake(h.db, 'k:r', opts)).toBeGreaterThan(0)
+    await rateLimitRefund(h.db, 'k:r', { capacity: 2 })
+    expect(await rateLimitTake(h.db, 'k:r', opts)).toBe(0)
+    await rateLimitRefund(h.db, 'k:r', { cost: 5, capacity: 2 })
+    expect(await tokens('k:r')).toBe(2)
+  })
+
+  it('does nothing for a bucket that does not exist, and refuses a cost of 0 or less', async () => {
+    await rateLimitRefund(h.db, 'k:none', { capacity: 2 })
+    expect(await tokens('k:none')).toBeUndefined()
+    await expect(rateLimitRefund(h.db, 'k:r', { cost: 0, capacity: 2 })).rejects.toThrow(/cost/)
+    await expect(rateLimitRefund(h.db, 'k:r', { cost: -1, capacity: 2 })).rejects.toThrow(/cost/)
   })
 })
 
@@ -509,6 +549,34 @@ describe('sponsored ATAs', () => {
     await recordSponsoredAtas(h.db, [row('a', 'c2', 20)])
     const rows = await all()
     expect(rows[0]).toMatchObject({ closedSig: 'x1', closedTo: 'SPONSOR', closedAt: t(10) })
+  })
+
+  it('locks the ATAs of a batch in sorted order, so two recorders cannot deadlock', async () => {
+    const dialect = new PgDialect()
+    const locked: string[] = []
+    const spy = new Proxy(h.db, {
+      get(target, prop) {
+        if (prop !== 'transaction') return Reflect.get(target, prop, target)
+        return (fn: (tx: unknown) => Promise<unknown>) =>
+          target.transaction((tx) =>
+            fn(
+              new Proxy(tx, {
+                get(t, p) {
+                  const value = Reflect.get(t, p, t)
+                  if (p !== 'execute') return typeof value === 'function' ? value.bind(t) : value
+                  return (q: SQL) => {
+                    const { sql: text, params } = dialect.sqlToQuery(q)
+                    if (text.includes('pg_advisory_xact_lock')) locked.push(String(params[0]))
+                    return t.execute(q)
+                  }
+                },
+              }),
+            ),
+          )
+      },
+    })
+    await recordSponsoredAtas(spy, [row('c'), row('a'), row('b'), row('a', 'sig-a2', 5)])
+    expect(locked).toEqual(['a', 'b', 'c'])
   })
 
   it('markAtaClosed on an ATA with no open row changes nothing', async () => {

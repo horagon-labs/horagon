@@ -33,7 +33,10 @@ export interface ApiDeps {
   cluster: 'devnet' | 'localnet'
   program: HoragonProgram
   collateralMint: PublicKey
-  /** Absent: `/tx/submit` answers SPONSOR_REJECTED and `/tx/trade` builds unsponsored. */
+  /**
+   * Absent: `/tx/submit` answers SPONSOR_REJECTED, and so do `/tx/trade` and `/tx/claim` unless
+   * the request says `sponsored: false` (the user then pays the fee and rent).
+   */
   sponsor?: SponsorConfig
   faucet: FaucetClient
   /** Public origin used in `evidence_uri` and links, e.g. https://horagon.com. */

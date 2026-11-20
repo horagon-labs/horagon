@@ -20,11 +20,47 @@ export function parseSecretKey(value: string): Keypair {
   }
 }
 
-/** Spec 19.1: Horagon refuses mainnet everywhere. */
+/**
+ * Spec 19.1: Horagon refuses mainnet everywhere. This is the cheap check on the URL; the RPC's
+ * genesis hash is checked before the sponsor signs anything (`sponsor/submit.ts`).
+ */
 export function assertNotMainnet(rpcUrl: string): void {
   if (/mainnet/i.test(rpcUrl)) {
     throw new HoragonError('MAINNET_DISABLED', 'HORAGON_RPC_URL points at mainnet')
   }
+}
+
+/**
+ * A whole number from the environment, or `fallback` when unset. A bad value throws a fixed
+ * message that names the variable and never quotes the value.
+ */
+function wholeNumber(
+  env: Record<string, string | undefined>,
+  name: string,
+  fallback: number,
+  min: 0 | 1,
+): number {
+  const raw = env[name]
+  const n = raw === undefined || raw.trim() === '' ? fallback : Number(raw)
+  if (!Number.isSafeInteger(n) || n < min) {
+    throw new Error(`${name} must be a whole number of ${min} or more`)
+  }
+  return n
+}
+
+/** SOL from the environment as lamports, above 0. */
+function solAmount(
+  env: Record<string, string | undefined>,
+  name: string,
+  fallback: number,
+): bigint {
+  const raw = env[name]
+  const sol = raw === undefined || raw.trim() === '' ? fallback : Number(raw)
+  const lamports = Math.round(sol * 1e9)
+  if (!Number.isFinite(sol) || !Number.isSafeInteger(lamports) || lamports < 1) {
+    throw new Error(`${name} must be an amount of SOL above 0`)
+  }
+  return BigInt(lamports)
 }
 
 export function depsFromEnv(env: Record<string, string | undefined>, db?: Db): ApiDeps {
@@ -51,11 +87,12 @@ export function depsFromEnv(env: Record<string, string | undefined>, db?: Db): A
       ? {
           sponsor: {
             keypair: parseSecretKey(sponsorKey),
-            dailyCapLamports: BigInt(Math.round(Number(env.SPONSOR_DAILY_CAP_SOL ?? '2') * 1e9)),
-            txPerHour: Number(env.SPONSOR_TX_PER_HOUR ?? '30'),
+            dailyCapLamports: solAmount(env, 'SPONSOR_DAILY_CAP_SOL', 2),
+            txPerHour: wholeNumber(env, 'SPONSOR_TX_PER_HOUR', 30, 1),
+            // 0 is allowed: the sponsor then opens no new token accounts (RATE_LIMITED).
             atasPerDay: {
-              wallet: Number(env.SPONSOR_ATAS_PER_WALLET_DAY ?? '26'),
-              ip: Number(env.SPONSOR_ATAS_PER_IP_DAY ?? '78'),
+              wallet: wholeNumber(env, 'SPONSOR_ATAS_PER_WALLET_DAY', 26, 0),
+              ip: wholeNumber(env, 'SPONSOR_ATAS_PER_IP_DAY', 78, 0),
             },
           },
         }

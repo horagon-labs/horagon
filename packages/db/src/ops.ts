@@ -13,7 +13,14 @@ import {
   sql,
 } from 'drizzle-orm'
 import { type Db, rowsOf } from './client'
-import { keeperHeartbeats, opsEvents, sponsoredAtas, sponsorLog, wallets } from './schema'
+import {
+  keeperHeartbeats,
+  opsEvents,
+  rateLimits,
+  sponsoredAtas,
+  sponsorLog,
+  wallets,
+} from './schema'
 
 export type SponsoredAtaRow = typeof sponsoredAtas.$inferSelect
 
@@ -36,16 +43,45 @@ export async function rateLimitTake(
   return wait > 0 ? Math.ceil(wait) : 0
 }
 
+/**
+ * Put `cost` tokens back into bucket `key` (at most up to `capacity`): a take whose action did
+ * not happen, for a reason that was not the caller's. A bucket that does not exist is left alone.
+ */
+export async function rateLimitRefund(
+  db: Db,
+  key: string,
+  opts: { cost?: number; capacity: number },
+): Promise<void> {
+  const cost = opts.cost ?? 1
+  if (!(cost > 0) || !Number.isFinite(cost)) {
+    throw new Error('rateLimitRefund: cost must be a finite number above 0')
+  }
+  await db
+    .update(rateLimits)
+    .set({
+      tokens: sql`least(${opts.capacity}::double precision, ${rateLimits.tokens} + ${cost}::double precision)`,
+    })
+    .where(eq(rateLimits.key, key))
+}
+
+/**
+ * 'duplicate': this signature already holds a reservation (the same signed transaction
+ * submitted again), which is not counted twice.
+ */
+export type SponsorReservation = 'reserved' | 'over_cap' | 'duplicate'
+
 /** Reserve the worst-case lamports of one sponsored tx under the daily cap (spec 9). */
 export async function sponsorReserve(
   db: Db,
   r: { sig: string; wallet: string; ipHash: string; lamports: bigint; capLamports: bigint },
-): Promise<boolean> {
+): Promise<SponsorReservation> {
   const res = await db.execute(
-    sql`select sponsor_reserve(${r.sig}, ${r.wallet}, ${r.ipHash}, ${r.lamports.toString()}::bigint, ${r.capLamports.toString()}::bigint) as ok`,
+    sql`select sponsor_reserve(${r.sig}, ${r.wallet}, ${r.ipHash}, ${r.lamports.toString()}::bigint, ${r.capLamports.toString()}::bigint) as result`,
   )
-  const ok = rowsOf<{ ok: boolean | string }>(res)[0]?.ok
-  return ok === true || ok === 't' || ok === 'true'
+  const result = rowsOf<{ result: string }>(res)[0]?.result
+  if (result === 'reserved' || result === 'over_cap' || result === 'duplicate') return result
+  // Fail closed: anything else must never read as "reserved".
+  throw new Error('sponsor_reserve returned an unexpected result')
 }
 
 /** Drop a reservation whose transaction never reached the network. */
@@ -78,7 +114,9 @@ export async function recordSponsoredAtas(
   const byAta = new Map<string, typeof rows>()
   for (const r of rows) byAta.set(r.ata, [...(byAta.get(r.ata) ?? []), r])
   await db.transaction(async (tx) => {
-    for (const [ata, incoming] of byAta) {
+    // Lock in sorted order: two recorders taking the same addresses can never deadlock.
+    for (const ata of [...byAta.keys()].sort()) {
+      const incoming = byAta.get(ata) ?? []
       // Serialise recorders of the same address (the partial unique index is the backstop).
       await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${ata}))`)
       const existing = await tx.select().from(sponsoredAtas).where(eq(sponsoredAtas.ata, ata))

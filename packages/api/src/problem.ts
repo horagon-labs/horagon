@@ -33,6 +33,8 @@ export class ApiError extends Error {
       reason?: string
       programCode?: number
       retryAfterSecs?: number
+      /** A transaction signature the client should look up (RFC 9457 extension member). */
+      signature?: string
       /** What went wrong underneath, for the logs only: never serialized into the response. */
       cause?: unknown
     } = {},
@@ -51,6 +53,7 @@ export interface ProblemBody {
   hint?: string
   programCode?: number
   reason?: string
+  signature?: string
   requestId?: string
 }
 
@@ -66,6 +69,7 @@ export function problemBody(err: unknown, requestId?: string): ProblemBody {
       hint: err.extra.hint ?? DEFAULT_HINTS[err.code],
       ...(err.extra.programCode === undefined ? {} : { programCode: err.extra.programCode }),
       ...(err.extra.reason === undefined ? {} : { reason: err.extra.reason }),
+      ...(err.extra.signature === undefined ? {} : { signature: err.extra.signature }),
       ...(requestId ? { requestId } : {}),
     }
   }

@@ -42,6 +42,7 @@ import {
 import { bodyLimit } from 'hono/body-limit'
 import { cors } from 'hono/cors'
 import { etag, RETAINED_304_HEADERS } from 'hono/etag'
+import { HTTPException } from 'hono/http-exception'
 import { requestId } from 'hono/request-id'
 import { ChainReader } from './chain'
 import type { ApiDeps } from './deps'
@@ -71,14 +72,41 @@ const body = <T extends z.ZodType>(schema: T) => ({
   body: { content: { 'application/json': { schema } }, required: true },
 })
 
-function zodDetail(error: z.ZodError): string {
+/** Where an input lives, in the words of the API docs. */
+const TARGET_LABEL: Readonly<Record<string, string>> = {
+  json: 'body',
+  query: 'query',
+  param: 'params',
+}
+
+function zodDetail(error: z.ZodError, target: string): string {
+  const label = TARGET_LABEL[target] ?? target
   return error.issues
     .slice(0, 3)
-    .map((i) => `${i.path.join('.') || 'body'}: ${i.message}`)
+    .map((i) => `${[label, ...i.path].join('.')}: ${i.message}`)
     .join('; ')
 }
 
-/** Client IP as Vercel (and most proxies) report it; only ever stored hashed. */
+/** Hono's own 4xx (bad JSON, wrong content type), told in words that echo nothing back. */
+function httpProblem(err: HTTPException): ApiError {
+  const message =
+    err.status === 400
+      ? 'The request body is not valid JSON'
+      : err.status === 415
+        ? 'Send the request body as application/json'
+        : `The request was refused (HTTP ${err.status})`
+  return new ApiError('INVALID_INPUT', message, { status: err.status })
+}
+
+/** Headers a browser on another origin may read: limits, request ids, caching, evidence. */
+const EXPOSED_HEADERS = ['retry-after', 'x-request-id', 'etag', 'x-evidence-sha256']
+
+/**
+ * Client IP: the left-most `x-forwarded-for` entry, then `x-real-ip`. Only ever stored hashed.
+ * This is safe only behind a proxy that overwrites the header (Vercel does); anywhere else a
+ * client can choose its own IP bucket. A request without either header lands in one shared
+ * bucket, 'unknown'.
+ */
 function clientIp(headers: Headers): string {
   const fwd = headers.get('x-forwarded-for')
   return fwd?.split(',')[0]?.trim() || headers.get('x-real-ip') || 'unknown'
@@ -91,7 +119,7 @@ export function createApp(deps: ApiDeps) {
     defaultHook: (result, c) => {
       if (!result.success) {
         return problemResponse(
-          new ApiError('INVALID_INPUT', zodDetail(result.error)),
+          new ApiError('INVALID_INPUT', zodDetail(result.error, result.target)),
           c.get('requestId'),
         )
       }
@@ -116,9 +144,14 @@ export function createApp(deps: ApiDeps) {
   // `/tx/*` first: a cors middleware answers a preflight itself, so the first match decides it.
   app.use(
     '/tx/*',
-    cors({ origin: '*', allowMethods: ['GET', 'POST'], allowHeaders: ['content-type'] }),
+    cors({
+      origin: '*',
+      allowMethods: ['GET', 'POST'],
+      allowHeaders: ['content-type'],
+      exposeHeaders: EXPOSED_HEADERS,
+    }),
   )
-  app.use('*', cors({ origin: '*', allowMethods: ['GET'] }))
+  app.use('*', cors({ origin: '*', allowMethods: ['GET'], exposeHeaders: EXPOSED_HEADERS }))
   app.use(
     '*',
     bodyLimit({
@@ -141,15 +174,37 @@ export function createApp(deps: ApiDeps) {
         ),
     }),
   )
-  // A 304 keeps only the retained headers: add the request id to them.
+  // A 304 keeps only the retained headers: add the request id and the CORS headers to them.
   app.use(
     '/games/*',
-    etag({ weak: true, retainedHeaders: [...RETAINED_304_HEADERS, 'x-request-id'] }),
+    etag({
+      weak: true,
+      retainedHeaders: [
+        ...RETAINED_304_HEADERS,
+        'x-request-id',
+        'access-control-allow-origin',
+        'access-control-expose-headers',
+      ],
+    }),
   )
   app.onError((err, c) => {
-    if (!(err instanceof ApiError))
-      deps.log.error({ error: errorSummary(err), requestId: c.get('requestId') }, 'unhandled')
-    return problemResponse(err, c.get('requestId'))
+    const rid = c.get('requestId')
+    // Hono's 4xx are the client's mistake: answer them, nothing to log.
+    if (err instanceof HTTPException && err.status < 500) {
+      return problemResponse(httpProblem(err), rid)
+    }
+    if (err instanceof ApiError) {
+      // An ApiError is meant for the client; only what went wrong underneath is worth a line.
+      if (err.extra.cause !== undefined) {
+        deps.log.warn(
+          { error: errorSummary(err.extra.cause), code: err.code, requestId: rid },
+          'request failed',
+        )
+      }
+    } else {
+      deps.log.error({ error: errorSummary(err), requestId: rid }, 'unhandled')
+    }
+    return problemResponse(err, rid)
   })
   app.notFound((c) =>
     problemResponse(new ApiError('NOT_FOUND', `No route ${c.req.path}`), c.get('requestId')),

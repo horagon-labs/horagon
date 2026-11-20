@@ -1,5 +1,7 @@
 // The work behind each route, free of HTTP: quote, build trade and claim transactions, read
 // transaction status and positions. Routes only parse, call one of these and serialize.
+
+import { Buffer } from 'node:buffer'
 import {
   getMarket,
   latestPrices,
@@ -29,7 +31,6 @@ import {
   tradeAtas,
 } from '@horagon/sdk'
 import { PublicKey, type VersionedTransaction } from '@solana/web3.js'
-import { Buffer } from 'buffer'
 import { type ChainReader, rpc, tokenAmount } from './chain'
 import type { ApiDeps } from './deps'
 import { aggregatePositions } from './positions'

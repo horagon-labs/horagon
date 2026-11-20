@@ -4,13 +4,19 @@
 //   3. rate-limit the verified signer and hashed IP  -> RATE_LIMITED
 //   4. validate the allowlist on the parsed object    -> SPONSOR_REJECTED
 //   5. no new sponsored ATAs for a wallet that closed sponsor-paid ones to another address
-//   6. sign that same object
-//   7. reserve the worst-case lamports under the daily cap (atomic) -> RATE_LIMITED
-//   8. simulate with sigVerify; release on failure   -> SLIPPAGE_EXCEEDED, ... PROGRAM_ERROR
-//   9. take the daily ATA budget (wallet and hashed IP), then send with skipPreflight and
-//      return the signature at once; release if either fails
-// No step before 8 calls the RPC (apart from one cached rent read), and nothing from an
-// exception reaches the client, or the logs beyond `errorSummary`.
+//   6. the RPC is not mainnet by its genesis hash (once per process; fails closed) -> 400/502
+//   7. sign that same object
+//   8. reserve the worst-case lamports under the daily cap (atomic) -> RATE_LIMITED; the same
+//      signature already reserved is the same transaction again: answer it, send nothing
+//   9. simulate with sigVerify; release on failure   -> SLIPPAGE_EXCEEDED, ... PROGRAM_ERROR
+//  10. take the daily ATA budget (wallet and hashed IP); release if it is used up
+//  11. send with skipPreflight and return the signature at once. A send error may come after
+//      the node took the transaction, so the reservation and the ATA budget stay spent and the
+//      502 names the signature to look up.
+// No step before 9 calls the RPC (apart from the genesis check and one rent read, both made
+// once), and nothing from an exception reaches the client, or the logs beyond `errorSummary`.
+
+import { Buffer } from 'node:buffer'
 import {
   atasClosedAway,
   listMarketMints,
@@ -18,10 +24,10 @@ import {
   sponsorRelease,
   sponsorReserve,
 } from '@horagon/db'
-import { errorSummary, fromProgramError, PROTOCOL_DAO } from '@horagon/sdk'
+import { assertNotMainnetGenesis, errorSummary, fromProgramError, PROTOCOL_DAO } from '@horagon/sdk'
 import { ComputeBudgetProgram, PublicKey, VersionedTransaction } from '@solana/web3.js'
 import bs58 from 'bs58'
-import { Buffer } from 'buffer'
+import { RPC_DOWN_HINT, rpc } from '../chain'
 import type { ApiDeps, SponsorConfig } from '../deps'
 import { ApiError } from '../problem'
 import { DEFAULT_SPONSOR_LIMITS, type SponsorPolicy, type SponsorVerdict } from './policy'
@@ -30,6 +36,18 @@ import { validateSponsoredTransaction } from './validate'
 const LAMPORTS_PER_SIGNATURE = 5_000n
 /** Rent-exempt minimum of a 165-byte SPL token account; read once from the RPC, then kept. */
 let tokenAccountRent: bigint | undefined
+/** Connections whose genesis hash was read and is not mainnet's. A failed check is not kept. */
+const notMainnet = new WeakSet<object>()
+
+/**
+ * Spec 19.1, failing closed: the sponsor signs nothing until the RPC has shown, by its genesis
+ * hash, that it is not mainnet (MAINNET_DISABLED, 400). An RPC error here is NETWORK (502).
+ */
+async function assertNotMainnetRpc(deps: ApiDeps): Promise<void> {
+  if (notMainnet.has(deps.connection)) return
+  await rpc('getGenesisHash', () => assertNotMainnetGenesis(deps.connection))
+  notMainnet.add(deps.connection)
+}
 
 export function parseTransaction(base64: string): VersionedTransaction {
   try {
@@ -203,22 +221,31 @@ export async function submitSponsored(
     )
   }
 
+  await assertNotMainnetRpc(deps)
   tx.sign([sponsor.keypair])
   const first = tx.signatures[0]
   if (!first) throw new ApiError('INVALID_INPUT', 'no fee payer signature slot')
   const signature = bs58.encode(first)
 
   if (tokenAccountRent === undefined) {
-    tokenAccountRent = BigInt(await deps.connection.getMinimumBalanceForRentExemption(165))
+    const rent = await rpc('getMinimumBalanceForRentExemption', () =>
+      deps.connection.getMinimumBalanceForRentExemption(165),
+    )
+    tokenAccountRent = BigInt(rent)
   }
-  const reserved = await sponsorReserve(deps.db, {
+  const reservation = await sponsorReserve(deps.db, {
     sig: signature,
     wallet,
     ipHash,
     lamports: exposureLamports(tx, tokenAccountRent, ataCreates),
     capLamports: sponsor.dailyCapLamports,
   })
-  if (!reserved) {
+  if (reservation === 'duplicate') {
+    // The sponsor's signature is deterministic: this exact transaction was submitted before.
+    deps.log.info({ sig: signature, wallet }, 'sponsored tx already submitted')
+    return { signature }
+  }
+  if (reservation === 'over_cap') {
     throw new ApiError('RATE_LIMITED', "Today's sponsor budget is used up", {
       hint: 'Retry after 00:00 UTC, or build the transaction with sponsored: false and pay the fee.',
       retryAfterSecs: secondsToUtcMidnight(deps.now()),
@@ -238,13 +265,25 @@ export async function submitSponsored(
       })
     }
     if (ataCreates > 0) await takeAtaBudget(deps.db, sponsor, wallet, ipHash, ataCreates)
-    await deps.connection.sendRawTransaction(tx.serialize(), { skipPreflight: true, maxRetries: 3 })
   } catch (e) {
+    // Nothing was sent: the reservation goes back.
     await sponsorRelease(deps.db, signature)
     if (e instanceof ApiError) throw e
-    deps.log.warn({ error: errorSummary(e), sig: signature }, 'sponsor send failed')
+    deps.log.warn({ error: errorSummary(e), sig: signature }, 'sponsor simulate failed')
     throw new ApiError('NETWORK', 'Could not reach the Solana RPC; nothing was sent', {
       status: 502,
+      hint: RPC_DOWN_HINT,
+    })
+  }
+  try {
+    await deps.connection.sendRawTransaction(tx.serialize(), { skipPreflight: true, maxRetries: 3 })
+  } catch (e) {
+    // The node may have taken it before the error: keep the reservation and the ATA budget.
+    deps.log.warn({ error: errorSummary(e), sig: signature }, 'sponsor send failed')
+    throw new ApiError('NETWORK', 'The RPC did not confirm it received the transaction', {
+      status: 502,
+      signature,
+      hint: `It may still land. Check GET /api/v1/tx/${signature} before building a new trade.`,
     })
   }
   deps.log.info({ sig: signature, wallet }, 'sponsored tx sent')
