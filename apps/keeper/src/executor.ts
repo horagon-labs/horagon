@@ -15,7 +15,8 @@
 //   - WAIT, polling once a second and re-broadcasting the same bytes (same signature, so it
 //     cannot land twice), while the attempt is `processed`, or unseen with its height still
 //     valid, or a status or height read failed (unknown: only a successful read proves
-//     anything).
+//     anything). The exception: a newest attempt known to have landed with an instruction
+//     error never waits; its ProgramFailure is rethrown.
 //   - GIVE UP at the 90 s cap with an UnresolvedAttempt error ("may still land"): rebuilding
 //     there is exactly the double landing. The caller's next tick re-plans from chain state.
 // Left open: the cap counts injected sleeps, and each poll's RPC calls have no timeout of their
@@ -287,6 +288,9 @@ export class TxSender {
       clean = state.dead ? clean + 1 : 0
       if (clean >= 2) return null
       const newest = sent[sent.length - 1] as Sent
+      // Known to have landed with an instruction error, whatever the lagging reads say now:
+      // earlier attempts are already proven dead, so the caller rethrows its ProgramFailure.
+      if (newest.failure) return null
       if (waited >= MAX_WAIT_MS) {
         const message = `${spec.label}: unresolved after ${MAX_WAIT_MS / 1000} s, ${newest.signature} may still land`
         this.opts.log.warn(

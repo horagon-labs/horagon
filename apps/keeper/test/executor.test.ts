@@ -716,6 +716,30 @@ describe('TxSender: unresolved attempts', () => {
     expect(a.sent.filter((k) => k.startsWith('tx-unresolved:'))).toEqual([])
     expect(sleeps.filter((ms) => ms === 1_000)).toHaveLength(1)
   })
+
+  it('reports a landed failure as that failure when later status reads are null and height reads throw', async () => {
+    let reads = 0
+    let heights = 0
+    const { conn } = fakeConnection({
+      send: [new Error('timeout')],
+      confirm: [{ err: { InstructionError: [2, { Custom: 6005 }] } }],
+      // Two clean reads let attempt 2 start; afterwards the node lags: null statuses, no height.
+      statuses: () => {
+        reads++
+        return [null]
+      },
+      height: () => {
+        if (heights++ < 2) return 1_000
+        throw new Error('height down')
+      },
+    })
+    const a = alerts()
+    const p = sender([conn], { alerts: a.alerter }).send(spec({ instructions: [horagonIx] }))
+    await expect(p).rejects.toBeInstanceOf(ProgramFailure)
+    await expect(p).rejects.toMatchObject({ program: 'horagon', code: 6005 })
+    expect(a.sent.filter((k) => k.startsWith('tx-unresolved:'))).toEqual([])
+    expect(reads).toBeGreaterThan(2)
+  })
 })
 
 describe('TxSender: retries and failover', () => {

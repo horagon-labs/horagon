@@ -303,8 +303,8 @@ export interface StopState {
   count: number
   /** When this market last warned; kept across signature changes. */
   warnedAt: number
-  /** An `index-stuck` send has been attempted (the alerter dedupes repeats). */
-  alerted: boolean
+  /** @deprecated Never read; the alerter dedupes repeats. Kept optional for type compatibility. */
+  alerted?: boolean
 }
 
 /** Consecutive stops (about 5 minutes at the 5 s loop) before `index-stuck` is sent. */
@@ -386,9 +386,7 @@ async function noteStop(deps: IndexerDeps, m: MarketRow, sig: string): Promise<v
   const now = deps.now()
   const prev = stops.get(m.pubkey)
   const st: StopState =
-    prev && prev.sig === sig
-      ? prev
-      : { sig, count: 0, warnedAt: prev?.warnedAt ?? -Infinity, alerted: false }
+    prev && prev.sig === sig ? prev : { sig, count: 0, warnedAt: prev?.warnedAt ?? -Infinity }
   st.count++
   stops.set(m.pubkey, st)
   if (now - st.warnedAt >= WARN_EVERY_SECS) {
@@ -399,7 +397,6 @@ async function noteStop(deps: IndexerDeps, m: MarketRow, sig: string): Promise<v
     )
   }
   if (st.count >= STUCK_AFTER) {
-    st.alerted = true
     await deps.alerts.send(
       `index-stuck:${m.pubkey}`,
       `Indexing of ${m.gameId} (market ${m.pubkey}) is stuck: signature ${sig} has been unreadable for ${st.count} passes`,

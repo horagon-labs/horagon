@@ -568,7 +568,7 @@ describe('indexOnce does not skip past a transaction it could not read', () => {
     expect(await cursor()).toBeNull()
   })
 
-  it('sends one index-stuck alert after 60 stops on the same signature, and resets on recovery', async () => {
+  it('sends an index-stuck alert on every stop from the 60th on the same signature, and resets on recovery', async () => {
     chain = new Map([['s1', null]])
     order = ['s1']
     for (let i = 0; i < 59; i++) await indexOnce(deps())
