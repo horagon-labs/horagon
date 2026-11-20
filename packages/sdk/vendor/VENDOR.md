@@ -26,8 +26,12 @@ The SDK in the repository is current, but not published.
 - `tsup.config.ts`: builds the `index` and `math` entries to ESM, CJS and `.d.ts`.
 
 The package type-checks with its own upstream `tsconfig.json`; Biome skips `vendor/`.
-`@horagon/sdk` reads the IDL in tests (error codes, instruction discriminators) and, from
-Tier 1, wraps this package behind `@horagon/sdk/pm-amm`.
+`@horagon/sdk` reads the IDL in tests (error codes, instruction discriminators). It does not
+import this package at run time: `@horagon/sdk/pm-amm` builds its own instructions
+(`src/pm-amm/ix.ts`) and `src/tx` (exported from the package root) its own transactions. Never send a sponsored
+transaction through the vendored `send.*` helpers: they attach a 1,400,000 CU limit, above the
+sponsor's 1,000,000 cap, so the sponsor refuses them with `COMPUTE_BUDGET`. Horagon's builder
+uses 800,000 (`SWAP_COMPUTE_UNITS`).
 
 ## Updating
 

@@ -72,12 +72,43 @@
         "default": "./dist/program.cjs"
       }
     },
-    "./package.json": "./package.json"
+    "./errors": {
+      "import": {
+        "types": "./dist/errors.d.ts",
+        "default": "./dist/errors.js"
+      },
+      "require": {
+        "types": "./dist/errors.d.cts",
+        "default": "./dist/errors.cjs"
+      }
+    },
+    "./replay": {
+      "import": {
+        "types": "./dist/replay.d.ts",
+        "default": "./dist/replay.js"
+      },
+      "require": {
+        "types": "./dist/replay.d.cts",
+        "default": "./dist/replay.cjs"
+      }
+    },
+    "./package.json": "./package.json",
+    "./client": {
+      "import": {
+        "types": "./dist/client.d.ts",
+        "default": "./dist/client.js"
+      },
+      "require": {
+        "types": "./dist/client.d.cts",
+        "default": "./dist/client.cjs"
+      }
+    }
   },
   "files": [
     "dist",
     "idl",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ],
   "scripts": {
     "build": "tsup",

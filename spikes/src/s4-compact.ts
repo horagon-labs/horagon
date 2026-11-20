@@ -17,6 +17,8 @@ import { join, resolve } from 'node:path'
 import { createInterface } from 'node:readline'
 import { pipeline } from 'node:stream/promises'
 import { createGzip } from 'node:zlib'
+// The fixture format lives in `@horagon/sdk/replay`, shared with the keeper's replay mode.
+import type { ReplayFrame, ReplayGameInput as ReplayGame } from '@horagon/sdk/replay'
 import {
   type EspnScoreboard,
   espnStatus,
@@ -32,29 +34,6 @@ import {
 } from './lib/raw-sample'
 
 export const REPLAY_DIR = join(import.meta.dirname, '../../tests/fixtures/replay')
-
-export interface ReplayFrame {
-  t: string
-  source: 'nba' | 'espn'
-  status: FrameStatus
-  period: number
-  clock: string
-  homeScore: number
-  awayScore: number
-}
-
-/** Fixture format read by the keeper's replay mode (Tier 1). */
-export interface ReplayGame {
-  schema: 'horagon.replay.v0'
-  /** Game date in US Eastern time, as the NBA schedules it. */
-  gameDate: string
-  home: string
-  away: string
-  tipoffUtc: string
-  nbaGameId?: string
-  espnEventId?: string
-  frames: ReplayFrame[]
-}
 
 interface RawLine {
   t: string
