@@ -1,6 +1,6 @@
 {
-  "id": "4726bb7a-34cb-4b64-bc56-4ffd90a82b15",
-  "prevId": "e1a5158c-7b22-47c7-a434-456f9dbf5efb",
+  "id": "34dd74f0-343b-4b77-b607-b0694012b91b",
+  "prevId": "b9faf234-cb1c-4626-b4f5-b5a981469765",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -907,7 +907,7 @@
         "ata": {
           "name": "ata",
           "type": "text",
-          "primaryKey": true,
+          "primaryKey": false,
           "notNull": true
         },
         "wallet": {
@@ -960,6 +960,22 @@
         }
       },
       "indexes": {
+        "sponsored_atas_open_idx": {
+          "name": "sponsored_atas_open_idx",
+          "columns": [
+            {
+              "expression": "ata",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "with": {},
+          "method": "btree",
+          "where": "\"sponsored_atas\".\"closed_at\" is null",
+          "concurrently": false
+        },
         "sponsored_atas_wallet_idx": {
           "name": "sponsored_atas_wallet_idx",
           "columns": [
@@ -977,7 +993,12 @@
         }
       },
       "foreignKeys": {},
-      "compositePrimaryKeys": {},
+      "compositePrimaryKeys": {
+        "sponsored_atas_ata_created_sig_pk": {
+          "name": "sponsored_atas_ata_created_sig_pk",
+          "columns": ["ata", "created_sig"]
+        }
+      },
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},

@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import {
   atasClosedAway,
   type DbHandle,
@@ -8,7 +8,9 @@ import {
   getGame,
   getHeartbeat,
   heartbeat,
+  insertPricePoint,
   insertTrades,
+  latestPrices,
   listGames,
   listIndexableMarkets,
   listMarketTrades,
@@ -22,6 +24,7 @@ import {
   rateLimitTake,
   recordSponsoredAtas,
   rowsOf,
+  schema,
   setFeatured,
   setWalletKind,
   sponsoredAtasToCheck,
@@ -42,6 +45,12 @@ let h: DbHandle
 beforeAll(async () => {
   h = await createTestDb()
 })
+// Every test starts from empty tables, so each one is self-contained (run alone with -t, or reordered).
+beforeEach(async () => {
+  await h.db.execute(
+    sql`truncate table evidence, game_snapshots, resolution_drafts, markets, games, trades, price_points, redeems_claims, wallets, sponsor_log, sponsored_atas, rate_limits, keeper_heartbeats, ops_events restart identity`,
+  )
+})
 afterAll(async () => {
   await h.close()
 })
@@ -59,7 +68,12 @@ const game = (id: string, over: Partial<Parameters<typeof upsertScheduledGames>[
   p0: 0.6,
   ...over,
 })
-const market = (pubkey: string, gameId: string, kind = 0) => ({
+const market = (
+  pubkey: string,
+  gameId: string,
+  over: Partial<ReturnType<typeof baseMarket>> = {},
+) => ({ ...baseMarket(pubkey, gameId), ...over })
+const baseMarket = (pubkey: string, gameId: string, kind = 0) => ({
   pubkey,
   gameId,
   kind,
@@ -73,6 +87,29 @@ const market = (pubkey: string, gameId: string, kind = 0) => ({
   status: 'open',
 })
 
+const seedGames = async (...ids: string[]) =>
+  upsertScheduledGames(
+    h.db,
+    ids.map((id) => game(id)),
+  )
+
+const TABLES = [
+  'evidence',
+  'game_snapshots',
+  'games',
+  'keeper_heartbeats',
+  'markets',
+  'ops_events',
+  'price_points',
+  'rate_limits',
+  'redeems_claims',
+  'resolution_drafts',
+  'sponsor_log',
+  'sponsored_atas',
+  'trades',
+  'wallets',
+]
+
 describe('migrations', () => {
   it('create every Tier 1 table and both functions', async () => {
     const tables = rowsOf<{ table_name: string }>(
@@ -80,23 +117,7 @@ describe('migrations', () => {
         sql`select table_name from information_schema.tables where table_schema = 'public' order by 1`,
       ),
     ).map((r) => r.table_name)
-    expect(tables).toEqual(
-      expect.arrayContaining([
-        'evidence',
-        'game_snapshots',
-        'games',
-        'keeper_heartbeats',
-        'markets',
-        'ops_events',
-        'price_points',
-        'rate_limits',
-        'redeems_claims',
-        'resolution_drafts',
-        'sponsor_log',
-        'trades',
-        'wallets',
-      ]),
-    )
+    expect(tables).toEqual(TABLES)
     const fns = rowsOf<{ proname: string }>(
       await h.db.execute(
         sql`select proname from pg_proc where proname in ('rate_limit_take', 'sponsor_reserve') order by 1`,
@@ -106,9 +127,20 @@ describe('migrations', () => {
   })
 })
 
+describe('rowsOf', () => {
+  it('accepts a plain array (postgres-js) and { rows } (PGlite), and throws otherwise', () => {
+    expect(rowsOf([{ a: 1 }])).toEqual([{ a: 1 }])
+    expect(rowsOf({ rows: [{ a: 2 }] })).toEqual([{ a: 2 }])
+    expect(() => rowsOf({})).toThrow(/unrecognised/)
+    expect(() => rowsOf({ rows: 'x' })).toThrow(/unrecognised/)
+    expect(() => rowsOf(null)).toThrow(/unrecognised/)
+    expect(() => rowsOf(undefined)).toThrow(/unrecognised/)
+  })
+})
+
 describe('games', () => {
   it('a schedule pass never rolls a live game back or erases its score', async () => {
-    await upsertScheduledGames(h.db, [game('nba-1')])
+    await seedGames('nba-1')
     await updateGameLive(h.db, 'nba-1', {
       status: 'live',
       homeScore: 30,
@@ -126,9 +158,20 @@ describe('games', () => {
 
   it('lists games in a window with their markets, and filters by status', async () => {
     await upsertScheduledGames(h.db, [
+      game('nba-1'),
       game('nba-2', { scheduledTipoff: new Date('2026-11-20T02:00:00Z') }),
       game('nba-3', { scheduledTipoff: new Date('2026-11-22T02:00:00Z') }),
     ])
+    await updateGameLive(h.db, 'nba-1', {
+      status: 'live',
+      homeScore: 1,
+      awayScore: 0,
+      period: 1,
+      clockSecs: 600,
+      periods: [],
+      modelProb: null,
+      feedUpdatedAt: new Date(),
+    })
     await upsertMarket(h.db, market('M2', 'nba-2'))
     const from = new Date('2026-11-19T12:00:00Z')
     const to = new Date('2026-11-20T12:00:00Z')
@@ -141,6 +184,7 @@ describe('games', () => {
   })
 
   it('setFeatured marks exactly the given games of that date', async () => {
+    await seedGames('nba-1', 'nba-2')
     await setFeatured(h.db, '2026-11-19', ['nba-2'])
     await setFeatured(h.db, '2026-11-19', ['nba-1'])
     const rows = await listGames(h.db, { from: new Date(0), to: new Date('2030-01-01') })
@@ -148,6 +192,7 @@ describe('games', () => {
   })
 
   it('never overwrites a proposed draft, but replaces a rejected one', async () => {
+    await seedGames('nba-1')
     const d = {
       gameId: 'nba-1',
       status: 'final',
@@ -181,15 +226,34 @@ describe('games', () => {
   })
 
   it('stores evidence verbatim', async () => {
+    await seedGames('nba-1')
     await putEvidence(h.db, { gameId: 'nba-1', kind: 0, json: '{"a":1}', hash: 'ab' })
     expect(await getEvidence(h.db, 'nba-1', 0)).toEqual({ json: '{"a":1}', hash: 'ab' })
     expect(await getEvidence(h.db, 'nba-1', 1)).toBeNull()
   })
 })
 
+const trade = (sig: string, over: Partial<Parameters<typeof insertTrades>[1][0]> = {}) => ({
+  sig,
+  ixIndex: 2,
+  market: 'M1',
+  wallet: 'W1',
+  direction: 'usdcToYes',
+  usdcAmount: 10_000_000n,
+  usdcDelta: -10_000_000n,
+  yesDelta: 15_000_000n,
+  noDelta: 0n,
+  fee: 200_000n,
+  slot: 5n,
+  blockTime: new Date('2026-11-20T01:00:00Z'),
+  ...over,
+})
+
 describe('markets and activity', () => {
   it('indexes markets until a day after recycling', async () => {
+    await seedGames('nba-1', 'nba-2', 'nba-3')
     await upsertMarket(h.db, market('M1', 'nba-1'))
+    await upsertMarket(h.db, market('M2', 'nba-2'))
     await upsertMarket(h.db, market('M3', 'nba-3'))
     const now = new Date('2026-11-21T00:00:00Z')
     await updateMarket(h.db, 'M3', {
@@ -205,20 +269,7 @@ describe('markets and activity', () => {
   })
 
   it('ignores a duplicate trade (same sig and ix index)', async () => {
-    const t = {
-      sig: 'S1',
-      ixIndex: 2,
-      market: 'M1',
-      wallet: 'W1',
-      direction: 'usdcToYes',
-      usdcAmount: 10_000_000n,
-      usdcDelta: -10_000_000n,
-      yesDelta: 15_000_000n,
-      noDelta: 0n,
-      fee: 200_000n,
-      slot: 5n,
-      blockTime: new Date('2026-11-20T01:00:00Z'),
-    }
+    const t = trade('S1')
     await insertTrades(h.db, [t, t])
     await insertTrades(h.db, [t])
     const { trades } = await walletActivity(h.db, 'W1')
@@ -229,16 +280,30 @@ describe('markets and activity', () => {
 
 describe('market queries', () => {
   it('finds markets by pubkey and by status, earliest end first', async () => {
+    await seedGames('nba-1', 'nba-2', 'nba-3')
+    const end = (hours: number) => new Date(tipoff.getTime() + hours * 3_600_000)
+    await upsertMarket(h.db, market('M1', 'nba-1', { endTs: end(5) }))
+    await upsertMarket(h.db, market('M2', 'nba-2', { endTs: end(9), status: 'recycled' }))
+    await upsertMarket(h.db, market('M3', 'nba-3', { endTs: end(2), status: 'recycled' }))
     expect(await marketsByPubkeys(h.db, [])).toEqual([])
     expect((await marketsByPubkeys(h.db, ['M1', 'nope'])).map((m) => m.pubkey)).toEqual(['M1'])
     const recycled = await marketsByStatus(h.db, ['recycled'])
-    expect(recycled.map((m) => m.pubkey).sort()).toEqual(['M2', 'M3'])
+    expect(recycled.map((m) => m.pubkey)).toEqual(['M3', 'M2'])
+    const everything = await marketsByStatus(h.db, ['open', 'recycled'])
+    expect(everything.map((m) => m.pubkey)).toEqual(['M3', 'M1', 'M2'])
   })
 
   it('lists the trades of a market oldest first', async () => {
     expect(await listMarketTrades(h.db, [])).toEqual([])
+    // Inserted newest first; read back oldest first.
+    await insertTrades(h.db, [
+      trade('S3', { blockTime: new Date('2026-11-20T03:00:00Z') }),
+      trade('S1', { blockTime: new Date('2026-11-20T01:00:00Z') }),
+      trade('S2', { blockTime: new Date('2026-11-20T02:00:00Z') }),
+      trade('S9', { market: 'M9', blockTime: new Date('2026-11-20T00:00:00Z') }),
+    ])
     const rows = await listMarketTrades(h.db, ['M1'])
-    expect(rows.map((r) => r.sig)).toEqual(['S1'])
+    expect(rows.map((r) => r.sig)).toEqual(['S1', 'S2', 'S3'])
   })
 })
 
@@ -273,7 +338,6 @@ describe('ops tables', () => {
 
 describe('latestPrices', () => {
   it('returns the newest point per market', async () => {
-    const { insertPricePoint, latestPrices } = await import('../src')
     await insertPricePoint(h.db, { market: 'M1', ts: new Date('2026-11-20T01:00:00Z'), price: 0.5 })
     await insertPricePoint(h.db, {
       market: 'M1',
@@ -308,15 +372,26 @@ describe('rate_limit_take', () => {
   })
 
   it('rejects a cost above capacity', async () => {
-    await expect(
-      rateLimitTake(h.db, 'k:d', { cost: 5, capacity: 1, refillPerSec: 1 }),
-    ).rejects.toThrow()
+    const err = await rateLimitTake(h.db, 'k:d', { cost: 5, capacity: 1, refillPerSec: 1 }).then(
+      () => null,
+      (e: unknown) => e as { message: string; cause?: { message: string } },
+    )
+    expect(err).not.toBeNull()
+    expect(`${err?.message} ${err?.cause?.message}`).toMatch(/rate_limit_take: bad arguments/)
+  })
+
+  it('throws instead of reporting "taken" when no row comes back', async () => {
+    const fake = { execute: async () => ({ rows: [] }) } as unknown as DbHandle['db']
+    await expect(rateLimitTake(fake, 'k:e', { capacity: 1, refillPerSec: 1 })).rejects.toThrow(
+      /no row/,
+    )
   })
 })
 
 describe('sponsor_reserve', () => {
+  const r = { wallet: 'W', ipHash: 'h', lamports: 3_000_000n, capLamports: 7_000_000n }
+
   it('reserves under the daily cap, refuses past it, and frees on release', async () => {
-    const r = { wallet: 'W', ipHash: 'h', lamports: 3_000_000n, capLamports: 7_000_000n }
     expect(await sponsorReserve(h.db, { ...r, sig: 'a' })).toBe(true)
     expect(await sponsorReserve(h.db, { ...r, sig: 'b' })).toBe(true)
     expect(await sponsorReserve(h.db, { ...r, sig: 'c' })).toBe(false)
@@ -327,32 +402,47 @@ describe('sponsor_reserve', () => {
   })
 
   it('does not count yesterday', async () => {
+    expect(await sponsorReserve(h.db, { ...r, lamports: 7_000_000n, sig: 'old' })).toBe(true)
     await h.db.execute(sql`update sponsor_log set ts = now() - interval '2 days'`)
-    const r = { wallet: 'W', ipHash: 'h', lamports: 7_000_000n, capLamports: 7_000_000n, sig: 'd' }
-    expect(await sponsorReserve(h.db, r)).toBe(true)
+    expect(await sponsorReserve(h.db, { ...r, lamports: 7_000_000n, sig: 'd' })).toBe(true)
   })
 })
 
 describe('sponsored ATAs', () => {
-  const at = new Date('2026-11-24T01:00:00Z')
-  const row = (ata: string, wallet = 'W') => ({
+  const t = (min: number) => new Date(Date.UTC(2026, 10, 24, 1, min))
+  const row = (ata: string, sig = `sig-${ata}`, min = 0, wallet = 'W') => ({
     ata,
     wallet,
     mint: 'M',
-    createdSig: `sig-${ata}`,
-    createdAt: at,
+    createdSig: sig,
+    createdAt: t(min),
   })
+  const all = async () =>
+    (await h.db.select().from(schema.sponsoredAtas)).sort(
+      (a, b) => a.ata.localeCompare(b.ata) || a.createdAt.getTime() - b.createdAt.getTime(),
+    )
+  const open = async (ata: string) =>
+    (await sponsoredAtasToCheck(h.db)).filter((r) => r.ata === ata)
 
-  it('records each ATA once and hands out the least recently checked first', async () => {
+  it('records each creation once and hands out the least recently checked first', async () => {
     await recordSponsoredAtas(h.db, [row('a'), row('b')])
     await recordSponsoredAtas(h.db, [row('a'), row('c')])
-    await markAtasChecked(h.db, ['a'], new Date('2026-11-24T02:00:00Z'))
+    await markAtasChecked(h.db, ['a'], t(60))
     const next = await sponsoredAtasToCheck(h.db, 2)
     expect(next.map((r) => r.ata).sort()).toEqual(['b', 'c'])
   })
 
+  it('recording the same creation twice changes nothing, even with different data', async () => {
+    await recordSponsoredAtas(h.db, [row('a'), row('a')])
+    const before = await all()
+    expect(before).toHaveLength(1)
+    await recordSponsoredAtas(h.db, [{ ...row('a'), wallet: 'OTHER', mint: 'X', createdAt: t(30) }])
+    expect(await all()).toEqual(before)
+  })
+
   it('counts only closes whose rent went away from the sponsor', async () => {
-    const closedAt = new Date('2026-11-24T03:00:00Z')
+    await recordSponsoredAtas(h.db, [row('a'), row('b'), row('c')])
+    const closedAt = t(120)
     await markAtaClosed(h.db, 'a', { closedSig: 's1', closedAt, closedTo: 'SPONSOR' })
     expect(await atasClosedAway(h.db, 'W', 'SPONSOR')).toBe(0)
     await markAtaClosed(h.db, 'b', { closedSig: 's2', closedAt, closedTo: 'ELSEWHERE' })
@@ -360,5 +450,79 @@ describe('sponsored ATAs', () => {
     expect(await atasClosedAway(h.db, 'W', 'SPONSOR')).toBe(2)
     expect(await atasClosedAway(h.db, 'other', 'SPONSOR')).toBe(0)
     expect(await sponsoredAtasToCheck(h.db)).toEqual([])
+  })
+
+  it('watches an ATA created again after a close to the sponsor', async () => {
+    await recordSponsoredAtas(h.db, [row('a', 'c1', 0)])
+    await markAtaClosed(h.db, 'a', { closedSig: 'x1', closedAt: t(10), closedTo: 'SPONSOR' })
+    await recordSponsoredAtas(h.db, [row('a', 'c2', 20)])
+    expect((await open('a')).map((r) => r.createdSig)).toEqual(['c2'])
+    expect(await atasClosedAway(h.db, 'W', 'SPONSOR')).toBe(0)
+    await markAtaClosed(h.db, 'a', { closedSig: 'x2', closedAt: t(30), closedTo: 'ELSEWHERE' })
+    expect(await atasClosedAway(h.db, 'W', 'SPONSOR')).toBe(1)
+  })
+
+  it('keeps a closed-away record when the ATA is created again', async () => {
+    await recordSponsoredAtas(h.db, [row('a', 'c1', 0)])
+    await markAtaClosed(h.db, 'a', { closedSig: 'x1', closedAt: t(10), closedTo: 'ELSEWHERE' })
+    await recordSponsoredAtas(h.db, [row('a', 'c2', 20)])
+    expect(await atasClosedAway(h.db, 'W', 'SPONSOR')).toBe(1)
+    expect((await open('a')).map((r) => r.createdSig)).toEqual(['c2'])
+  })
+
+  it('closes by inference an open ATA that is created again', async () => {
+    await recordSponsoredAtas(h.db, [row('a', 'c1', 0)])
+    await recordSponsoredAtas(h.db, [row('a', 'c2', 20)])
+    const rows = await all()
+    expect(rows).toHaveLength(2)
+    expect(rows[0]).toMatchObject({
+      createdSig: 'c1',
+      closedTo: 'unknown',
+      closedSig: null,
+      closedAt: t(20),
+    })
+    expect(rows[1]).toMatchObject({ createdSig: 'c2', closedAt: null, closedTo: null })
+    expect(await atasClosedAway(h.db, 'W', 'SPONSOR')).toBe(1)
+    expect((await sponsoredAtasToCheck(h.db)).map((r) => r.createdSig)).toEqual(['c2'])
+  })
+
+  it('ends in the same state whatever order creations are recorded in', async () => {
+    await recordSponsoredAtas(h.db, [row('a', 'c1', 0)])
+    await recordSponsoredAtas(h.db, [row('a', 'c2', 20)])
+    await recordSponsoredAtas(h.db, [row('a', 'c3', 40)])
+    const inOrder = await all()
+    await h.db.execute(sql`truncate table sponsored_atas`)
+    await recordSponsoredAtas(h.db, [row('a', 'c3', 40)])
+    await recordSponsoredAtas(h.db, [row('a', 'c1', 0)])
+    await recordSponsoredAtas(h.db, [row('a', 'c2', 20)])
+    expect(await all()).toEqual(inOrder)
+    await h.db.execute(sql`truncate table sponsored_atas`)
+    await recordSponsoredAtas(h.db, [row('a', 'c2', 20), row('a', 'c3', 40), row('a', 'c1', 0)])
+    expect(await all()).toEqual(inOrder)
+    expect(inOrder.filter((r) => r.closedAt === null).map((r) => r.createdSig)).toEqual(['c3'])
+    expect(await atasClosedAway(h.db, 'W', 'SPONSOR')).toBe(2)
+  })
+
+  it('does not overwrite a real close when a newer creation arrives', async () => {
+    await recordSponsoredAtas(h.db, [row('a', 'c1', 0)])
+    await markAtaClosed(h.db, 'a', { closedSig: 'x1', closedAt: t(10), closedTo: 'SPONSOR' })
+    await recordSponsoredAtas(h.db, [row('a', 'c2', 20)])
+    const rows = await all()
+    expect(rows[0]).toMatchObject({ closedSig: 'x1', closedTo: 'SPONSOR', closedAt: t(10) })
+  })
+
+  it('markAtaClosed on an ATA with no open row changes nothing', async () => {
+    await recordSponsoredAtas(h.db, [row('a', 'c1', 0)])
+    await markAtaClosed(h.db, 'a', { closedSig: 'x1', closedAt: t(10), closedTo: 'SPONSOR' })
+    const before = await all()
+    await markAtaClosed(h.db, 'a', { closedSig: 'x2', closedAt: t(50), closedTo: 'ELSEWHERE' })
+    await markAtaClosed(h.db, 'never-seen', {
+      closedSig: null,
+      closedAt: t(50),
+      closedTo: 'unknown',
+    })
+    await markAtasChecked(h.db, ['a'], t(90))
+    expect(await all()).toEqual(before)
+    expect(await atasClosedAway(h.db, 'W', 'SPONSOR')).toBe(0)
   })
 })

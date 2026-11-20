@@ -1,4 +1,17 @@
-import { and, asc, count, desc, eq, gte, inArray, isNotNull, isNull, ne, sql } from 'drizzle-orm'
+import {
+  and,
+  asc,
+  count,
+  desc,
+  eq,
+  gte,
+  inArray,
+  isNotNull,
+  isNull,
+  ne,
+  or,
+  sql,
+} from 'drizzle-orm'
 import { type Db, rowsOf } from './client'
 import { keeperHeartbeats, opsEvents, sponsoredAtas, sponsorLog, wallets } from './schema'
 
@@ -16,7 +29,10 @@ export async function rateLimitTake(
   const res = await db.execute(
     sql`select rate_limit_take(${key}, ${opts.cost ?? 1}, ${opts.capacity}, ${opts.refillPerSec}) as wait`,
   )
-  const wait = Number(rowsOf<{ wait: number | string }>(res)[0]?.wait ?? 0)
+  const row = rowsOf<{ wait: number | string }>(res)[0]
+  // Fail closed: a missing row must never read as "token taken".
+  if (!row) throw new Error('rate_limit_take returned no row')
+  const wait = Number(row.wait)
   return wait > 0 ? Math.ceil(wait) : 0
 }
 
@@ -45,7 +61,13 @@ export async function sponsorSpentSince(db: Db, since: Date): Promise<bigint> {
   return BigInt(rows[0]?.total ?? 0)
 }
 
-/** ATAs a confirmed sponsored transaction created; a known one is left as it is. */
+/**
+ * ATAs a confirmed sponsored transaction created. One row per creation (`ata`, `createdSig`):
+ * recording a creation twice changes nothing. An address can be created again after a close, so
+ * for one `ata` only the newest creation may stay open; when a newer creation shows up, an older
+ * open one is closed by inference (`closed_to = 'unknown'`, counted against the wallet). Order of
+ * arrival does not matter: the end state is the same.
+ */
 export async function recordSponsoredAtas(
   db: Db,
   rows: ReadonlyArray<
@@ -53,10 +75,64 @@ export async function recordSponsoredAtas(
   >,
 ): Promise<void> {
   if (rows.length === 0) return
-  await db
-    .insert(sponsoredAtas)
-    .values([...rows])
-    .onConflictDoNothing()
+  const byAta = new Map<string, typeof rows>()
+  for (const r of rows) byAta.set(r.ata, [...(byAta.get(r.ata) ?? []), r])
+  await db.transaction(async (tx) => {
+    for (const [ata, incoming] of byAta) {
+      // Serialise recorders of the same address (the partial unique index is the backstop).
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${ata}))`)
+      const existing = await tx.select().from(sponsoredAtas).where(eq(sponsoredAtas.ata, ata))
+      const known = new Set(existing.map((e) => e.createdSig))
+      const fresh = new Map<string, (typeof rows)[number]>()
+      for (const r of incoming) if (!known.has(r.createdSig)) fresh.set(r.createdSig, r)
+      if (fresh.size === 0) continue
+      const all = [
+        ...existing.map((e) => ({ sig: e.createdSig, at: e.createdAt })),
+        ...[...fresh.values()].map((r) => ({ sig: r.createdSig, at: r.createdAt })),
+      ].sort((x, y) => x.at.getTime() - y.at.getTime() || (x.sig < y.sig ? -1 : 1))
+      const nextCreation = new Map<string, Date>()
+      all.forEach((c, i) => {
+        const next = all[i + 1]
+        if (next) nextCreation.set(c.sig, next.at)
+      })
+      // Close older open rows first, so the new open row never meets two open ones. A row closed
+      // by inference earlier (closed at the time of a later creation) moves to the nearer next
+      // creation when one arrives out of order; a real close is never touched.
+      for (const e of existing) {
+        const at = nextCreation.get(e.createdSig)
+        if (!at) continue
+        const closedByInference =
+          e.closedAt !== null &&
+          e.closedSig === null &&
+          e.closedTo === 'unknown' &&
+          all.some((c) => c.sig !== e.createdSig && c.at.getTime() === e.closedAt?.getTime())
+        if (e.closedAt !== null && !(closedByInference && e.closedAt.getTime() !== at.getTime())) {
+          continue
+        }
+        await tx
+          .update(sponsoredAtas)
+          .set({ closedSig: null, closedAt: at, closedTo: 'unknown', checkedAt: at })
+          .where(
+            and(
+              eq(sponsoredAtas.ata, ata),
+              eq(sponsoredAtas.createdSig, e.createdSig),
+              or(
+                isNull(sponsoredAtas.closedAt),
+                and(isNull(sponsoredAtas.closedSig), eq(sponsoredAtas.closedTo, 'unknown')),
+              ),
+            ),
+          )
+      }
+      await tx.insert(sponsoredAtas).values(
+        [...fresh.values()].map((r) => {
+          const at = nextCreation.get(r.createdSig)
+          return at
+            ? { ...r, closedSig: null, closedAt: at, closedTo: 'unknown', checkedAt: at }
+            : r
+        }),
+      )
+    }
+  })
 }
 
 /** Open sponsored ATAs, the least recently checked first. */
@@ -74,9 +150,10 @@ export async function markAtasChecked(db: Db, atas: readonly string[], at: Date)
   await db
     .update(sponsoredAtas)
     .set({ checkedAt: at })
-    .where(inArray(sponsoredAtas.ata, [...atas]))
+    .where(and(inArray(sponsoredAtas.ata, [...atas]), isNull(sponsoredAtas.closedAt)))
 }
 
+/** Closes the open creation of `ata`; a no-op when there is none. */
 export async function markAtaClosed(
   db: Db,
   ata: string,
@@ -85,7 +162,7 @@ export async function markAtaClosed(
   await db
     .update(sponsoredAtas)
     .set({ ...c, checkedAt: c.closedAt })
-    .where(eq(sponsoredAtas.ata, ata))
+    .where(and(eq(sponsoredAtas.ata, ata), isNull(sponsoredAtas.closedAt)))
 }
 
 /** How many sponsor-paid ATAs `wallet` closed with the rent going anywhere but `sponsor`. */

@@ -14,6 +14,7 @@ import {
   smallint,
   text,
   timestamp,
+  uniqueIndex,
 } from 'drizzle-orm/pg-core'
 
 const ts = (name: string) => timestamp(name, { withTimezone: true, mode: 'date' })
@@ -228,7 +229,7 @@ export const sponsorLog = pgTable(
 export const sponsoredAtas = pgTable(
   'sponsored_atas',
   {
-    ata: text('ata').primaryKey(),
+    ata: text('ata').notNull(),
     wallet: text('wallet').notNull(),
     mint: text('mint').notNull(),
     createdSig: text('created_sig').notNull(),
@@ -240,7 +241,13 @@ export const sponsoredAtas = pgTable(
     /** Who received the rent on close; 'unknown' when no close instruction was found. */
     closedTo: text('closed_to'),
   },
-  (t) => [index('sponsored_atas_wallet_idx').on(t.wallet)],
+  (t) => [
+    // One row per creation: an ATA address is fixed by (wallet, mint), so the same address can be
+    // created again after a close. At most one creation of an address is open at a time.
+    primaryKey({ columns: [t.ata, t.createdSig] }),
+    uniqueIndex('sponsored_atas_open_idx').on(t.ata).where(sql`${t.closedAt} is null`),
+    index('sponsored_atas_wallet_idx').on(t.wallet),
+  ],
 )
 
 export const rateLimits = pgTable('rate_limits', {

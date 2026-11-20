@@ -133,7 +133,7 @@ CREATE TABLE "sponsor_log" (
 );
 --> statement-breakpoint
 CREATE TABLE "sponsored_atas" (
-	"ata" text PRIMARY KEY NOT NULL,
+	"ata" text NOT NULL,
 	"wallet" text NOT NULL,
 	"mint" text NOT NULL,
 	"created_sig" text NOT NULL,
@@ -141,7 +141,8 @@ CREATE TABLE "sponsored_atas" (
 	"checked_at" timestamp with time zone,
 	"closed_sig" text,
 	"closed_at" timestamp with time zone,
-	"closed_to" text
+	"closed_to" text,
+	CONSTRAINT "sponsored_atas_ata_created_sig_pk" PRIMARY KEY("ata","created_sig")
 );
 --> statement-breakpoint
 CREATE TABLE "trades" (
@@ -178,6 +179,7 @@ CREATE INDEX "markets_status_idx" ON "markets" USING btree ("status");--> statem
 CREATE INDEX "ops_events_ts_idx" ON "ops_events" USING btree ("ts");--> statement-breakpoint
 CREATE INDEX "claims_wallet_idx" ON "redeems_claims" USING btree ("wallet");--> statement-breakpoint
 CREATE INDEX "sponsor_log_ts_idx" ON "sponsor_log" USING btree ("ts");--> statement-breakpoint
+CREATE UNIQUE INDEX "sponsored_atas_open_idx" ON "sponsored_atas" USING btree ("ata") WHERE "sponsored_atas"."closed_at" is null;--> statement-breakpoint
 CREATE INDEX "sponsored_atas_wallet_idx" ON "sponsored_atas" USING btree ("wallet");--> statement-breakpoint
 CREATE INDEX "trades_wallet_idx" ON "trades" USING btree ("wallet");--> statement-breakpoint
 CREATE INDEX "trades_market_time_idx" ON "trades" USING btree ("market","block_time");

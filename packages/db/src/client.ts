@@ -35,9 +35,13 @@ export function connectPglite(dataDir?: string): DbHandle & { pglite: PGlite } {
   }
 }
 
-/** `db.execute` returns an array on postgres-js and `{ rows }` on PGlite. */
+/**
+ * `db.execute` returns an array on postgres-js and `{ rows }` on PGlite. Any other shape throws:
+ * callers such as the rate limiter must never read "no rows" out of a result they do not understand.
+ */
 export function rowsOf<T>(result: unknown): T[] {
   if (Array.isArray(result)) return result as T[]
-  const rows = (result as { rows?: unknown }).rows
-  return Array.isArray(rows) ? (rows as T[]) : []
+  const rows = (result as { rows?: unknown } | null | undefined)?.rows
+  if (Array.isArray(rows)) return rows as T[]
+  throw new Error('unrecognised query result shape')
 }
