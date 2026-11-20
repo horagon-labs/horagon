@@ -1,8 +1,8 @@
 {
   "spike": "end-ts",
   "cluster": "n/a",
-  "startedAt": "2026-11-19T18:47:55.359Z",
-  "finishedAt": "2026-11-19T18:47:55.443Z",
+  "startedAt": "2026-11-19T23:52:58.477Z",
+  "finishedAt": "2026-11-19T23:52:58.574Z",
   "pass": true,
   "checks": [
     {
@@ -19,6 +19,11 @@
       "name": "S + 2h10m: no game within 5 points is still open in its last minute",
       "pass": true,
       "detail": "0 games"
+    },
+    {
+      "name": "S + 1h40m: no game has reached Q4 when the feed-silent watch starts",
+      "pass": true,
+      "detail": "220 of 220 games reach Q4, the first at S + 102.7 min"
     },
     {
       "name": "S + 2h20m: over 5% of games end before the close, so a later close is rejected",
@@ -56,6 +61,16 @@
       "p75": 12.2,
       "p95": 15.7,
       "max": 24.1
+    },
+    "q4StartMinutesAfterS": {
+      "min": 102.7,
+      "p1": 105.4,
+      "p5": 108.8,
+      "p25": 114.4,
+      "p50": 119,
+      "p75": 124.3,
+      "p95": 135.1,
+      "max": 145.7
     },
     "endMinutesAfterS": {
       "min": 128.2,
