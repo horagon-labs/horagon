@@ -4,23 +4,32 @@
   "private": true,
   "type": "module",
   "exports": {
+    ".": "./src/index.ts",
     "./sponsor": "./src/sponsor/index.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "vitest run --coverage"
+    "test": "vitest run --coverage",
+    "dev": "tsx watch src/dev-server.ts"
   },
   "dependencies": {
+    "@hono/zod-openapi": "1.6.3",
     "@horagon/db": "workspace:*",
     "@horagon/sdk": "workspace:*",
     "@solana/spl-token": "^0.4.15",
-    "@solana/web3.js": "^1.98.4"
+    "@solana/web3.js": "^1.98.4",
+    "hono": "4.13.19",
+    "pino": "10.4.0",
+    "zod": "^4.6.7",
+    "bs58": "6.0.0"
   },
   "devDependencies": {
     "@types/node": "^22.20.5",
     "@vitest/coverage-v8": "^5.1.0",
     "fast-check": "^4.10.2",
     "typescript": "~5.9.3",
-    "vitest": "^5.1.0"
+    "vitest": "^5.1.0",
+    "@hono/node-server": "2.1.9",
+    "tsx": "4.23.15"
   }
 }
