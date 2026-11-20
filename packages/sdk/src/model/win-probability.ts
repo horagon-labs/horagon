@@ -21,15 +21,17 @@ export function winProbability(input: WinProbabilityInput): number {
   const { margin, minutesRemaining, p0, sigma } = input
   if (!Number.isFinite(margin))
     throw new HoragonError('INVALID_INPUT', `margin must be finite, got ${margin}`)
-  if (!(minutesRemaining >= 0)) {
+  if (!(Number.isFinite(minutesRemaining) && minutesRemaining >= 0 && minutesRemaining <= 48)) {
     throw new HoragonError(
       'INVALID_INPUT',
-      `minutesRemaining must be >= 0, got ${minutesRemaining}`,
+      `minutesRemaining must be in [0, 48], got ${minutesRemaining}`,
     )
   }
   if (!(p0 > 0 && p0 < 1))
     throw new HoragonError('INVALID_INPUT', `p0 must be in (0, 1), got ${p0}`)
-  if (!(sigma > 0)) throw new HoragonError('INVALID_INPUT', `sigma must be > 0, got ${sigma}`)
+  if (!(Number.isFinite(sigma) && sigma > 0)) {
+    throw new HoragonError('INVALID_INPUT', `sigma must be finite and > 0, got ${sigma}`)
+  }
   const tau = minutesRemaining / 48
   if (tau === 0) return margin > 0 ? 1 : margin < 0 ? 0 : 0.5
   const mu = sigma * cdfInv(p0)

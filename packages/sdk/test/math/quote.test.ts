@@ -222,7 +222,15 @@ describe('quoteSwap at the edges of a game', () => {
   it('never quotes a whale buy above what the pool holds', () => {
     fc.assert(
       fc.property(fc.bigInt({ min: 1_000n, max: 2n ** 53n - 1n }), (amountIn) => {
-        const q = quoteSwap({ pool: POOL_A, direction: 'usdcToYes', amountIn, now: NOW })
+        let q: ReturnType<typeof quoteSwap>
+        try {
+          q = quoteSwap({ pool: POOL_A, direction: 'usdcToYes', amountIn, now: NOW })
+        } catch (e) {
+          // Refused as too large: it would average 1 mUSDC a share or more.
+          expect(e instanceof HoragonError && e.code === 'INVALID_INPUT').toBe(true)
+          return
+        }
+        expect(q.avgPrice).toBeLessThan(1)
         // A buy mints (amountIn - fee) pairs and takes YES from the pool: at most all of it.
         expect(q.amountOut <= amountIn - q.fee + BigInt(POOL_A.reserveYes)).toBe(true)
         expect(q.priceAfter >= q.priceBefore && q.priceAfter <= 1).toBe(true)
@@ -239,4 +247,45 @@ describe('quoteSwap at the edges of a game', () => {
       }),
     )
   })
+})
+
+describe('quoteSwap on an off-centre pool', () => {
+  // POOL_C sits at P = 0.7: each direction must move the price the right way and pay no better
+  // than the price before the trade (the fee and the impact both cost the trader).
+  const p0 = quoteSwap({
+    pool: POOL_C,
+    direction: 'usdcToYes',
+    amountIn: 1_000n,
+    now: NOW,
+  }).priceBefore
+  const cases: Array<[(typeof SWAP_DIRECTIONS)[number], 'up' | 'down', (avg: number) => boolean]> =
+    [
+      ['usdcToYes', 'up', (avg) => avg >= p0],
+      ['yesToUsdc', 'down', (avg) => avg <= p0],
+      ['usdcToNo', 'down', (avg) => avg >= 1 - p0],
+      ['noToUsdc', 'up', (avg) => avg <= 1 - p0],
+      ['yesToNo', 'down', () => true],
+      ['noToYes', 'up', () => true],
+    ]
+
+  it.each(cases)(
+    '%s moves the price %s and pays no better than the price before',
+    (direction, way, fair) => {
+      const amountIn = direction.startsWith('usdc') ? 25_000_000n : 20_000_000n
+      const q = quoteSwap({ pool: POOL_C, direction, amountIn, now: NOW })
+      expect(q.priceBefore).toBeCloseTo(0.7, 6)
+      expect(way === 'up' ? q.priceAfter > q.priceBefore : q.priceAfter < q.priceBefore).toBe(true)
+      expect(fair(q.avgPrice)).toBe(true)
+    },
+  )
+
+  it.each(['usdcToYes', 'usdcToNo'] as const)(
+    'refuses a %s buy that would average 1 mUSDC a share or more',
+    (direction) => {
+      const quote = () =>
+        quoteSwap({ pool: POOL_C, direction, amountIn: 1_000_000_000_000_000n, now: NOW })
+      expect(quote).toThrow(HoragonError)
+      expect(quote).toThrow('Trade is too large for this pool')
+    },
+  )
 })

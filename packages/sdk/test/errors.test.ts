@@ -1,6 +1,7 @@
 import { describe, expect, expectTypeOf, it } from 'vitest'
 import {
   DEFAULT_HINTS,
+  errorSummary,
   HORAGON_ERROR_CODES,
   HoragonError,
   type HoragonErrorCode,
@@ -37,5 +38,23 @@ describe('HoragonError', () => {
   it('exposes the code union as a type', () => {
     expectTypeOf<HoragonErrorCode>().toEqualTypeOf<(typeof HORAGON_ERROR_CODES)[number]>()
     expectTypeOf<'MARKET_CLOSED'>().toMatchTypeOf<HoragonErrorCode>()
+  })
+})
+
+describe('errorSummary', () => {
+  it('keeps the name and message but never the stack or a keyed URL', () => {
+    const err = new Error(
+      'fetch failed: https://devnet.helius-rpc.com/?api-key=K3Y and wss://rpc.example/ws?token=T0K',
+    )
+    const s = errorSummary(err)
+    expect(s.name).toBe('Error')
+    expect(s.message).toContain('https://devnet.helius-rpc.com/…')
+    expect(JSON.stringify(s)).not.toMatch(/K3Y|T0K|stack|at /)
+  })
+
+  it('reads codes and non-Error values', () => {
+    expect(errorSummary(new HoragonError('NETWORK', 'down')).code).toBe('NETWORK')
+    expect(errorSummary({ InstructionError: [0, { Custom: 6004 }] }).message).toContain('6004')
+    expect(errorSummary('api_key=abc&x=1').message).toBe('api_key=…&x=1')
   })
 })

@@ -1,3 +1,4 @@
+import { HoragonError } from '../errors'
 /** NBA-style Elo (spec section 7): K = 20, home advantage 100, carryover 0.75 toward 1505. */
 export const ELO_K = 20
 export const ELO_HOME_ADVANTAGE = 100
@@ -22,6 +23,15 @@ export function eloProbability(
   eloAway: number,
   homeAdvantage = ELO_HOME_ADVANTAGE,
 ): number {
+  for (const [name, value] of [
+    ['eloHome', eloHome],
+    ['eloAway', eloAway],
+    ['homeAdvantage', homeAdvantage],
+  ] as const) {
+    if (!Number.isFinite(value)) {
+      throw new HoragonError('INVALID_INPUT', `${name} must be finite, got ${value}`)
+    }
+  }
   return Math.min(P0_MAX, Math.max(P0_MIN, eloExpected(eloHome, eloAway, homeAdvantage)))
 }
 

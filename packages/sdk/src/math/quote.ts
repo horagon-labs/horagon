@@ -1,7 +1,7 @@
 import { HoragonError } from '../errors'
 import { computeSwapOutput, lEffective, priceFromReserves, type SwapDirection } from './curve'
 import { feeOf, isUsdcIn, isUsdcOut } from './fees'
-import { type PoolState, rescaleReserves } from './rescale'
+import { effectiveTime, type PoolState, rescaleReserves } from './rescale'
 
 export const DEFAULT_SLIPPAGE_BPS = 200
 
@@ -53,12 +53,8 @@ export function quoteSwap(input: QuoteSwapInput): SwapQuote {
       `amountIn must be in [1, 2^53 - 1] raw units, got ${amountIn}`,
     )
   }
-  if (!Number.isFinite(now)) {
-    throw new HoragonError('INVALID_INPUT', `now must be finite Unix seconds, got ${now}`)
-  }
+  const t = effectiveTime(now, pool.lastAccrualTs)
   if (pool.resolved) throw new HoragonError('MARKET_CLOSED', 'Market is resolved')
-  // The program never swaps before the last accrual: quote a lagging client clock at that time.
-  const t = Math.max(Math.floor(now), pool.lastAccrualTs)
   const remaining = pool.endTs - t
   if (remaining <= 0) throw new HoragonError('MARKET_CLOSED', 'Market has expired')
   if (pool.lZero === 0 || !pool.hasLiquidity) {
@@ -85,6 +81,13 @@ export function quoteSwap(input: QuoteSwapInput): SwapQuote {
   const avgPrice = isUsdcOut(direction)
     ? Number(amountOut) / Number(amountIn)
     : Number(amountIn) / Number(amountOut)
+  // A share pays at most 1 mUSDC, so a buy that averages 1 or more can never pay off: the
+  // amount is larger than the pool can fill at a sane price.
+  if (isUsdcIn(direction) && avgPrice >= 1) {
+    throw new HoragonError('INVALID_INPUT', 'Trade is too large for this pool', {
+      hint: 'It would pay 1 mUSDC or more per share. Try a smaller amount.',
+    })
+  }
   return {
     direction,
     amountIn,

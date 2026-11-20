@@ -1,3 +1,4 @@
+import { HoragonError } from '../errors'
 import {
   lEffective,
   PRICE_MAX,
@@ -20,6 +21,19 @@ export interface PoolState {
   /** total_lp_shares > 0 */
   hasLiquidity: boolean
   resolved: boolean
+}
+
+/**
+ * The time the program prices a pool at: the caller's clock, but never before the last accrual,
+ * because the program never swaps before `last_accrual_ts`. A client clock that lags the chain
+ * would otherwise rescale nothing yet size L_eff from a longer remaining time. Every
+ * remaining-time and L_eff computation (quotes, live market state, the UI's countdown) uses it.
+ */
+export function effectiveTime(now: number, lastAccrualTs: number): number {
+  if (!Number.isFinite(now)) {
+    throw new HoragonError('INVALID_INPUT', `now must be finite Unix seconds, got ${now}`)
+  }
+  return Math.max(Math.floor(now), lastAccrualTs)
 }
 
 /**

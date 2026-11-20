@@ -1,4 +1,5 @@
-import { HoragonError, type HoragonErrorCode } from '../errors'
+import { HoragonError, type HoragonErrorCode, isHoragonError } from '../errors'
+import type { PmAmmInstructionName } from './instructions'
 
 /** pm-AMM error names for the codes a market trader can hit (IDL `errors`, 6000+). */
 export const PM_AMM_ERROR_NAMES: Readonly<Record<number, string>> = {
@@ -32,13 +33,24 @@ const PROGRAM_CODE_MAP: Readonly<Record<number, [HoragonErrorCode, string]>> = {
   6005: ['INVALID_INPUT', 'Trade is too small: the output rounds to zero'],
   6006: ['INSUFFICIENT_FUNDS', 'Not enough tokens for this trade'],
   6007: ['SLIPPAGE_EXCEEDED', 'Price moved beyond the slippage limit'],
-  3012: ['MISSING_TOKEN_ACCOUNT', 'A required token account does not exist'],
+  [ANCHOR_ACCOUNT_NOT_INITIALIZED]: [
+    'MISSING_TOKEN_ACCOUNT',
+    'A required token account does not exist',
+  ],
 }
 
 function errorText(err: unknown): string {
   const parts: string[] = []
   if (err instanceof Error) parts.push(err.message)
-  else parts.push(String(err))
+  else if (typeof err === 'string') parts.push(err)
+  else {
+    // A confirmTransaction `value.err` such as {InstructionError: [2, {Custom: 6007}]}.
+    try {
+      parts.push(JSON.stringify(err) ?? String(err))
+    } catch {
+      parts.push(String(err))
+    }
+  }
   if (typeof err === 'object' && err !== null) {
     const logs =
       (err as { logs?: unknown; transactionLogs?: unknown }).logs ??
@@ -56,17 +68,41 @@ export function extractProgramErrorCode(text: string): number | undefined {
   if (json?.[1]) return Number.parseInt(json[1], 10)
   const anchor = /Error Number: (\d+)/.exec(text)
   if (anchor?.[1]) return Number.parseInt(anchor[1], 10)
+  const rust = /\bCustom\((\d+)\)/.exec(text)
+  if (rust?.[1]) return Number.parseInt(rust[1], 10)
   return undefined
 }
 
+/** Which pm-AMM instruction failed, when the caller knows: some codes mean different things. */
+export interface ProgramErrorContext {
+  instruction?: PmAmmInstructionName
+}
+
 /** Map anything thrown while sending a pm-AMM transaction to a HoragonError. */
-export function fromProgramError(err: unknown): HoragonError {
-  if (err instanceof HoragonError) return err
+export function fromProgramError(err: unknown, context: ProgramErrorContext = {}): HoragonError {
+  if (isHoragonError(err)) return err
   const text = errorText(err)
-  if (/\b429\b|too many requests/i.test(text)) {
+  const code = extractProgramErrorCode(text)
+  if (code === ANCHOR_ACCOUNT_NOT_INITIALIZED && context.instruction === 'claimLpResiduals') {
+    // withdraw_liquidity(all shares) closes the LpPosition, so there is nothing left to claim.
+    return new HoragonError('NOT_FOUND', 'No LP position: a full withdrawal closed it', {
+      cause: err,
+      programCode: code,
+      hint: 'Nothing to do: the residuals were paid out when the liquidity was withdrawn.',
+    })
+  }
+  if (code === 6004 && context.instruction !== undefined && context.instruction !== 'swap') {
+    // Only a swap on a drained pool means the market is halted; a withdrawal or deposit that
+    // hits InsufficientLiquidity asked for more than the pool or the LP position holds.
+    return new HoragonError('PROGRAM_ERROR', 'Not enough liquidity for this instruction', {
+      cause: err,
+      programCode: code,
+    })
+  }
+  // A program code wins over a stray "429" in the logs.
+  if (code === undefined && /\b429\b|too many requests/i.test(text)) {
     return new HoragonError('RATE_LIMITED', 'RPC rate limit hit', { cause: err })
   }
-  const code = extractProgramErrorCode(text)
   const mapped = code === undefined ? undefined : PROGRAM_CODE_MAP[code]
   if (code !== undefined && mapped) {
     return new HoragonError(mapped[0], mapped[1], { cause: err, programCode: code })

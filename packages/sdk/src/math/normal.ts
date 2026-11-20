@@ -63,9 +63,10 @@ function acklamTail(q: number): number {
 }
 
 /**
- * Phi^-1(p): the standard normal quantile for p in (0, 1), relative error below 1e-12.
- * Acklam's approximation over the full range (central region and both tails),
- * refined with one Halley step against `cdf`.
+ * Phi^-1(p): the standard normal quantile for p in (0, 1). Acklam's approximation over the full
+ * range (central region and both tails), refined with one Halley step against `cdf`. Tested to
+ * 1e-12 relative against Python's NormalDist at the reference points, and cdf(cdfInv(p)) within
+ * 1e-11 of p (relative) for p in [1e-12, 1 - 1e-12]; no bound is claimed beyond that.
  */
 export function cdfInv(p: number): number {
   if (!(p > 0 && p < 1)) throw new RangeError(`cdfInv: p must be in (0, 1), got ${p}`)

@@ -38,12 +38,15 @@ export interface HoragonErrorOptions {
   cause?: unknown
   /** Raw on-chain error code, when the error came from a program. */
   programCode?: number
+  /** RATE_LIMITED: seconds until a retry can succeed (the API's Retry-After). */
+  retryAfterSecs?: number
 }
 
 export class HoragonError extends Error {
   readonly code: HoragonErrorCode
   readonly hint: string
   readonly programCode: number | undefined
+  readonly retryAfterSecs: number | undefined
 
   constructor(code: HoragonErrorCode, message: string, options: HoragonErrorOptions = {}) {
     super(message, options.cause === undefined ? undefined : { cause: options.cause })
@@ -51,6 +54,7 @@ export class HoragonError extends Error {
     this.code = code
     this.hint = options.hint ?? DEFAULT_HINTS[code]
     this.programCode = options.programCode
+    this.retryAfterSecs = options.retryAfterSecs
   }
 
   toJSON(): { code: HoragonErrorCode; message: string; hint: string; programCode?: number } {
@@ -63,6 +67,45 @@ export class HoragonError extends Error {
   }
 }
 
+/**
+ * True for a HoragonError from any copy of the SDK. `instanceof` alone fails across the ESM and
+ * CJS builds (two class objects), so this also accepts any error named `HoragonError` whose
+ * `code` is in the table.
+ */
 export function isHoragonError(value: unknown): value is HoragonError {
-  return value instanceof HoragonError
+  if (value instanceof HoragonError) return true
+  if (!(value instanceof Error) || value.name !== 'HoragonError') return false
+  const code = (value as { code?: unknown }).code
+  return typeof code === 'string' && (HORAGON_ERROR_CODES as readonly string[]).includes(code)
+}
+
+/** Cuts URL paths and query strings (where RPC providers put API keys) and `api-key` values. */
+export function redactUrls(text: string): string {
+  return text
+    .replace(/\b(https?|wss?):\/\/([^\s/?#]+)[^\s"']*/gi, '$1://$2/…')
+    .replace(/(api[-_]?key|token)=[^&\s"']+/gi, '$1=…')
+}
+
+/**
+ * What a log line may carry about an error: its name, code and a redacted, shortened message.
+ * Never the stack, the cause chain or a keyed RPC URL.
+ */
+export function errorSummary(err: unknown): { name: string; code?: string; message: string } {
+  const name = err instanceof Error ? err.name : typeof err
+  let message: string
+  if (err instanceof Error) message = err.message
+  else if (typeof err === 'string') message = err
+  else {
+    try {
+      message = JSON.stringify(err) ?? String(err)
+    } catch {
+      message = String(err)
+    }
+  }
+  const code = (err as { code?: unknown } | null)?.code
+  return {
+    name,
+    ...(typeof code === 'string' ? { code } : {}),
+    message: redactUrls(message).slice(0, 300),
+  }
 }

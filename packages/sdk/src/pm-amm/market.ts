@@ -1,6 +1,7 @@
 import { PublicKey } from '@solana/web3.js'
 import { HoragonError } from '../errors'
 import type { PoolState } from '../math/rescale'
+import { PM_AMM_PROGRAM_ID } from './constants'
 
 /** sha256("account:Market")[0..8], from the pm-AMM IDL. */
 export const MARKET_DISCRIMINATOR = Uint8Array.from([219, 190, 213, 55, 0, 227, 198, 154])
@@ -127,6 +128,14 @@ export function decodeMarket(data: Uint8Array): MarketAccount {
     unclaimedExcessYes: r.u64(),
     unclaimedExcessNo: r.u64(),
   }
+}
+
+/** Decode an account fetched from the RPC, refusing one that pm-AMM does not own. */
+export function decodeMarketAccount(info: { owner: PublicKey; data: Uint8Array }): MarketAccount {
+  if (!info.owner.equals(PM_AMM_PROGRAM_ID)) {
+    throw new HoragonError('NOT_FOUND', `Not a pm-AMM account: owner ${info.owner.toBase58()}`)
+  }
+  return decodeMarket(info.data)
 }
 
 const TWO_POW_127 = 2n ** 127n
