@@ -14,7 +14,7 @@ import {
   VersionedTransaction,
   type VersionedTransactionResponse,
 } from '@solana/web3.js'
-import pino from 'pino'
+import pino, { type Logger } from 'pino'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { Alerter } from '../src/alerts'
 import { type AtaWatchDeps, closeDestination, watchSponsoredAtas } from '../src/ata-watch'
@@ -162,5 +162,113 @@ describe('watchSponsoredAtas', () => {
     const open = await sponsoredAtasToCheck(h.db)
     expect(open.map((r) => r.createdSig)).toEqual(['c2'])
     expect(open[0]?.closedAt).toBeNull()
+  })
+
+  const NOW_SECS = Date.parse('2026-11-24T02:00:00Z') / 1000
+  const record = async (n: number, createdAt = new Date('2026-11-24T01:00:00Z')) => {
+    const rows = Array.from({ length: n }, (_, i) => ({
+      ata: key().toBase58(),
+      wallet: key().toBase58(),
+      mint: mint.toBase58(),
+      createdSig: `c${i}`,
+      createdAt,
+    }))
+    await recordSponsoredAtas(h.db, rows)
+    return rows
+  }
+  const depsWith = (
+    connection: Record<string, unknown>,
+    extra: Partial<AtaWatchDeps> = {},
+    sent: string[] = [],
+    warns: Array<Record<string, unknown>> = [],
+  ): AtaWatchDeps => ({
+    db: h.db,
+    connection: {
+      getMultipleAccountsInfo: async (keys: PublicKey[]) => keys.map(() => null),
+      getSignaturesForAddress: async () => [],
+      getTransaction: async () => null,
+      ...connection,
+    } as unknown as AtaWatchDeps['connection'],
+    sponsor,
+    alerts: {
+      send: async (k) => {
+        sent.push(k)
+      },
+    },
+    log: { warn: (obj: Record<string, unknown>) => warns.push(obj) } as unknown as Logger,
+    now: () => NOW_SECS,
+    ...extra,
+  })
+
+  it('does not close an ATA younger than 10 minutes on one empty read', async () => {
+    const young = new Date((NOW_SECS - 60) * 1000)
+    const [row] = await record(1, young)
+    const calls: string[] = []
+    const deps = depsWith({
+      getSignaturesForAddress: async (k: PublicKey) => {
+        calls.push(k.toBase58())
+        return []
+      },
+    })
+    expect(await watchSponsoredAtas(deps)).toEqual({ checked: 1, closed: 0, flagged: 0 })
+    expect(calls).toEqual([])
+    const open = await sponsoredAtasToCheck(h.db)
+    expect(open.map((r) => r.ata)).toEqual([row?.ata])
+    expect(open[0]?.checkedAt).toEqual(new Date(NOW_SECS * 1000))
+    // Once it is old enough, the same empty read closes it.
+    const later = depsWith({}, { now: () => NOW_SECS + 600 })
+    expect(await watchSponsoredAtas(later)).toEqual({ checked: 1, closed: 1, flagged: 1 })
+  })
+
+  it('clamps the batch to 1..100 ATAs per pass', async () => {
+    await record(101)
+    const sizes: number[] = []
+    const connection = {
+      getMultipleAccountsInfo: async (keys: PublicKey[]) => {
+        sizes.push(keys.length)
+        return keys.map(() => ({}))
+      },
+    }
+    await watchSponsoredAtas(depsWith(connection, { batch: 1000 }))
+    await watchSponsoredAtas(depsWith(connection, { batch: 0 }))
+    expect(sizes).toEqual([100, 1])
+  })
+
+  it('leaves a row whose lookup fails for the next pass and carries on with the others', async () => {
+    const rows = await record(2)
+    const [bad, good] = rows as [(typeof rows)[number], (typeof rows)[number]]
+    const warns: Array<Record<string, unknown>> = []
+    const deps = depsWith(
+      {
+        getSignaturesForAddress: async (k: PublicKey) => {
+          if (k.toBase58() === bad.ata) throw new Error('rpc down')
+          return []
+        },
+      },
+      {},
+      [],
+      warns,
+    )
+    expect(await watchSponsoredAtas(deps)).toEqual({ checked: 2, closed: 1, flagged: 1 })
+    expect(warns).toHaveLength(2)
+    expect(JSON.stringify(warns[0])).not.toContain('stack')
+    const open = await sponsoredAtasToCheck(h.db)
+    expect(open.map((r) => r.ata)).toEqual([bad.ata])
+    expect(open[0]?.checkedAt).toEqual(new Date(NOW_SECS * 1000))
+    expect(await atasClosedAway(h.db, good.wallet, sponsor.toBase58())).toBe(1)
+  })
+
+  it('records unknown when the signatures failed or their transactions are gone', async () => {
+    const [row] = await record(1)
+    const deps = depsWith({
+      getSignaturesForAddress: async () =>
+        [
+          { signature: 'failed', err: { InstructionError: [0, 'x'] } },
+          { signature: 'gone', err: null },
+        ] as never,
+      getTransaction: async () => null,
+    })
+    expect(await watchSponsoredAtas(deps)).toEqual({ checked: 1, closed: 1, flagged: 1 })
+    expect(await atasClosedAway(h.db, row?.wallet ?? '', sponsor.toBase58())).toBe(1)
   })
 })

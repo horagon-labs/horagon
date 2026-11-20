@@ -36,8 +36,10 @@ export function pickFeatured(games: readonly FeedGame[], ratings: Ratings): stri
     .map(gameIdOf)
 }
 
+// A schedule pass only moves a game between scheduled, postponed and canceled; live and final
+// come from the live pass, and the upsert keeps an existing live or final status.
 const scheduleStatus = (s: FeedGame['status']) =>
-  s === 'postponed' || s === 'canceled' ? s : s === 'scheduled' ? 'scheduled' : s
+  s === 'postponed' || s === 'canceled' ? s : 'scheduled'
 
 export interface ScheduleDeps {
   db: Db

@@ -3,6 +3,7 @@
 // rent went anywhere but the sponsor is recorded and alerted, and the API then opens no more
 // accounts for that wallet (`atasClosedAway`).
 import { type Db, markAtaClosed, markAtasChecked, sponsoredAtasToCheck } from '@horagon/db'
+import { errorSummary } from '@horagon/sdk'
 import { TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID } from '@solana/spl-token'
 import { type Connection, PublicKey, type VersionedTransactionResponse } from '@solana/web3.js'
 import type { Logger } from 'pino'
@@ -10,6 +11,9 @@ import type { Alerter } from './alerts'
 
 /** SPL Token `CloseAccount`: accounts [account, destination, owner]. */
 const CLOSE_ACCOUNT = 9
+/** An ATA younger than this is not closed on one empty read: a lagging node may not see it yet. */
+const MIN_AGE_SECS = 600
+const MAX_BATCH = 100
 const TOKEN_PROGRAMS = [TOKEN_PROGRAM_ID.toBase58(), TOKEN_2022_PROGRAM_ID.toBase58()]
 
 export interface AtaWatchDeps {
@@ -70,9 +74,11 @@ async function findClose(
 export async function watchSponsoredAtas(
   deps: AtaWatchDeps,
 ): Promise<{ checked: number; closed: number; flagged: number }> {
-  const rows = await sponsoredAtasToCheck(deps.db, deps.batch ?? 100)
+  const batch = Math.min(Math.max(Math.trunc(deps.batch ?? MAX_BATCH), 1), MAX_BATCH)
+  const rows = await sponsoredAtasToCheck(deps.db, batch)
   if (rows.length === 0) return { checked: 0, closed: 0, flagged: 0 }
-  const now = new Date(deps.now() * 1000)
+  const nowSecs = deps.now()
+  const now = new Date(nowSecs * 1000)
   const infos = await deps.connection.getMultipleAccountsInfo(
     rows.map((r) => new PublicKey(r.ata)),
     'confirmed',
@@ -81,11 +87,20 @@ export async function watchSponsoredAtas(
   let closed = 0
   let flagged = 0
   for (const [i, row] of rows.entries()) {
-    if (infos[i]) {
+    // Present, too young to judge, or not traceable this pass: stays open, checked again later.
+    if (infos[i] || nowSecs - row.createdAt.getTime() / 1000 < MIN_AGE_SECS) {
       stillOpen.push(row.ata)
       continue
     }
-    const { sig, to } = await findClose(deps, row.ata)
+    let found: { sig: string | null; to: string }
+    try {
+      found = await findClose(deps, row.ata)
+    } catch (err) {
+      deps.log.warn({ ata: row.ata, error: errorSummary(err).message }, 'ata close lookup failed')
+      stillOpen.push(row.ata)
+      continue
+    }
+    const { sig, to } = found
     // Guarded by the creation we traced: a newer creation of this address stays open.
     await markAtaClosed(deps.db, row.ata, {
       closedSig: sig,

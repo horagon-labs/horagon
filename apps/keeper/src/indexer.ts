@@ -22,7 +22,11 @@ import {
   pmAmmInstructionName,
   SWAP_DIRECTIONS,
 } from '@horagon/sdk'
-import { ASSOCIATED_TOKEN_PROGRAM_ID } from '@solana/spl-token'
+import {
+  ASSOCIATED_TOKEN_PROGRAM_ID,
+  TOKEN_2022_PROGRAM_ID,
+  TOKEN_PROGRAM_ID,
+} from '@solana/spl-token'
 import {
   type Connection,
   PublicKey,
@@ -50,6 +54,128 @@ interface Ctx {
   authority: string
   /** The sponsor's pubkey; without it no ATA is recorded. */
   sponsor?: string
+  /** Where a row skipped for unreadable token flows is reported. */
+  log?: Logger
+}
+
+const TOKEN_PROGRAMS = new Set([TOKEN_PROGRAM_ID.toBase58(), TOKEN_2022_PROGRAM_ID.toBase58()])
+const B58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
+
+function base58Decode(text: string): Uint8Array {
+  const bytes: number[] = []
+  for (const ch of text) {
+    let carry = B58.indexOf(ch)
+    if (carry < 0) throw new Error('bad base58')
+    for (let i = 0; i < bytes.length; i++) {
+      carry += (bytes[i] as number) * 58
+      bytes[i] = carry & 0xff
+      carry >>= 8
+    }
+    while (carry > 0) {
+      bytes.push(carry & 0xff)
+      carry >>= 8
+    }
+  }
+  for (const ch of text) {
+    if (ch !== '1') break
+    bytes.push(0)
+  }
+  return Uint8Array.from(bytes.reverse())
+}
+
+/** Signed token movements (by account index) of the SPL Token CPIs inside one instruction. */
+function tokenMoves(
+  inner: {
+    instructions: ReadonlyArray<{ programIdIndex: number; accounts: number[]; data: string }>
+  },
+  keys: readonly string[],
+): Array<{ account: number; delta: bigint }> {
+  const moves: Array<{ account: number; delta: bigint }> = []
+  for (const ix of inner.instructions) {
+    const program = keys[ix.programIdIndex]
+    if (!program || !TOKEN_PROGRAMS.has(program)) continue
+    const data = base58Decode(ix.data)
+    if (data.length < 9) continue
+    const amount = new DataView(data.buffer, data.byteOffset, data.byteLength).getBigUint64(1, true)
+    const a = ix.accounts
+    const push = (account: number | undefined, delta: bigint) => {
+      if (account !== undefined) moves.push({ account, delta })
+    }
+    switch (data[0]) {
+      case 3: // Transfer: source, destination, authority
+        push(a[0], -amount)
+        push(a[1], amount)
+        break
+      case 12: // TransferChecked: source, mint, destination, authority
+        push(a[0], -amount)
+        push(a[2], amount)
+        break
+      case 7: // MintTo: mint, destination, authority
+      case 14:
+        push(a[1], amount)
+        break
+      case 8: // Burn: account, mint, authority
+      case 15:
+        push(a[0], -amount)
+        break
+    }
+  }
+  return moves
+}
+
+interface Flows {
+  usdc: bigint
+  yes: bigint
+  no: bigint
+  fee: bigint
+}
+
+/** Whole-transaction balance deltas: exact when the transaction holds one pm-AMM instruction. */
+function wholeTxFlows(tx: VersionedTransactionResponse, user: string, ctx: Ctx): Flows {
+  const fee =
+    deltas(tx, PROTOCOL_DAO.toBase58(), ctx.collateralMint) +
+    deltas(tx, ctx.authority, ctx.collateralMint)
+  return {
+    usdc: deltas(tx, user, ctx.collateralMint),
+    yes: deltas(tx, user, ctx.market.yesMint),
+    no: deltas(tx, user, ctx.market.noMint),
+    fee: fee > 0n ? fee : 0n,
+  }
+}
+
+/** One instruction's flows from its inner token CPIs; undefined when they were not recorded. */
+function instructionFlows(
+  tx: VersionedTransactionResponse,
+  keys: readonly string[],
+  ixIndex: number,
+  user: string,
+  ctx: Ctx,
+): Flows | undefined {
+  const meta = tx.meta
+  const inner = meta?.innerInstructions?.find((i) => i.index === ixIndex)
+  if (!meta || !inner) return undefined
+  const owners = new Map<number, { owner?: string; mint: string }>()
+  for (const b of [...(meta.preTokenBalances ?? []), ...(meta.postTokenBalances ?? [])]) {
+    owners.set(b.accountIndex, { ...(b.owner ? { owner: b.owner } : {}), mint: b.mint })
+  }
+  const moves = tokenMoves(inner, keys)
+  const net = (owner: string, mint: string) =>
+    moves
+      .filter((x) => {
+        const o = owners.get(x.account)
+        return o?.owner === owner && o.mint === mint
+      })
+      .reduce((n, x) => n + x.delta, 0n)
+  const feeIn = (owner: string) => {
+    const n = net(owner, ctx.collateralMint)
+    return n > 0n ? n : 0n
+  }
+  return {
+    usdc: net(user, ctx.collateralMint),
+    yes: net(user, ctx.market.yesMint),
+    no: net(user, ctx.market.noMint),
+    fee: feeIn(PROTOCOL_DAO.toBase58()) + feeIn(ctx.authority),
+  }
 }
 
 function held(list: TokenBalance[] | null | undefined, owner: string, mint: string): bigint {
@@ -84,18 +210,32 @@ export function decodeTransaction(
   const blockTime = new Date(tx.blockTime * 1000)
   const slot = BigInt(tx.slot)
   const m = ctx.market
+  const pmAmmCalls = msg.compiledInstructions.filter(
+    (ix) => keys[ix.programIdIndex] === PM_AMM_PROGRAM_ID.toBase58(),
+  ).length
   msg.compiledInstructions.forEach((ix, ixIndex) => {
     if (keys[ix.programIdIndex] !== PM_AMM_PROGRAM_ID.toBase58()) return
     if (!ix.accountKeyIndexes.some((i) => keys[i] === m.pubkey)) return
     const name = pmAmmInstructionName(ix.data)
-    const usdc = deltas(tx, user, ctx.collateralMint)
-    const yes = deltas(tx, user, m.yesMint)
-    const no = deltas(tx, user, m.noMint)
+    if (name === 'depositLiquidity') {
+      if (user !== ctx.authority) out.externalLp = true
+      return
+    }
+    if (name !== 'swap' && name !== 'redeemPair' && name !== 'claimWinnings') return
+    // Several pm-AMM instructions share one transaction's balance deltas, so each reads its own
+    // CPIs; a lone one may use the whole-transaction deltas. Flows that cannot be read are never
+    // guessed.
+    const flows =
+      pmAmmCalls === 1
+        ? wholeTxFlows(tx, user, ctx)
+        : instructionFlows(tx, keys, ixIndex, user, ctx)
+    if (!flows) {
+      ctx.log?.warn({ market: m.pubkey, sig, ixIndex }, 'token flows not recorded; row skipped')
+      return
+    }
+    const { usdc, yes, no, fee } = flows
     if (name === 'swap') {
       const direction = SWAP_DIRECTIONS[ix.data[8] ?? 255] ?? 'unknown'
-      const fee =
-        deltas(tx, PROTOCOL_DAO.toBase58(), ctx.collateralMint) +
-        deltas(tx, ctx.authority, ctx.collateralMint)
       out.trades.push({
         sig,
         ixIndex,
@@ -106,7 +246,7 @@ export function decodeTransaction(
         usdcDelta: usdc,
         yesDelta: yes,
         noDelta: no,
-        fee: fee > 0n ? fee : 0n,
+        fee,
         slot,
         blockTime,
       })
@@ -122,8 +262,6 @@ export function decodeTransaction(
         noDelta: no,
         blockTime,
       })
-    } else if (name === 'depositLiquidity' && user !== ctx.authority) {
-      out.externalLp = true
     }
   })
   if (ctx.sponsor && keys[0] === ctx.sponsor) {
@@ -148,6 +286,19 @@ export function decodeTransaction(
   return out
 }
 
+/** Consecutive passes that stopped on the same unreadable signature, per market. */
+export interface StopState {
+  sig: string
+  count: number
+  warnedAt: number
+  alerted: boolean
+}
+
+/** Consecutive stops (about 5 minutes at the 5 s loop) before `index-stuck` is sent. */
+export const STUCK_AFTER = 60
+const WARN_EVERY_SECS = 60
+const defaultStops = new Map<string, StopState>()
+
 export interface IndexerDeps {
   db: Db
   connection: Connection
@@ -158,6 +309,8 @@ export interface IndexerDeps {
   now: () => number
   /** The sponsor; when set, the ATAs it paid for are recorded. */
   sponsor?: PublicKey
+  /** Stop counters per market; defaults to a module-level map. */
+  stops?: Map<string, StopState>
 }
 
 /** One pass over every indexable market. Returns how many rows were written. */
@@ -180,32 +333,69 @@ export async function indexOnce(
   }
   const open = markets.filter((m) => m.status === 'open' && m.endTs.getTime() / 1000 > now)
   if (open.length > 0) {
-    const infos = await deps.connection.getMultipleAccountsInfo(
-      open.map((m) => new PublicKey(m.pubkey)),
-      'confirmed',
-    )
+    let infos: Awaited<ReturnType<Connection['getMultipleAccountsInfo']>>
+    try {
+      infos = await deps.connection.getMultipleAccountsInfo(
+        open.map((m) => new PublicKey(m.pubkey)),
+        'confirmed',
+      )
+    } catch (err) {
+      deps.log.warn({ error: errorSummary(err).message }, 'price read failed')
+      return { trades, claims, prices }
+    }
     for (const [i, info] of infos.entries()) {
       const m = open[i]
       if (!info || !m) continue
-      const live = liveMarket(decodeMarketAccount(info), now)
-      if (live.price === null) continue
-      await insertPricePoint(deps.db, {
-        market: m.pubkey,
-        ts: new Date(now * 1000),
-        price: live.price,
-      })
-      prices++
+      try {
+        const live = liveMarket(decodeMarketAccount(info), now)
+        if (live.price === null) continue
+        await insertPricePoint(deps.db, {
+          market: m.pubkey,
+          ts: new Date(now * 1000),
+          price: live.price,
+        })
+        prices++
+      } catch (err) {
+        deps.log.warn({ market: m.pubkey, error: errorSummary(err).message }, 'price point failed')
+      }
     }
   }
   return { trades, claims, prices }
+}
+
+/** A market stopped at `sig`: warn at most once a minute; alert once after STUCK_AFTER stops. */
+async function noteStop(deps: IndexerDeps, m: MarketRow, sig: string): Promise<void> {
+  const stops = deps.stops ?? defaultStops
+  const now = deps.now()
+  const prev = stops.get(m.pubkey)
+  const st: StopState =
+    prev && prev.sig === sig ? prev : { sig, count: 0, warnedAt: -Infinity, alerted: false }
+  st.count++
+  stops.set(m.pubkey, st)
+  if (now - st.warnedAt >= WARN_EVERY_SECS) {
+    st.warnedAt = now
+    deps.log.warn(
+      { market: m.pubkey, sig, stops: st.count },
+      'transaction not readable yet; indexing waits',
+    )
+  }
+  if (st.count >= STUCK_AFTER && !st.alerted) {
+    st.alerted = true
+    await deps.alerts.send(
+      `index-stuck:${m.pubkey}`,
+      `Indexing of ${m.gameId} (market ${m.pubkey}) is stuck: signature ${sig} has been unreadable for ${st.count} passes`,
+    )
+  }
 }
 
 async function indexMarket(
   deps: IndexerDeps,
   m: MarketRow,
 ): Promise<{ trades: number; claims: number }> {
+  const stops = deps.stops ?? defaultStops
   const address = new PublicKey(m.pubkey)
   const sigs: string[] = []
+  let newestFetched: string | undefined
   let before: string | undefined
   // Newest first; page back until the cursor (the newest signature already indexed).
   for (;;) {
@@ -218,11 +408,15 @@ async function indexMarket(
       },
       'confirmed',
     )
+    newestFetched ??= page[0]?.signature
     sigs.push(...page.filter((s) => s.err === null).map((s) => s.signature))
     if (page.length < 1000) break
     before = page.at(-1)?.signature
   }
-  if (sigs.length === 0) return { trades: 0, claims: 0 }
+  if (!newestFetched) {
+    stops.delete(m.pubkey)
+    return { trades: 0, claims: 0 }
+  }
   const ordered = sigs.reverse()
   // The newest signature fully processed: the cursor never moves past a transaction not read.
   let processed: string | undefined
@@ -236,11 +430,19 @@ async function indexMarket(
       maxSupportedTransactionVersion: 0,
       commitment: 'confirmed',
     })
-    for (const [j, tx] of txs.entries()) {
-      const sig = chunk[j] as string
-      // Not yet available (or no block time): stop here and leave the rest for the next tick.
-      // Inserts are idempotent, so reading a later transaction again is harmless.
-      if (!tx || tx.blockTime === null || tx.blockTime === undefined) {
+    for (const [j, sig] of chunk.entries()) {
+      const tx = txs[j]
+      // Not yet available, no block time or meta, or not the transaction asked for (a short or
+      // reordered batch): stop here and leave the rest for the next tick. Inserts are
+      // idempotent, so reading a later transaction again is harmless.
+      if (
+        !tx ||
+        txs.length !== chunk.length ||
+        tx.blockTime === null ||
+        tx.blockTime === undefined ||
+        !tx.meta ||
+        tx.transaction.signatures[0] !== sig
+      ) {
         stoppedAt = sig
         break scan
       }
@@ -248,6 +450,7 @@ async function indexMarket(
         market: m,
         collateralMint: deps.collateralMint.toBase58(),
         authority: deps.authority.toBase58(),
+        log: deps.log,
         ...(deps.sponsor ? { sponsor: deps.sponsor.toBase58() } : {}),
       })
       await insertTrades(deps.db, d.trades)
@@ -263,12 +466,14 @@ async function indexMarket(
       processed = sig
     }
   }
-  if (stoppedAt) {
-    deps.log.debug({ market: m.pubkey, sig: stoppedAt }, 'transaction not readable yet; will retry')
-  }
-  if (processed) {
+  if (stoppedAt) await noteStop(deps, m, stoppedAt)
+  else stops.delete(m.pubkey)
+  // Without a stop everything fetched is done, failed signatures included, so a market with
+  // failing swaps does not page through the same failures every tick.
+  const cursor = stoppedAt ? processed : newestFetched
+  if (cursor) {
     await updateMarket(deps.db, m.pubkey, {
-      indexCursor: processed,
+      indexCursor: cursor,
       ...(externalLp && !m.externalLp ? { externalLp: true } : {}),
     })
   }
