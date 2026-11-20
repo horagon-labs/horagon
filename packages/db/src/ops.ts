@@ -191,16 +191,27 @@ export async function markAtasChecked(db: Db, atas: readonly string[], at: Date)
     .where(and(inArray(sponsoredAtas.ata, [...atas]), isNull(sponsoredAtas.closedAt)))
 }
 
-/** Closes the open creation of `ata`; a no-op when there is none. */
+/**
+ * Closes the open creation of `ata`; a no-op when there is none. With `createdSig`, only the open
+ * row of that creation: a close found for an older creation never lands on a newer one recorded
+ * in between.
+ */
 export async function markAtaClosed(
   db: Db,
   ata: string,
-  c: { closedSig: string | null; closedAt: Date; closedTo: string },
+  c: { closedSig: string | null; closedAt: Date; closedTo: string; createdSig?: string },
 ): Promise<void> {
+  const { createdSig, ...close } = c
   await db
     .update(sponsoredAtas)
-    .set({ ...c, checkedAt: c.closedAt })
-    .where(and(eq(sponsoredAtas.ata, ata), isNull(sponsoredAtas.closedAt)))
+    .set({ ...close, checkedAt: close.closedAt })
+    .where(
+      and(
+        eq(sponsoredAtas.ata, ata),
+        isNull(sponsoredAtas.closedAt),
+        ...(createdSig !== undefined ? [eq(sponsoredAtas.createdSig, createdSig)] : []),
+      ),
+    )
 }
 
 /** How many sponsor-paid ATAs `wallet` closed with the rent going anywhere but `sponsor`. */

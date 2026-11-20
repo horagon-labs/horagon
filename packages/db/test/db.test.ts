@@ -593,4 +593,42 @@ describe('sponsored ATAs', () => {
     expect(await all()).toEqual(before)
     expect(await atasClosedAway(h.db, 'W', 'SPONSOR')).toBe(0)
   })
+
+  it('markAtaClosed with a createdSig closes only that creation', async () => {
+    await recordSponsoredAtas(h.db, [row('a', 'c1', 0)])
+    // The close found for c1 arrives after c2 was recorded: it must not land on c2.
+    await recordSponsoredAtas(h.db, [row('a', 'c2', 20)])
+    await markAtaClosed(h.db, 'a', {
+      closedSig: 'x1',
+      closedAt: t(30),
+      closedTo: 'ELSEWHERE',
+      createdSig: 'c1',
+    })
+    expect((await open('a')).map((r) => r.createdSig)).toEqual(['c2'])
+    const before = await all()
+    expect(before[0]).toMatchObject({ createdSig: 'c1', closedTo: 'unknown', closedSig: null })
+    // A matching guard closes the open row.
+    await markAtaClosed(h.db, 'a', {
+      closedSig: 'x2',
+      closedAt: t(40),
+      closedTo: 'SPONSOR',
+      createdSig: 'c2',
+    })
+    expect(await open('a')).toEqual([])
+    expect((await all())[1]).toMatchObject({ closedSig: 'x2', closedTo: 'SPONSOR' })
+  })
+
+  it('markAtaClosed with a createdSig that does not match changes nothing', async () => {
+    await recordSponsoredAtas(h.db, [row('a', 'c1', 0)])
+    const before = await all()
+    await markAtaClosed(h.db, 'a', {
+      closedSig: 'x1',
+      closedAt: t(30),
+      closedTo: 'ELSEWHERE',
+      createdSig: 'older',
+    })
+    expect(await all()).toEqual(before)
+    expect((await open('a')).map((r) => r.createdSig)).toEqual(['c1'])
+    expect(await atasClosedAway(h.db, 'W', 'SPONSOR')).toBe(0)
+  })
 })
