@@ -43,6 +43,9 @@ Every failure is a `HoragonError` with a `code` (for example `SLIPPAGE_EXCEEDED`
 `RATE_LIMITED`) and often a `hint`. Test with `isHoragonError(err)`, not `instanceof`: the
 package ships ESM and CommonJS builds, and an app that loads both gets two classes.
 
+Horagon refuses mainnet. `assertNotMainnetGenesis(connection)` throws `MAINNET_DISABLED` when the
+RPC reports mainnet's genesis hash (`MAINNET_GENESIS_HASH`), whatever its URL.
+
 ## Time near the end of a market
 
 Liquidity shrinks with the square root of the time left, so a quote is only as good as its

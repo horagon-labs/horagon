@@ -4,6 +4,7 @@
 // `@horagon/sdk/program`. `@horagon/sdk/errors` holds the error types alone.
 export * from './amount'
 export * from './client'
+export * from './cluster'
 export * from './errors'
 export {
   canonicalize,
