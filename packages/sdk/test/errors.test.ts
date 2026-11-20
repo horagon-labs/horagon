@@ -6,6 +6,7 @@ import {
   HoragonError,
   type HoragonErrorCode,
   isHoragonError,
+  redactUrls,
 } from '../src/errors'
 
 describe('HoragonError', () => {
@@ -56,5 +57,20 @@ describe('errorSummary', () => {
     expect(errorSummary(new HoragonError('NETWORK', 'down')).code).toBe('NETWORK')
     expect(errorSummary({ InstructionError: [0, { Custom: 6004 }] }).message).toContain('6004')
     expect(errorSummary('api_key=abc&x=1').message).toBe('api_key=…&x=1')
+  })
+})
+
+describe('redactUrls userinfo', () => {
+  it('drops user:pass@ and keeps only the host', () => {
+    expect(redactUrls('https://user:s3cret@rpc.example.com/v1?x=1')).toBe(
+      'https://rpc.example.com/…',
+    )
+    expect(redactUrls('wss://tok@rpc.example.com:8900/ws')).toBe('wss://rpc.example.com:8900/…')
+  })
+
+  it('keeps the password out of an error summary', () => {
+    const s = errorSummary(new Error('fetch failed: https://user:s3cret@rpc.example.com/v1'))
+    expect(s.message).toContain('https://rpc.example.com/…')
+    expect(JSON.stringify(s)).not.toMatch(/s3cret|user:/)
   })
 })
