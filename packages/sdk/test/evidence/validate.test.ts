@@ -116,6 +116,48 @@ describe('parseResolutionEvidence', () => {
     expect(parseResolutionEvidence(postponed).status).toBe('postponed')
     rejects({ ...postponed, outcome: 'yes' }, /postponed game resolves NO/)
   })
+
+  it('rejects a postponed game that carries a score or periods', () => {
+    const postponed = {
+      ...FINAL,
+      status: 'postponed',
+      rule: 'postponed-over-7-days',
+      homeScore: 0,
+      awayScore: 0,
+      periods: [],
+      outcome: 'no',
+    }
+    rejects(
+      {
+        ...postponed,
+        homeScore: 100,
+        awayScore: 90,
+        periods: [
+          [50, 40],
+          [50, 50],
+        ],
+      },
+      /postponed game has no score or periods/,
+    )
+    rejects({ ...postponed, periods: [[0, 0]] }, /postponed game has no score or periods/)
+    rejects({ ...postponed, rule: 'winner-incl-ot' }, /postponed game uses rule/)
+  })
+
+  it('rejects a tied final score for kind 0', () => {
+    const tied = {
+      ...FINAL,
+      homeScore: 100,
+      awayScore: 100,
+      periods: [
+        [30, 30],
+        [30, 30],
+        [20, 20],
+        [20, 20],
+      ],
+      outcome: 'no',
+    }
+    rejects(tied, /NBA game cannot end tied/)
+  })
 })
 
 describe('outcomeFor', () => {

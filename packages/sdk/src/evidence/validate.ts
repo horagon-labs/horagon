@@ -69,6 +69,9 @@ export function parseResolutionEvidence(value: unknown): ResolutionEvidence {
   if (e.status === 'postponed') {
     if (e.rule !== POSTPONED_RULE) fail(`a postponed game uses rule ${POSTPONED_RULE}`)
     if (e.outcome !== 'no') fail('a postponed game resolves NO')
+    if (e.homeScore !== 0 || e.awayScore !== 0 || e.periods.length !== 0) {
+      fail('a postponed game has no score or periods')
+    }
     return e
   }
   if (e.rule !== EVIDENCE_RULES[e.kind]) fail(`kind ${e.kind} uses rule ${EVIDENCE_RULES[e.kind]}`)
