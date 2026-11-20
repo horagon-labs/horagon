@@ -1,7 +1,7 @@
 // RFC 9457 problem details with Horagon's error code (spec 19.3). Every error leaves the API
 // through `problemResponse`; nothing else ever reaches the client, so an exception's text
 // (which may hold an RPC URL or a stack) is logged, not echoed.
-import { DEFAULT_HINTS, type HoragonErrorCode, isHoragonError } from '@horagon/sdk'
+import { DEFAULT_HINTS, type HoragonErrorCode, isHoragonError, redactUrls } from '@horagon/sdk'
 
 export const STATUS_BY_CODE: Readonly<Record<HoragonErrorCode, number>> = {
   INVALID_INPUT: 400,
@@ -18,6 +18,10 @@ export const STATUS_BY_CODE: Readonly<Record<HoragonErrorCode, number>> = {
   NETWORK: 502,
 }
 
+/** The hint of an unexpected server fault: nothing the client can fix on its side. */
+export const SERVER_FAULT_HINT =
+  'Something failed on the server. Retry in a few seconds; if it persists, report the request id.'
+
 /** An error meant for the client: its message and fields are safe to show. */
 export class ApiError extends Error {
   constructor(
@@ -29,9 +33,11 @@ export class ApiError extends Error {
       reason?: string
       programCode?: number
       retryAfterSecs?: number
+      /** What went wrong underneath, for the logs only: never serialized into the response. */
+      cause?: unknown
     } = {},
   ) {
-    super(message)
+    super(message, extra.cause === undefined ? undefined : { cause: extra.cause })
     this.name = 'ApiError'
   }
 }
@@ -63,13 +69,14 @@ export function problemBody(err: unknown, requestId?: string): ProblemBody {
       ...(requestId ? { requestId } : {}),
     }
   }
-  // HoragonError messages are written for users (SDK input checks, program error mapping).
+  // HoragonError messages are written for users (SDK input checks, program error mapping), but
+  // one built from an RPC failure can still quote a URL: redact it.
   if (isHoragonError(err)) {
     return {
       type: `https://horagon.com/docs/errors#${err.code.toLowerCase()}`,
       title: err.code,
       status: STATUS_BY_CODE[err.code],
-      detail: err.message,
+      detail: redactUrls(err.message),
       code: err.code,
       hint: err.hint,
       ...(err.programCode === undefined ? {} : { programCode: err.programCode }),
@@ -82,17 +89,24 @@ export function problemBody(err: unknown, requestId?: string): ProblemBody {
     status: 500,
     detail: 'Internal error. Retry; if it persists, report the request id.',
     code: 'NETWORK',
-    hint: DEFAULT_HINTS.NETWORK,
+    hint: SERVER_FAULT_HINT,
     ...(requestId ? { requestId } : {}),
   }
+}
+
+function retryAfterOf(err: unknown): number | undefined {
+  if (err instanceof ApiError) return err.extra.retryAfterSecs
+  if (isHoragonError(err)) return err.retryAfterSecs
+  return undefined
 }
 
 export function problemResponse(err: unknown, requestId?: string): Response {
   const body = problemBody(err, requestId)
   const headers = new Headers({ 'content-type': 'application/problem+json' })
   if (requestId) headers.set('x-request-id', requestId)
-  if (err instanceof ApiError && err.extra.retryAfterSecs !== undefined) {
-    headers.set('retry-after', String(Math.max(1, Math.ceil(err.extra.retryAfterSecs))))
+  const retryAfter = retryAfterOf(err)
+  if (retryAfter !== undefined && Number.isFinite(retryAfter)) {
+    headers.set('retry-after', String(Math.max(1, Math.ceil(retryAfter))))
   }
   return new Response(JSON.stringify(body), { status: body.status, headers })
 }

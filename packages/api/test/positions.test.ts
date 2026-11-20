@@ -158,3 +158,57 @@ describe('aggregatePositions', () => {
     ])
   })
 })
+
+describe('aggregatePositions ordering and exact values', () => {
+  const at = (t: TradeRow, slot: bigint, sig: string, second: number): TradeRow => ({
+    ...t,
+    slot,
+    sig: sig.padEnd(88, 'x'),
+    blockTime: new Date(second * 1000),
+  })
+
+  it('orders flows of one second by slot, not by signature', () => {
+    const [p] = aggregatePositions({
+      trades: [
+        at(trade(8n * U, -10n * U, 0n), 6n, 'a-sell', 100),
+        at(trade(-10n * U, 20n * U, 0n), 5n, 'b-buy', 100),
+      ],
+      claims: [],
+      markets: [market()],
+      prices: new Map([[M, 0.5]]),
+    })
+    // Buy 20 for 10, then sell 10 for 8: 10 left at cost 5, realized +3, value 5.
+    expect(p).toMatchObject({ shares: '10', costUsdc: '5', valueUsdc: '5', pnlUsdc: '3' })
+  })
+
+  it('still takes the shares off and books the proceeds of a sell ordered before its buy', () => {
+    const [p] = aggregatePositions({
+      trades: [
+        at(trade(8n * U, -10n * U, 0n), 7n, 'a-sell', 100),
+        at(trade(-10n * U, 20n * U, 0n), 7n, 'b-buy', 100),
+      ],
+      claims: [],
+      markets: [market()],
+      prices: new Map([[M, 0.5]]),
+    })
+    // Same slot, the sell's signature sorts first: 10 shares, and the same total P&L (+3).
+    expect(p).toMatchObject({ shares: '10', costUsdc: '10', valueUsdc: '5', pnlUsdc: '3' })
+  })
+
+  it('values shares in exact base units: 100 at 0.29 is worth 29', () => {
+    const home = aggregatePositions({
+      trades: [trade(-29n * U, 100n * U, 0n)],
+      claims: [],
+      markets: [market()],
+      prices: new Map([[M, 0.29]]),
+    })
+    expect(home[0]).toMatchObject({ valueUsdc: '29', pnlUsdc: '0' })
+    const away = aggregatePositions({
+      trades: [trade(-29n * U, 0n, 100n * U)],
+      claims: [],
+      markets: [market()],
+      prices: new Map([[M, 0.71]]),
+    })
+    expect(away[0]).toMatchObject({ side: 'away', valueUsdc: '29', pnlUsdc: '0' })
+  })
+})

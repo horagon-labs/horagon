@@ -25,33 +25,55 @@ interface Flow {
   usdc: bigint
   /** A claim pays only the winning side; its USDC is credited to that side's book. */
   claim: boolean
-  order: [number, string, number]
+  /** Block time (ms), slot, signature, instruction index. */
+  order: [number, bigint, string, number]
 }
 
 const RESOLVED: ReadonlySet<string> = new Set(['finalized', 'recycled'])
+const MICROS = 1_000_000n
 
+/** A price in [0, 1] as integer millionths, rounded half up, so value math stays in bigint. */
+function toMicros(price: number): bigint {
+  return BigInt(Math.round(price * 1_000_000))
+}
+/** Claims carry no slot: within one second they sort after the trades. */
+const NO_SLOT = 2n ** 64n
+
+const compareText = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0)
+
+/**
+ * Oldest first. Block time has 1 s resolution, so the slot orders flows within a second; block
+ * time stays the first key because claims have no slot, and it never decreases from slot to slot.
+ */
 function flows(trades: TradeRow[], claims: ClaimRow[]): Flow[] {
   const out: Flow[] = [
-    ...trades.map((t) => ({
-      market: t.market,
-      yes: t.yesDelta,
-      no: t.noDelta,
-      usdc: t.usdcDelta,
-      claim: false,
-      order: [t.blockTime.getTime(), t.sig, t.ixIndex] as [number, string, number],
-    })),
-    ...claims.map((c) => ({
-      market: c.market,
-      yes: c.yesDelta,
-      no: c.noDelta,
-      usdc: c.usdcAmount,
-      claim: c.kind === 'claim',
-      order: [c.blockTime.getTime(), c.sig, c.ixIndex] as [number, string, number],
-    })),
+    ...trades.map(
+      (t): Flow => ({
+        market: t.market,
+        yes: t.yesDelta,
+        no: t.noDelta,
+        usdc: t.usdcDelta,
+        claim: false,
+        order: [t.blockTime.getTime(), t.slot, t.sig, t.ixIndex],
+      }),
+    ),
+    ...claims.map(
+      (c): Flow => ({
+        market: c.market,
+        yes: c.yesDelta,
+        no: c.noDelta,
+        usdc: c.usdcAmount,
+        claim: c.kind === 'claim',
+        order: [c.blockTime.getTime(), NO_SLOT, c.sig, c.ixIndex],
+      }),
+    ),
   ]
   return out.sort(
     (a, b) =>
-      a.order[0] - b.order[0] || a.order[1].localeCompare(b.order[1]) || a.order[2] - b.order[2],
+      a.order[0] - b.order[0] ||
+      (a.order[1] < b.order[1] ? -1 : a.order[1] > b.order[1] ? 1 : 0) ||
+      compareText(a.order[2], b.order[2]) ||
+      a.order[3] - b.order[3],
   )
 }
 
@@ -61,11 +83,17 @@ function apply(books: { home: Book; away: Book }, f: Flow, winner: Side | null):
     { side: 'away', book: books.away, delta: f.no, sold: 0n, removed: 0n },
   ]
   for (const leg of legs) {
-    if (leg.delta >= 0n || leg.book.shares <= 0n) continue
-    // biome-ignore lint/complexity/useMathMinMax: bigint operands; Math.min takes numbers only
-    leg.sold = -leg.delta > leg.book.shares ? leg.book.shares : -leg.delta
-    leg.removed = (leg.book.cost * leg.sold) / leg.book.shares
-    leg.book.cost -= leg.removed
+    if (leg.delta >= 0n) continue
+    leg.sold = -leg.delta
+    // Cost leaves with the shares that carry it. Shares the book does not hold (a sell ordered
+    // before its buy within one slot, or tokens from outside Horagon) carry none, but they still
+    // leave the book, and their proceeds are booked as realized below.
+    if (leg.book.shares > 0n) {
+      // biome-ignore lint/complexity/useMathMinMax: bigint operands; Math.min takes numbers only
+      const covered = leg.sold > leg.book.shares ? leg.book.shares : leg.sold
+      leg.removed = (leg.book.cost * covered) / leg.book.shares
+      leg.book.cost -= leg.removed
+    }
     leg.book.shares -= leg.sold
   }
   const removed = legs.reduce((n, l) => n + l.removed, 0n)
@@ -135,21 +163,23 @@ export function aggregatePositions(input: PositionInputs): Position[] {
       const book = books[side]
       if (book.shares === 0n && book.realized === 0n && book.cost === 0n) continue
       const price = side === 'home' ? yesPrice : 1 - yesPrice
-      const value = BigInt(Math.floor(Number(book.shares) * price))
+      // A book can dip below zero (shares it never saw bought); show it as holding none.
+      const shares = book.shares > 0n ? book.shares : 0n
+      const value = (shares * toMicros(price)) / MICROS
       const winning = resolved && (side === 'home') === (m.outcome === 'yes')
       out.push({
         market,
         gameId: m.gameId,
         kind: marketKindName(m.kind),
         side,
-        shares: formatAmount(book.shares),
+        shares: formatAmount(shares),
         costUsdc: formatAmount(book.cost),
         valueUsdc: formatAmount(value),
         pnlUsdc: formatAmount(value - book.cost + book.realized),
         price: resolved ? price : input.prices.get(market) === undefined ? null : price,
         marketStatus: m.status as MarketStatus,
         outcome: (m.outcome as Outcome | null) ?? null,
-        claimable: winning && book.shares > 0n,
+        claimable: winning && shares > 0n,
       })
     }
   }
