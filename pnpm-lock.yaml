@@ -63,7 +63,7 @@ importers:
     devDependencies:
       '@anchor-lang/core':
         specifier: ^1.2.2
-        version: 1.2.2(bufferutil@4.2.0)(typescript@5.9.3)(utf-8-validate@6.0.6)
+        version: 1.2.2(bufferutil@4.2.0)(typescript@5.9.3)
       '@horagon/pm-amm-vendor':
         specifier: workspace:*
         version: link:vendor/pm-amm
@@ -90,7 +90,7 @@ importers:
     dependencies:
       '@anchor-lang/core':
         specifier: ^1.2.2
-        version: 1.2.2(bufferutil@4.2.0)(typescript@5.9.3)(utf-8-validate@6.0.6)
+        version: 1.2.2(bufferutil@4.2.0)(typescript@5.9.3)
       '@solana/spl-token':
         specifier: ^0.4.15
         version: 0.4.15(@solana/web3.js@1.99.0(bufferutil@4.2.0)(typescript@5.9.3)(utf-8-validate@6.0.6))(bufferutil@4.2.0)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)(utf-8-validate@6.0.6)
@@ -112,7 +112,7 @@ importers:
     dependencies:
       '@anchor-lang/core':
         specifier: ^1.2.2
-        version: 1.2.2(bufferutil@4.2.0)(typescript@5.9.3)(utf-8-validate@6.0.6)
+        version: 1.2.2(bufferutil@4.2.0)(typescript@5.9.3)
       '@horagon/api':
         specifier: workspace:*
         version: link:../packages/api
@@ -135,6 +135,28 @@ importers:
       tsx:
         specifier: ^4.23.15
         version: 4.23.15
+      typescript:
+        specifier: ~5.9.3
+        version: 5.9.3
+      vitest:
+        specifier: ^5.1.0
+        version: 5.1.0(@types/node@22.20.5)(@vitest/coverage-v8@5.1.0)(vite@8.3.8(@types/node@22.20.5)(esbuild@0.28.2)(tsx@4.23.15))
+
+  tests:
+    dependencies:
+      '@horagon/sdk':
+        specifier: workspace:*
+        version: link:../packages/sdk
+      '@solana/spl-token':
+        specifier: ^0.4.15
+        version: 0.4.15(@solana/web3.js@1.99.0(bufferutil@4.2.0)(typescript@5.9.3)(utf-8-validate@6.0.6))(bufferutil@4.2.0)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)(utf-8-validate@6.0.6)
+      '@solana/web3.js':
+        specifier: ^1.98.4
+        version: 1.99.0(bufferutil@4.2.0)(typescript@5.9.3)(utf-8-validate@6.0.6)
+    devDependencies:
+      '@types/node':
+        specifier: ^22.20.5
+        version: 22.20.5
       typescript:
         specifier: ~5.9.3
         version: 5.9.3
@@ -1674,7 +1696,7 @@ snapshots:
       bn.js: 5.2.5
       buffer-layout: 1.2.2
 
-  '@anchor-lang/core@1.2.2(bufferutil@4.2.0)(typescript@5.9.3)(utf-8-validate@6.0.6)':
+  '@anchor-lang/core@1.2.2(bufferutil@4.2.0)(typescript@5.9.3)':
     dependencies:
       '@anchor-lang/borsh': 1.2.2(@solana/web3.js@1.99.0(bufferutil@4.2.0)(typescript@5.9.3))
       '@anchor-lang/errors': 1.2.2
@@ -2296,7 +2318,7 @@ snapshots:
       obug: 3.0.0
       std-env: 4.3.0
       tinyrainbow: 3.2.0
-      vitest: 5.1.0(@types/node@22.20.5)(@vitest/coverage-v8@5.1.0)(vite@8.3.8(@types/node@22.20.5)(esbuild@0.27.7)(tsx@4.23.15))
+      vitest: 5.1.0(@types/node@22.20.5)(@vitest/coverage-v8@5.1.0)(vite@8.3.8(@types/node@22.20.5)(esbuild@0.28.2)(tsx@4.23.15))
 
   '@vitest/istanbul-lib-coverage@2.1.0': {}
 

@@ -1,0 +1,570 @@
+// The horagon program against real pm-AMM, on Surfpool (a devnet fork: pm-AMM and Metaplex
+// load on first use). Spec 15 and 20.3: the whole lifecycle, plus a wrong-signer call for
+// every instruction, and quote parity near end_ts. Needs a FRESH Surfpool process with the
+// program deployed (Config is a singleton, and the clock only moves forward):
+//   HORAGON_IT_RPC=http://127.0.0.1:8899 pnpm --filter @horagon/integration test
+// The admin signs initialize_config, so it must be the program's upgrade authority on that
+// Surfpool: a throwaway key used to deploy there, read from HORAGON_IT_ADMIN (a keypair JSON
+// path, default .keys/it-admin.json). Never the devnet deployer.
+import { createHash } from 'node:crypto'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import {
+  buildClaimWinningsIx,
+  buildTradeTransaction,
+  CREATE_MARKET_COMPUTE_UNITS,
+  decodeMarketAccount,
+  failedProgramError,
+  HEAVY_IX_COMPUTE_UNITS,
+  HoragonProgram,
+  type HoragonProgramErrorName,
+  marketIdFor,
+  marketName,
+  quoteSwap,
+  type SwapDirection,
+  toPoolState,
+  tradeAtas,
+} from '@horagon/sdk'
+import {
+  createAssociatedTokenAccountIdempotentInstruction,
+  createMint,
+  getAccount,
+  getAssociatedTokenAddressSync,
+  mintTo,
+} from '@solana/spl-token'
+import {
+  ComputeBudgetProgram,
+  Connection,
+  Keypair,
+  LAMPORTS_PER_SOL,
+  PublicKey,
+  SYSVAR_CLOCK_PUBKEY,
+  SystemProgram,
+  type TransactionInstruction,
+  TransactionMessage,
+  VersionedTransaction,
+} from '@solana/web3.js'
+import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+
+const RPC = process.env.HORAGON_IT_RPC
+const ADMIN_KEY =
+  process.env.HORAGON_IT_ADMIN ?? join(import.meta.dirname, '../../.keys/it-admin.json')
+const USDC = 1_000_000n
+const SEED = 1_000n * USDC
+const WINDOW_SECS = 60
+
+class TxFailed extends Error {
+  constructor(
+    readonly signature: string,
+    readonly logs: string[],
+  ) {
+    super(`${signature} failed:\n${logs.join('\n')}`)
+  }
+}
+
+const loadKeypair = (path: string) =>
+  Keypair.fromSecretKey(Uint8Array.from(JSON.parse(readFileSync(path, 'utf8')) as number[]))
+
+describe.skipIf(!RPC)('horagon program on Surfpool', () => {
+  const conn = new Connection(RPC ?? 'http://127.0.0.1:8899', 'confirmed')
+  const admin = RPC ? loadKeypair(ADMIN_KEY) : Keypair.generate()
+  const attestor = Keypair.generate()
+  const guardian = Keypair.generate()
+  const stranger = Keypair.generate()
+  const trader = Keypair.generate()
+  const externalId = `it${Date.now() % 1e9}`
+  let mint: PublicKey
+  let program: HoragonProgram
+  let marketId: bigint
+  let residualMarketId: bigint
+  let endTs: number
+
+  async function sendTx(tx: VersionedTransaction, signers: Keypair[]): Promise<string> {
+    tx.sign(signers)
+    const signature = await conn.sendTransaction(tx, { skipPreflight: true })
+    const latest = await conn.getLatestBlockhash('confirmed')
+    // web3.js resolves with value.err when the signature subscription sees the failure, but
+    // rejects with the bare TransactionError when its first status poll does (Surfpool is fast
+    // enough for either), so both paths end here.
+    const err = await conn.confirmTransaction({ signature, ...latest }, 'confirmed').then(
+      (res) => res.value.err,
+      (e: unknown) => e,
+    )
+    if (err) {
+      const t = await conn.getTransaction(signature, {
+        commitment: 'confirmed',
+        maxSupportedTransactionVersion: 0,
+      })
+      // Not a failed transaction (an expired blockhash, an RPC error): rethrow as is.
+      if (!t?.meta?.err) throw err
+      throw new TxFailed(signature, t.meta.logMessages ?? [])
+    }
+    return signature
+  }
+
+  /** Numbers worth keeping from a run (compute units by transaction, amounts); printed last. */
+  const measured: Record<string, number> = {}
+  /** The compute units a whole transaction consumed (from its meta), under the limit it set. */
+  async function measure(label: string, signature: string, limit: number): Promise<void> {
+    const t = await conn.getTransaction(signature, {
+      commitment: 'confirmed',
+      maxSupportedTransactionVersion: 0,
+    })
+    const used = t?.meta?.computeUnitsConsumed
+    if (used === undefined) throw new Error(`${label}: no computeUnitsConsumed in the meta`)
+    expect(used, `${label} compute units`).toBeLessThan(limit)
+    measured[`${label} CU`] = used
+  }
+  afterAll(() => {
+    if (Object.keys(measured).length > 0) console.info(`measured: ${JSON.stringify(measured)}`)
+  })
+
+  async function send(
+    ixs: TransactionInstruction[],
+    payer: Keypair,
+    others: Keypair[] = [],
+    units = 400_000,
+  ): Promise<string> {
+    const { blockhash } = await conn.getLatestBlockhash('confirmed')
+    const message = new TransactionMessage({
+      payerKey: payer.publicKey,
+      recentBlockhash: blockhash,
+      instructions: [ComputeBudgetProgram.setComputeUnitLimit({ units }), ...ixs],
+    }).compileToV0Message()
+    const signers = [payer, ...others.filter((k) => !k.publicKey.equals(payer.publicKey))]
+    return sendTx(new VersionedTransaction(message), signers)
+  }
+
+  async function expectError(
+    p: Promise<unknown>,
+    expected: { name: HoragonProgramErrorName } | { code: number } | { program: 'pm-amm' },
+  ) {
+    const err = await p.then(
+      () => undefined,
+      (e: unknown) => e,
+    )
+    expect(err, 'the transaction should have failed').toBeInstanceOf(TxFailed)
+    const failed = failedProgramError((err as TxFailed).logs, program.programId)
+    if ('program' in expected) expect(failed?.program).toBe('pm-amm')
+    else expect(failed).toMatchObject({ program: 'horagon', ...expected })
+  }
+
+  async function chainTime(): Promise<number> {
+    const info = await conn.getAccountInfo(SYSVAR_CLOCK_PUBKEY, 'confirmed')
+    if (!info) throw new Error('no Clock sysvar')
+    return Number(info.data.readBigInt64LE(32))
+  }
+
+  /** surfnet_timeTravel takes milliseconds; verify the Clock instead of trusting the call. */
+  async function travelTo(unixSecs: number): Promise<void> {
+    if ((await chainTime()) >= unixSecs) return
+    const res = await fetch(RPC as string, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'surfnet_timeTravel',
+        params: [{ absoluteTimestamp: unixSecs * 1000 }],
+      }),
+    })
+    const body = (await res.json()) as { error?: unknown }
+    if (body.error) throw new Error(`surfnet_timeTravel: ${JSON.stringify(body.error)}`)
+    for (let i = 0; i < 40 && (await chainTime()) < unixSecs; i++) {
+      await new Promise((r) => setTimeout(r, 250))
+    }
+    expect(await chainTime()).toBeGreaterThanOrEqual(unixSecs)
+  }
+
+  const balance = async (owner: PublicKey) =>
+    (await getAccount(conn, getAssociatedTokenAddressSync(mint, owner, true), 'confirmed')).amount
+  const gameMarket = async (id = marketId) => {
+    const gm = await program.fetchGameMarket(conn, id)
+    if (!gm) throw new Error('GameMarket missing')
+    return gm
+  }
+  const evidenceHash = createHash('sha256').update(externalId).digest()
+
+  beforeAll(async () => {
+    for (const k of [admin, attestor, guardian, stranger, trader]) {
+      const sig = await conn.requestAirdrop(k.publicKey, 20e9)
+      await conn.confirmTransaction(sig, 'confirmed')
+    }
+    if (await new HoragonProgram({ collateralMint: PublicKey.default }).fetchConfig(conn)) {
+      throw new Error(
+        'Config already exists: restart Surfpool so the run starts from a fresh chain',
+      )
+    }
+    mint = await createMint(conn, admin, admin.publicKey, null, 6)
+    program = new HoragonProgram({ collateralMint: mint })
+    const fund = (owner: PublicKey) =>
+      createAssociatedTokenAccountIdempotentInstruction(
+        admin.publicKey,
+        getAssociatedTokenAddressSync(mint, owner, true),
+        owner,
+        mint,
+      )
+    // The Authority PDA pays the rent of every pm-AMM market it creates (0.03538 SOL in S2).
+    const rent = SystemProgram.transfer({
+      fromPubkey: admin.publicKey,
+      toPubkey: program.authority,
+      lamports: LAMPORTS_PER_SOL,
+    })
+    await send(
+      [rent, fund(program.authority), fund(trader.publicKey), fund(admin.publicKey)],
+      admin,
+    )
+    await mintTo(conn, admin, mint, program.treasury, admin, 10_000n * USDC)
+    await mintTo(
+      conn,
+      admin,
+      mint,
+      getAssociatedTokenAddressSync(mint, trader.publicKey),
+      admin,
+      100n * USDC,
+    )
+    marketId = await marketIdFor('NBA', externalId, 0)
+  })
+
+  it('initialize_config: only the upgrade authority', async () => {
+    const init = (who: Keypair) =>
+      program.ix.initializeConfig({
+        admin: who.publicKey,
+        attestor: attestor.publicKey,
+        guardians: [guardian.publicKey, PublicKey.default],
+        disputeWindowSecs: WINDOW_SECS,
+      })
+    // The upgrade-authority constraint names its error (`@ HoragonError::Unauthorized`).
+    await expectError(send([init(stranger)], stranger), { name: 'Unauthorized' })
+    await send([init(admin)], admin)
+    expect(await program.fetchConfig(conn)).toMatchObject({
+      admin: admin.publicKey,
+      attestor: attestor.publicKey,
+      disputeWindowSecs: WINDOW_SECS,
+      creationPaused: false,
+    })
+  })
+
+  it('update_config and withdraw_treasury: admin only', async () => {
+    await expectError(
+      send(
+        [program.ix.updateConfig({ admin: stranger.publicKey, creationPaused: true })],
+        stranger,
+      ),
+      { name: 'Unauthorized' },
+    )
+    const withdraw = (who: Keypair) =>
+      program.ix.withdrawTreasury({
+        admin: who.publicKey,
+        destination: getAssociatedTokenAddressSync(mint, admin.publicKey),
+        amount: USDC,
+      })
+    await expectError(send([withdraw(stranger)], stranger), { name: 'Unauthorized' })
+    const before = await balance(admin.publicKey)
+    await send([withdraw(admin)], admin)
+    expect(await balance(admin.publicKey)).toBe(before + USDC)
+  })
+
+  const createIx = (
+    signer: PublicKey,
+    over: {
+      marketId?: bigint
+      externalGameId?: string
+      endTs?: number
+      initialPriceBps?: number
+      seedAmount?: bigint
+    } = {},
+  ) =>
+    program.ix.createGameMarket({
+      attestor: signer,
+      marketId: over.marketId ?? marketId,
+      kind: 0,
+      league: 'NBA',
+      externalGameId: over.externalGameId ?? externalId,
+      home: 'BOS',
+      away: 'NYK',
+      scheduledTipoff: endTs - 7_800,
+      endTs: over.endTs ?? endTs,
+      name: marketName({
+        league: 'NBA',
+        away: 'NYK',
+        home: 'BOS',
+        gameDate: '2026-11-24',
+        kind: 0,
+      }),
+      initialPriceBps: over.initialPriceBps ?? 6_000,
+      seedAmount: over.seedAmount ?? SEED,
+    })
+
+  it('create_game_market: attestor only, validated, paused refuses, seeds from the treasury', async () => {
+    const now = await chainTime()
+    endTs = now + 600
+    const sendCreate = (ix: TransactionInstruction, who: Keypair) =>
+      send([ix], who, [], CREATE_MARKET_COMPUTE_UNITS)
+    const create = (who: Keypair, over = {}) => sendCreate(createIx(who.publicKey, over), who)
+    await expectError(create(stranger), { name: 'Unauthorized' })
+    await expectError(create(attestor, { endTs: now + 100 }), { name: 'EndTooSoon' })
+    // The SDK refuses the price before signing; to reach the program's own check, encode a
+    // valid price and patch the u16, which only the u64 seed amount follows.
+    expect(() => createIx(attestor.publicKey, { initialPriceBps: 400 })).toThrow(/initialPriceBps/)
+    const lowPrice = createIx(attestor.publicKey)
+    lowPrice.data.writeUInt16LE(400, lowPrice.data.length - 10)
+    await expectError(sendCreate(lowPrice, attestor), { name: 'PriceOutOfRange' })
+    await expectError(create(attestor, { seedAmount: 1_000_000n * USDC }), {
+      name: 'InsufficientTreasury',
+    })
+
+    await send([program.ix.updateConfig({ admin: admin.publicKey, creationPaused: true })], admin)
+    await expectError(create(attestor), { name: 'CreationPaused' })
+    await send([program.ix.updateConfig({ admin: admin.publicKey, creationPaused: false })], admin)
+
+    const treasuryBefore = await balance(program.authority)
+    await measure('create_game_market', await create(attestor), CREATE_MARKET_COMPUTE_UNITS)
+    const gm = await gameMarket()
+    expect(gm).toMatchObject({
+      status: 'open',
+      seedAmount: SEED,
+      endTs,
+      externalGameId: externalId,
+    })
+    const info = await conn.getAccountInfo(gm.market, 'confirmed')
+    expect(info && decodeMarketAccount(info).authority.equals(program.authority)).toBe(true)
+    expect(await balance(program.authority)).toBe(treasuryBefore - SEED)
+  })
+
+  const swapOn = async (market: PublicKey, direction: SwapDirection) => {
+    const { blockhash } = await conn.getLatestBlockhash('confirmed')
+    const p = {
+      user: trader.publicKey,
+      market,
+      collateralMint: mint,
+      authority: program.authority,
+    }
+    const tx = buildTradeTransaction({
+      feePayer: trader.publicKey,
+      recentBlockhash: blockhash,
+      swap: { ...p, direction, amountIn: 20n * USDC, minOut: 0n },
+      createAtas: tradeAtas(p),
+    })
+    return sendTx(tx, [trader])
+  }
+  const swap = async () => swapOn((await gameMarket()).market, 'usdcToYes')
+
+  // Never halted, so its LpPosition is still open at finalize and recycle must claim the LP
+  // residuals before the winnings; the halted market skips that step. It opens now, with the
+  // same end_ts, because the clock only moves forward.
+  it('a second market, never halted, opens and trades', async () => {
+    const externalGameId = `${externalId}r`
+    residualMarketId = await marketIdFor('NBA', externalGameId, 0)
+    await send(
+      [createIx(attestor.publicKey, { marketId: residualMarketId, externalGameId })],
+      attestor,
+      [],
+      CREATE_MARKET_COMPUTE_UNITS,
+    )
+    const gm = await gameMarket(residualMarketId)
+    expect(gm).toMatchObject({ status: 'open', endTs, externalGameId })
+    await swapOn(gm.market, 'usdcToNo')
+  })
+
+  it('a player swaps; halt is attestor or guardian only and stops trading', async () => {
+    await swap()
+    const halt = (who: Keypair) =>
+      program.ix.halt({ signer: who.publicKey, marketId }, who.publicKey)
+    await expectError(send(halt(stranger), stranger, [], HEAVY_IX_COMPUTE_UNITS), {
+      name: 'Unauthorized',
+    })
+    const sig = await send(halt(attestor), attestor, [], HEAVY_IX_COMPUTE_UNITS)
+    await measure('halt', sig, HEAVY_IX_COMPUTE_UNITS)
+    expect((await gameMarket()).status).toBe('halted')
+    await expectError(swap(), { program: 'pm-amm' })
+  })
+
+  const propose = (who: Keypair, id = marketId) =>
+    send(
+      [
+        program.ix.proposeResult({
+          signer: who.publicKey,
+          marketId: id,
+          outcome: 'yes',
+          evidenceHash,
+          evidenceUri: `https://horagon.invalid/api/v1/evidence/nba-${externalId}/winner`,
+        }),
+      ],
+      who,
+    )
+
+  it('propose_result: not before end_ts, attestor or guardian only', async () => {
+    await expectError(propose(attestor), { name: 'TooEarly' })
+    await travelTo(endTs + 1)
+    await expectError(propose(stranger), { name: 'Unauthorized' })
+    await propose(attestor)
+    const gm = await gameMarket()
+    expect(gm).toMatchObject({ status: 'proposed', proposedOutcome: 'yes' })
+    expect(Buffer.from(gm.evidenceHash).equals(evidenceHash)).toBe(true)
+  })
+
+  const challenge = (who: Keypair) =>
+    send([program.ix.challenge({ guardian: who.publicKey, marketId })], who)
+  const finalize = (payer: Keypair, id = marketId) =>
+    send([program.ix.finalize({ marketId: id })], payer, [], 1_400_000)
+  const recycle = (payer: Keypair, id = marketId) =>
+    send(program.ix.recycle({ marketId: id }, payer.publicKey), payer, [], HEAVY_IX_COMPUTE_UNITS)
+
+  it('challenge: guardians only, inside the window; a challenged result is proposed again', async () => {
+    await expectError(challenge(stranger), { name: 'Unauthorized' })
+    await expectError(challenge(attestor), { name: 'Unauthorized' })
+    await challenge(guardian)
+    expect((await gameMarket()).status).toBe('challenged')
+    await propose(attestor)
+    expect((await gameMarket()).status).toBe('proposed')
+  })
+
+  it('finalize: anyone, only after the window; resolves pm-AMM', async () => {
+    await expectError(finalize(stranger), { name: 'WindowOpen' })
+    const gm = await gameMarket()
+    await travelTo(gm.proposedAt + WINDOW_SECS + 1)
+    await expectError(challenge(guardian), { name: 'WindowClosed' })
+    await finalize(stranger)
+    expect((await gameMarket()).status).toBe('finalized')
+    const info = await conn.getAccountInfo(gm.market, 'confirmed')
+    expect(info && decodeMarketAccount(info)).toMatchObject({ resolved: true, winningSide: 1 })
+  })
+
+  it('the winner claims 1 mUSDC per YES share', async () => {
+    const market = (await gameMarket()).market
+    const info = await conn.getAccountInfo(market, 'confirmed')
+    if (!info) throw new Error('market account missing')
+    const yesAta = getAssociatedTokenAddressSync(
+      decodeMarketAccount(info).yesMint,
+      trader.publicKey,
+    )
+    const yes = (await getAccount(conn, yesAta, 'confirmed')).amount
+    expect(yes).toBeGreaterThan(0n)
+    const before = await balance(trader.publicKey)
+    await send(
+      [buildClaimWinningsIx({ user: trader.publicKey, market, collateralMint: mint })],
+      trader,
+    )
+    expect(await balance(trader.publicKey)).toBe(before + yes)
+  })
+
+  it('recycle: anyone, once; leftover mUSDC returns to the treasury', async () => {
+    const before = await balance(program.authority)
+    await measure('recycle (halted)', await recycle(stranger), HEAVY_IX_COMPUTE_UNITS)
+    expect((await gameMarket()).status).toBe('recycled')
+    expect(await balance(program.authority)).toBeGreaterThan(before)
+    await expectError(recycle(stranger), { name: 'BadStatus' })
+  })
+
+  it('recycle of a never-halted market recovers the LP residuals into the treasury', async () => {
+    await propose(attestor, residualMarketId)
+    const gm = await gameMarket(residualMarketId)
+    await travelTo(gm.proposedAt + WINDOW_SECS + 1)
+    await finalize(stranger, residualMarketId)
+    expect((await gameMarket(residualMarketId)).status).toBe('finalized')
+    const a = program.addresses(residualMarketId)
+    expect(await conn.getAccountInfo(a.lpPosition, 'confirmed')).not.toBeNull()
+
+    // The Authority holds no YES or NO of this market yet, so whatever the treasury gains came
+    // out of the LpPosition through claim_lp_residuals.
+    const before = await balance(program.authority)
+    const sig = await recycle(stranger, residualMarketId)
+    await measure('recycle (never halted)', sig, HEAVY_IX_COMPUTE_UNITS)
+    expect((await gameMarket(residualMarketId)).status).toBe('recycled')
+    const recovered = (await balance(program.authority)) - before
+    expect(recovered).toBeGreaterThan(0n)
+    measured['recovered (never halted), raw mUSDC'] = Number(recovered)
+    // claim_winnings burned every YES and NO the Authority held, the losing side included
+    // (pm-AMM closes the emptied accounts too).
+    for (const ata of [a.authorityYes, a.authorityNo]) {
+      const left = await getAccount(conn, ata, 'confirmed').catch(() => undefined)
+      expect(left?.amount ?? 0n).toBe(0n)
+    }
+  })
+
+  // Tier 0 final review: L_eff shrinks with the square root of the time left, so near end_ts a
+  // quote is only as good as its clock. Quoting the pool as it was before a swap, at the time
+  // the swap accrued, must give what the swap paid.
+  it('quotes match the chain at 30 s and 10 s left (time travel)', async () => {
+    const parityId = `${externalId}p`
+    const parityMarketId = await marketIdFor('NBA', parityId, 0)
+    const parityEnd = (await chainTime()) + 600
+    await send(
+      [
+        program.ix.createGameMarket({
+          attestor: attestor.publicKey,
+          marketId: parityMarketId,
+          kind: 0,
+          league: 'NBA',
+          externalGameId: parityId,
+          home: 'BOS',
+          away: 'NYK',
+          scheduledTipoff: parityEnd - 7_800,
+          endTs: parityEnd,
+          name: marketName({
+            league: 'NBA',
+            away: 'NYK',
+            home: 'BOS',
+            gameDate: '2026-11-25',
+            kind: 0,
+          }),
+          initialPriceBps: 6_000,
+          seedAmount: SEED,
+        }),
+      ],
+      attestor,
+      [],
+      CREATE_MARKET_COMPUTE_UNITS,
+    )
+    const gm = await program.fetchGameMarket(conn, parityMarketId)
+    if (!gm) throw new Error('parity GameMarket missing')
+    const marketState = async () => {
+      const info = await conn.getAccountInfo(gm.market, 'confirmed')
+      if (!info) throw new Error('market account missing')
+      return decodeMarketAccount(info)
+    }
+    const yesAta = getAssociatedTokenAddressSync((await marketState()).yesMint, trader.publicKey)
+    const yesHeld = async () =>
+      (await getAccount(conn, yesAta, 'confirmed').catch(() => undefined))?.amount ?? 0n
+    const p = {
+      user: trader.publicKey,
+      market: gm.market,
+      collateralMint: mint,
+      authority: program.authority,
+    }
+    const amountIn = 5n * USDC
+
+    for (const left of [30, 10]) {
+      await travelTo(parityEnd - left)
+      const before = toPoolState(await marketState())
+      const held = await yesHeld()
+      const { blockhash } = await conn.getLatestBlockhash('confirmed')
+      await sendTx(
+        buildTradeTransaction({
+          feePayer: trader.publicKey,
+          recentBlockhash: blockhash,
+          swap: { ...p, direction: 'usdcToYes', amountIn, minOut: 0n },
+          createAtas: tradeAtas(p),
+        }),
+        [trader],
+      )
+      const after = toPoolState(await marketState())
+      const got = (await yesHeld()) - held
+      // The swap accrued at its own Clock, before end_ts.
+      expect(after.lastAccrualTs).toBeGreaterThanOrEqual(parityEnd - left)
+      expect(after.lastAccrualTs).toBeLessThan(parityEnd)
+      const at = (now: number) => quoteSwap({ pool: before, direction: 'usdcToYes', amountIn, now })
+      const q = at(after.lastAccrualTs)
+      // Tier 0 measured 1.26e-7 on Surfpool and 1.06e-5 on devnet (docs/spikes.md).
+      expect(Math.abs(Number(q.amountOut - got)) / Number(got), `${left} s left`).toBeLessThan(1e-4)
+      expect(got).toBeGreaterThanOrEqual(q.minOut)
+      // A clock 5 s behind sees more time left, so a deeper pool: never less out.
+      expect(at(after.lastAccrualTs - 5).amountOut).toBeGreaterThanOrEqual(q.amountOut)
+      // A clock behind the pool's last accrual is moved up to it (`effectiveTime`).
+      expect(quoteSwap({ pool: after, direction: 'usdcToYes', amountIn, now: 0 })).toEqual(
+        quoteSwap({ pool: after, direction: 'usdcToYes', amountIn, now: after.lastAccrualTs }),
+      )
+    }
+  })
+})
