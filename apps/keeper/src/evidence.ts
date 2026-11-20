@@ -28,7 +28,8 @@ export type BoxScoreCheck =
   | {
       ok: true
       source: string
-      warning?: string /** Normalised href: store this one. */
+      warning?: string
+      /** Normalised href: store this one. */
       url?: string
     }
   | { ok: false; reason: string }
@@ -95,7 +96,11 @@ export function buildEvidence(p: EvidenceInput): ResolutionEvidence {
     outcome: postponed ? 'no' : outcomeFor(p.kind, p.draft.homeScore, p.draft.awayScore, periods),
     sources: [
       { name: 'espn', url: p.draft.sourceUrl, fetchedAt: isoSeconds(p.draft.fetchedAt) },
-      { name: p.confirmSource, url: p.confirmUrl, fetchedAt: isoSeconds(p.confirmedAt) },
+      {
+        name: p.confirmSource,
+        url: new URL(p.confirmUrl).href,
+        fetchedAt: isoSeconds(p.confirmedAt),
+      },
     ],
   }
   return parseResolutionEvidence(evidence)

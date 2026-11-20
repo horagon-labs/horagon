@@ -56,6 +56,8 @@ interface Ctx {
   sponsor?: string
   /** Where a row skipped for unreadable token flows is reported. */
   log?: Logger
+  /** Called for each row skipped for unreadable token flows, so it can be alerted. */
+  onSkip?: (sig: string, ixIndex: number) => void
 }
 
 const TOKEN_PROGRAMS = new Set([TOKEN_PROGRAM_ID.toBase58(), TOKEN_2022_PROGRAM_ID.toBase58()])
@@ -83,15 +85,22 @@ function base58Decode(text: string): Uint8Array {
   return Uint8Array.from(bytes.reverse())
 }
 
-/** Signed token movements (by account index) of the SPL Token CPIs inside one instruction. */
+/**
+ * Signed token movements (by account index) of the SPL Token CPIs inside one instruction.
+ * Undefined when a CPI names a program or account past the static keys (a lookup-table key):
+ * it cannot be read here, so the flows are never guessed.
+ */
 function tokenMoves(
   inner: {
     instructions: ReadonlyArray<{ programIdIndex: number; accounts: number[]; data: string }>
   },
   keys: readonly string[],
-): Array<{ account: number; delta: bigint }> {
+): Array<{ account: number; delta: bigint }> | undefined {
   const moves: Array<{ account: number; delta: bigint }> = []
   for (const ix of inner.instructions) {
+    if (ix.programIdIndex >= keys.length || ix.accounts.some((i) => i >= keys.length)) {
+      return undefined
+    }
     const program = keys[ix.programIdIndex]
     if (!program || !TOKEN_PROGRAMS.has(program)) continue
     const data = base58Decode(ix.data)
@@ -131,7 +140,7 @@ interface Flows {
 }
 
 /** Whole-transaction balance deltas: exact when the transaction holds one pm-AMM instruction. */
-function wholeTxFlows(tx: VersionedTransactionResponse, user: string, ctx: Ctx): Flows {
+export function wholeTxFlows(tx: VersionedTransactionResponse, user: string, ctx: Ctx): Flows {
   const fee =
     deltas(tx, PROTOCOL_DAO.toBase58(), ctx.collateralMint) +
     deltas(tx, ctx.authority, ctx.collateralMint)
@@ -159,6 +168,7 @@ function instructionFlows(
     owners.set(b.accountIndex, { ...(b.owner ? { owner: b.owner } : {}), mint: b.mint })
   }
   const moves = tokenMoves(inner, keys)
+  if (!moves) return undefined
   const net = (owner: string, mint: string) =>
     moves
       .filter((x) => {
@@ -231,6 +241,7 @@ export function decodeTransaction(
         : instructionFlows(tx, keys, ixIndex, user, ctx)
     if (!flows) {
       ctx.log?.warn({ market: m.pubkey, sig, ixIndex }, 'token flows not recorded; row skipped')
+      ctx.onSkip?.(sig, ixIndex)
       return
     }
     const { usdc, yes, no, fee } = flows
@@ -290,7 +301,9 @@ export function decodeTransaction(
 export interface StopState {
   sig: string
   count: number
+  /** When this market last warned; kept across signature changes. */
   warnedAt: number
+  /** An `index-stuck` send has been attempted (the alerter dedupes repeats). */
   alerted: boolean
 }
 
@@ -363,13 +376,19 @@ export async function indexOnce(
   return { trades, claims, prices }
 }
 
-/** A market stopped at `sig`: warn at most once a minute; alert once after STUCK_AFTER stops. */
+/**
+ * A market stopped at `sig`: warn at most once a minute per market; from STUCK_AFTER stops on,
+ * send `index-stuck` on every stop. The alerter's dedupe throttles it, and re-arms the key after
+ * a failed delivery, which is why this must not be a one-shot.
+ */
 async function noteStop(deps: IndexerDeps, m: MarketRow, sig: string): Promise<void> {
   const stops = deps.stops ?? defaultStops
   const now = deps.now()
   const prev = stops.get(m.pubkey)
   const st: StopState =
-    prev && prev.sig === sig ? prev : { sig, count: 0, warnedAt: -Infinity, alerted: false }
+    prev && prev.sig === sig
+      ? prev
+      : { sig, count: 0, warnedAt: prev?.warnedAt ?? -Infinity, alerted: false }
   st.count++
   stops.set(m.pubkey, st)
   if (now - st.warnedAt >= WARN_EVERY_SECS) {
@@ -379,7 +398,7 @@ async function noteStop(deps: IndexerDeps, m: MarketRow, sig: string): Promise<v
       'transaction not readable yet; indexing waits',
     )
   }
-  if (st.count >= STUCK_AFTER && !st.alerted) {
+  if (st.count >= STUCK_AFTER) {
     st.alerted = true
     await deps.alerts.send(
       `index-stuck:${m.pubkey}`,
@@ -413,8 +432,8 @@ async function indexMarket(
     if (page.length < 1000) break
     before = page.at(-1)?.signature
   }
+  // Nothing fetched: the market did not move past a signature, so a stall counter stays.
   if (!newestFetched) {
-    stops.delete(m.pubkey)
     return { trades: 0, claims: 0 }
   }
   const ordered = sigs.reverse()
@@ -424,6 +443,7 @@ async function indexMarket(
   let trades = 0
   let claims = 0
   let externalLp = false
+  const skipped: Array<{ sig: string; ixIndex: number }> = []
   scan: for (let i = 0; i < ordered.length; i += 50) {
     const chunk = ordered.slice(i, i + 50)
     const txs = await deps.connection.getTransactions(chunk, {
@@ -451,6 +471,7 @@ async function indexMarket(
         collateralMint: deps.collateralMint.toBase58(),
         authority: deps.authority.toBase58(),
         log: deps.log,
+        onSkip: (skippedSig, ixIndex) => skipped.push({ sig: skippedSig, ixIndex }),
         ...(deps.sponsor ? { sponsor: deps.sponsor.toBase58() } : {}),
       })
       await insertTrades(deps.db, d.trades)
@@ -460,6 +481,13 @@ async function indexMarket(
         deps.db,
         d.sponsoredAtas.map((a) => ({ ...a, createdSig: sig, createdAt })),
       )
+      // The row is gone for good (the cursor moves on): make the lost P&L visible.
+      for (const k of skipped.splice(0)) {
+        await deps.alerts.send(
+          `index-skip:${m.pubkey}`,
+          `Indexing of ${m.gameId} (market ${m.pubkey}) skipped a row: signature ${k.sig}, instruction ${k.ixIndex} has no readable token flows`,
+        )
+      }
       trades += d.trades.length
       claims += d.claims.length
       externalLp ||= d.externalLp

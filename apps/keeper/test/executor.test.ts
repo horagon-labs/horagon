@@ -45,6 +45,7 @@ function fakeConnection(script: Script) {
     priorities: [] as number[],
     rawSigs: [] as Uint8Array[],
     asked: [] as string[][],
+    order: [] as string[],
   }
   const conn: Record<string, unknown> = {
     async getLatestBlockhash() {
@@ -68,6 +69,7 @@ function fakeConnection(script: Script) {
       return `sig${calls.send}`
     },
     async getBlockHeight() {
+      calls.order.push('height')
       return script.height ? script.height() : 1_000
     },
     async confirmTransaction() {
@@ -80,6 +82,7 @@ function fakeConnection(script: Script) {
   const statuses = script.statuses ?? ((sigs: string[]) => sigs.map(() => null))
   conn.getSignatureStatuses = async (sigs: string[]) => {
     calls.asked.push(sigs)
+    calls.order.push('statuses')
     return { context: { slot: 1 }, value: statuses(sigs) }
   }
   return { conn: conn as unknown as Connection, calls }
@@ -384,6 +387,8 @@ describe('TxSender: landed transactions', () => {
     const r = await sender([conn]).send(spec())
     expect(calls.blockhashes).toBe(2)
     expect(r.attempts).toBe(2)
+    // Exactly two reads before the rebuild: one clean read is not enough, a third is not needed.
+    expect(calls.asked).toHaveLength(2)
   })
 
   it('reads the height before the statuses and ignores a height not yet past', async () => {
@@ -397,6 +402,11 @@ describe('TxSender: landed transactions', () => {
       .catch((x: Error) => x)
     expect(err).toBeInstanceOf(UnresolvedAttempt)
     expect(calls.blockhashes).toBe(1)
+    // Every lookup reads the height first, then the statuses.
+    expect(calls.order.length).toBeGreaterThan(2)
+    for (let i = 0; i < calls.order.length; i += 2) {
+      expect(calls.order.slice(i, i + 2)).toEqual(['height', 'statuses'])
+    }
   })
 
   it('waits for the last attempt before giving up, and succeeds if it confirms', async () => {
@@ -436,7 +446,7 @@ describe('TxSender: landed transactions', () => {
     await expect(p).rejects.toThrow(/x: unresolved after 90 s, [A-Za-z0-9]+ may still land/)
     expect(calls.blockhashes).toBe(1)
     expect(new Set(calls.rawSigs.map((x) => Buffer.from(x).toString('hex'))).size).toBe(1)
-    expect(a.sent).toEqual(['tx:x'])
+    expect(a.sent).toEqual(['tx-unresolved:x'])
     expect(sleeps.filter((ms) => ms === 1_000)).toHaveLength(90)
   })
 
@@ -456,7 +466,7 @@ describe('TxSender: landed transactions', () => {
       sender([conn], { alerts: a.alerter, sleep: async (ms) => void sleeps.push(ms) }).send(spec()),
     ).rejects.toBeInstanceOf(UnresolvedAttempt)
     expect(calls.blockhashes).toBe(1)
-    expect(a.sent).toEqual(['tx:x'])
+    expect(a.sent).toEqual(['tx-unresolved:x'])
     expect(sleeps.filter((ms) => ms === 1_000)).toHaveLength(90)
   })
 
@@ -541,7 +551,7 @@ describe('TxSender: landed transactions', () => {
     expect(err).toBeInstanceOf(UnresolvedAttempt)
     expect(calls.blockhashes).toBe(1)
     expect(new Set(calls.rawSigs.map((x) => Buffer.from(x).toString('hex'))).size).toBe(1)
-    expect(a.sent).toEqual(['tx:x'])
+    expect(a.sent).toEqual(['tx-unresolved:x'])
     expect(lines.join(',')).toContain('signature status lookup failed')
     expect(lines.join(',')).not.toContain('SECRETKEY')
   })
@@ -635,6 +645,76 @@ describe('TxSender: landed transactions', () => {
     expect(r.attempts).toBe(2)
     expect(lines.join(',')).toContain('isDone failed')
     expect(lines.join(',')).not.toContain('SECRETKEY')
+  })
+})
+
+describe('TxSender: unresolved attempts', () => {
+  const refused = () =>
+    new TypeError('fetch failed', {
+      cause: Object.assign(new Error('c'), { code: 'ECONNREFUSED' }),
+    })
+
+  it('delivers both the 4th-failure alert and the unresolved alert, under different keys', async () => {
+    const { conn } = fakeConnection({
+      send: [refused(), refused(), refused(), refused()],
+      confirm: [new Error('timeout')],
+      statuses: () => [{ err: null, confirmationStatus: 'processed' }],
+    })
+    const a = alerts()
+    await expect(sender([conn], { alerts: a.alerter }).send(spec())).rejects.toBeInstanceOf(
+      UnresolvedAttempt,
+    )
+    expect(a.sent).toEqual(['tx:x', 'tx-unresolved:x'])
+    expect(a.texts[1]).toMatch(/may still land/)
+  })
+
+  it('caps on the give-up path with one unresolved alert', async () => {
+    const { conn } = fakeConnection({
+      send: [new Error('timeout')],
+      statuses: () => [{ err: null, confirmationStatus: 'processed' }],
+    })
+    const a = alerts()
+    await expect(
+      sender([conn], { alerts: a.alerter, maxAttempts: 1 }).send(spec()),
+    ).rejects.toBeInstanceOf(UnresolvedAttempt)
+    expect(a.sent.filter((k) => k.startsWith('tx-unresolved:'))).toEqual(['tx-unresolved:x'])
+  })
+
+  it('caps on the program-failure path with one unresolved alert', async () => {
+    let reads = 0
+    const { conn } = fakeConnection({
+      send: [new Error('timeout')],
+      simulate: [{ err: null }, { err: { InstructionError: [2, { Custom: 6005 }] } }],
+      // Two clean null reads let attempt 2 start; afterwards the first attempt looks processed.
+      statuses: () => [reads++ < 2 ? null : { err: null, confirmationStatus: 'processed' }],
+    })
+    const a = alerts()
+    await expect(sender([conn], { alerts: a.alerter }).send(spec())).rejects.toBeInstanceOf(
+      UnresolvedAttempt,
+    )
+    expect(a.sent.filter((k) => k.startsWith('tx-unresolved:'))).toEqual(['tx-unresolved:x'])
+  })
+
+  it('reports an attempt that landed with an instruction error as that failure, never as unresolved', async () => {
+    let reads = 0
+    const { conn } = fakeConnection({
+      send: [new Error('timeout')],
+      confirm: [{ err: { InstructionError: [2, { Custom: 6005 }] } }],
+      statuses: () => {
+        if (reads++ < 2) return [null]
+        throw new Error('down')
+      },
+    })
+    const a = alerts()
+    const sleeps: number[] = []
+    const p = sender([conn], {
+      alerts: a.alerter,
+      sleep: async (ms) => void sleeps.push(ms),
+    }).send(spec({ instructions: [horagonIx] }))
+    await expect(p).rejects.toBeInstanceOf(ProgramFailure)
+    await expect(p).rejects.toMatchObject({ program: 'horagon', code: 6005 })
+    expect(a.sent.filter((k) => k.startsWith('tx-unresolved:'))).toEqual([])
+    expect(sleeps.filter((ms) => ms === 1_000)).toHaveLength(1)
   })
 })
 

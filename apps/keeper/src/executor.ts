@@ -9,7 +9,9 @@
 //   - REBUILD only after two clean reads in a row, one poll apart: the status read succeeded,
 //     showed the attempt unseen (null), and came after a height read past its
 //     `lastValidBlockHeight`; or when the send error proves the node never got the request
-//     (error code ECONNREFUSED, ENOTFOUND or EAI_AGAIN, on the error or its cause).
+//     (error code ECONNREFUSED, ENOTFOUND or EAI_AGAIN, on the error or its cause chain, up to
+//     3 levels); or when the newest attempt landed with an error that is not an instruction
+//     error (a failed transaction cannot land again).
 //   - WAIT, polling once a second and re-broadcasting the same bytes (same signature, so it
 //     cannot land twice), while the attempt is `processed`, or unseen with its height still
 //     valid, or a status or height read failed (unknown: only a successful read proves
@@ -120,6 +122,8 @@ interface Sent {
   signature: string
   lastValidBlockHeight: number
   raw: Uint8Array
+  /** Set once it confirmed with an instruction error: it landed and failed, nothing to wait for. */
+  failure?: ProgramFailure
 }
 
 const POLL_MS = 1_000
@@ -289,7 +293,7 @@ export class TxSender {
           { label: spec.label, error: errorSummary(new Error(message)).message },
           'tx unresolved',
         )
-        await this.opts.alerts.send(`tx:${spec.label}`, message)
+        await this.opts.alerts.send(`tx-unresolved:${spec.label}`, message)
         throw new UnresolvedAttempt(message)
       }
       if (!state.dead && !state.processed) await this.rebroadcast(spec, newest)
@@ -325,7 +329,9 @@ export class TxSender {
       )
       statuses = res.value
     } catch (err) {
-      // A failed read proves nothing, whatever the height says.
+      // A failed read proves nothing, whatever the height says, except for an attempt that is
+      // already known to have landed and failed: there is nothing left to wait for.
+      if (newest.failure) return { settled: true, dead: false, processed: false }
       this.opts.log.warn(
         { label: spec.label, error: errorSummary(err).message },
         'signature status lookup failed',
@@ -399,7 +405,11 @@ export class TxSender {
     }
     // Known before the send, so a send or confirmation that throws can still be looked up.
     const raw = tx.serialize()
-    const entry = { signature: base58(tx.signatures[0] as Uint8Array), lastValidBlockHeight, raw }
+    const entry: Sent = {
+      signature: base58(tx.signatures[0] as Uint8Array),
+      lastValidBlockHeight,
+      raw,
+    }
     sent.push(entry)
     let signature: string
     try {
@@ -414,7 +424,10 @@ export class TxSender {
       'confirmed',
     )
     if (res.value.err) {
-      if (instructionError(res.value.err)) throw chainProgramFailure(spec, res.value.err)
+      if (instructionError(res.value.err)) {
+        entry.failure = chainProgramFailure(spec, res.value.err)
+        throw entry.failure
+      }
       throw new Error(`transaction failed: ${JSON.stringify(res.value.err)}`)
     }
     return signature

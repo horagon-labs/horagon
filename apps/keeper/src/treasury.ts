@@ -88,12 +88,15 @@ export async function treasuryTick(deps: TreasuryDeps): Promise<{ moved: bigint;
   const seeds = games.map((g) => (g.featured ? deps.seeds.featured : deps.seeds.regular))
   const target = topUpTarget(seeds)
 
-  // The SOL checks come first: a keeper out of SOL is the likeliest reason a send fails.
+  // The SOL checks come first: a keeper out of SOL is the likeliest reason a send fails. The two
+  // reads are independent: a failed one warns and skips only its own alert.
+  const [authorityRead, keeperRead] = await Promise.allSettled([
+    conn.getBalance(deps.program.authority, 'confirmed'),
+    conn.getBalance(keeper, 'confirmed'),
+  ])
   try {
-    const [authoritySol, keeperSol] = await Promise.all([
-      conn.getBalance(deps.program.authority, 'confirmed').then(BigInt),
-      conn.getBalance(keeper, 'confirmed').then(BigInt),
-    ])
+    if (authorityRead.status === 'rejected') throw authorityRead.reason
+    const authoritySol = BigInt(authorityRead.value)
     // Spec 6.3: alert when the Authority's SOL covers fewer than 2 nights of markets. A night is
     // the next game date (US Eastern), not the whole 36 h window.
     const nextDate = games[0] ? easternDate(games[0].scheduledTipoff) : undefined
@@ -105,6 +108,12 @@ export async function treasuryTick(deps: TreasuryDeps): Promise<{ moved: bigint;
         `Authority holds ${Number(authoritySol) / 1e9} SOL, under 2 nights of markets: horagon-ops fund-authority`,
       )
     }
+  } catch (err) {
+    deps.log.warn({ error: errorSummary(err).message }, 'SOL balance check skipped: authority')
+  }
+  try {
+    if (keeperRead.status === 'rejected') throw keeperRead.reason
+    const keeperSol = BigInt(keeperRead.value)
     if (keeperSol < KEEPER_MIN_LAMPORTS) {
       await deps.alerts.send(
         'sol-keeper',
@@ -112,7 +121,7 @@ export async function treasuryTick(deps: TreasuryDeps): Promise<{ moved: bigint;
       )
     }
   } catch (err) {
-    deps.log.warn({ error: errorSummary(err).message }, 'SOL balance check skipped')
+    deps.log.warn({ error: errorSummary(err).message }, 'SOL balance check skipped: keeper')
   }
 
   const keeperAta = getAssociatedTokenAddressSync(mint, keeper)
@@ -135,6 +144,7 @@ export async function treasuryTick(deps: TreasuryDeps): Promise<{ moved: bigint;
   }
   let moved = transferAmount(treasury, held, target)
   if (moved > 0n) {
+    let sig: string | null = null
     try {
       const res = await deps.sender.send({
         label: 'treasury top-up',
@@ -165,15 +175,23 @@ export async function treasuryTick(deps: TreasuryDeps): Promise<{ moved: bigint;
           }
         },
       })
-      await logOps(deps.db, {
-        actor: 'keeper',
-        action: 'top-up',
-        sig: res.signature,
-        detail: { amount: moved.toString() },
-      })
+      sig = res.signature
     } catch (err) {
       deps.log.warn({ error: errorSummary(err).message }, 'treasury top-up failed')
       moved = 0n
+    }
+    if (moved > 0n) {
+      // The transfer landed; a failed log write must not turn it into a failed top-up.
+      try {
+        await logOps(deps.db, {
+          actor: 'keeper',
+          action: 'top-up',
+          sig,
+          detail: { amount: moved.toString() },
+        })
+      } catch (err) {
+        deps.log.warn({ error: errorSummary(err).message }, 'treasury top-up not logged')
+      }
     }
   }
   if (treasury + moved < target) {

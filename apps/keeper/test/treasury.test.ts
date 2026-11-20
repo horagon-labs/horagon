@@ -216,7 +216,9 @@ describe('treasury', () => {
     expect(r).toEqual({ moved: 0n, target: 1080n * MUSDC })
     expect(f.sends).toHaveLength(0)
     expect(f.alerts).toEqual([])
-    expect(f.logs.some(([l, m]) => l === 'warn' && m.includes('skipped'))).toBe(true)
+    expect(
+      f.logs.some(([l, m]) => l === 'warn' && m === 'treasury top-up skipped: balance unread'),
+    ).toBe(true)
 
     f.tokens.set(treasury.toBase58(), 0n)
     f.tokens.set(keeperAta.toBase58(), new Error('timeout'))
@@ -239,6 +241,27 @@ describe('treasury', () => {
       { error: 'insufficient lamports for fee' },
     ])
     expect(await h.db.select().from(schema.opsEvents)).toHaveLength(0)
+  })
+
+  it('reports the real amount moved when only the ops log write fails', async () => {
+    await upsertScheduledGames(h.db, night)
+    f.tokens.set(keeperAta.toBase58(), 10_000n * MUSDC)
+    const failing = new Proxy(h.db, {
+      get: (target, prop, receiver) =>
+        prop === 'insert'
+          ? () => {
+              throw new Error('db down https://rpc.example.com/v2/SECRETKEY?k=SECRETKEY')
+            }
+          : Reflect.get(target, prop, receiver),
+    })
+    const r = await treasuryTick(f.deps(failing))
+    expect(r.moved).toBe(r.target)
+    expect(f.sends).toHaveLength(1)
+    expect(f.alerts.map(([k]) => k)).not.toContain('treasury-low')
+    expect(f.logs.some(([, m]) => m === 'treasury top-up failed')).toBe(false)
+    const warn = f.logs.find(([l, m]) => l === 'warn' && m === 'treasury top-up not logged')
+    expect(warn).toBeDefined()
+    expect(JSON.stringify(warn)).not.toContain('SECRETKEY')
   })
 
   it('lets the sender ask whether the transfer already landed', async () => {
@@ -272,6 +295,20 @@ describe('treasury', () => {
     expect(f.alerts.filter(([k]) => k === 'sol-authority')).toHaveLength(1)
   })
 
+  it('still alerts a low keeper wallet when the Authority read fails, and the other way round', async () => {
+    f.sol.set(attestor.publicKey.toBase58(), Number(KEEPER_MIN_LAMPORTS) - 1)
+    f.sol.delete(authority.toBase58())
+    await treasuryTick(f.deps(h.db))
+    expect(f.alerts.map(([k]) => k)).toEqual(['sol-keeper'])
+    expect(f.logs.some(([l, m]) => l === 'warn' && m.includes('SOL balance check'))).toBe(true)
+
+    f.alerts.length = 0
+    f.sol.set(authority.toBase58(), Number(2n * 4n * LAMPORTS_PER_MARKET) - 1)
+    f.sol.delete(attestor.publicKey.toBase58())
+    await treasuryTick(f.deps(h.db))
+    expect(f.alerts.map(([k]) => k)).toEqual(['sol-authority'])
+  })
+
   it('assumes at least four markets a night, alerts a low keeper wallet and survives faucet and SOL read errors', async () => {
     f.faucetError = new Error('rate limited')
     f.sol.set(authority.toBase58(), Number(2n * 4n * LAMPORTS_PER_MARKET) - 1)
@@ -281,6 +318,7 @@ describe('treasury', () => {
     expect(f.logs.some(([l, m]) => l === 'info' && m === 'faucet skipped')).toBe(true)
 
     f.alerts.length = 0
+    f.sol.set(attestor.publicKey.toBase58(), 1e9)
     f.sol.delete(authority.toBase58())
     await expect(treasuryTick(f.deps(h.db))).resolves.toEqual({ moved: 0n, target: 0n })
     expect(f.alerts).toEqual([])

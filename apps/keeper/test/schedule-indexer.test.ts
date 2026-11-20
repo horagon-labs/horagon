@@ -28,10 +28,14 @@ import {
 } from '@horagon/sdk'
 import {
   createAssociatedTokenAccountInstruction,
+  createBurnCheckedInstruction,
   createBurnInstruction,
   createCloseAccountInstruction,
+  createMintToCheckedInstruction,
   createMintToInstruction,
+  createTransferCheckedInstruction,
   createTransferInstruction,
+  TOKEN_2022_PROGRAM_ID,
 } from '@solana/spl-token'
 import {
   Keypair,
@@ -44,7 +48,13 @@ import type { Logger } from 'pino'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Ratings } from '../src/elo'
 import type { Feed, FeedGame } from '../src/feeds/types'
-import { decodeTransaction, type IndexerDeps, indexOnce } from '../src/indexer'
+import {
+  decodeTransaction,
+  type IndexerDeps,
+  indexOnce,
+  STUCK_AFTER,
+  wholeTxFlows,
+} from '../src/indexer'
 import { pickFeatured, scheduleDates, scheduleTick } from '../src/schedule'
 
 // Market accounts are not decoded for real here: the first data byte says what the account holds
@@ -565,8 +575,8 @@ describe('indexOnce does not skip past a transaction it could not read', () => {
     expect(sent).toEqual([])
     await indexOnce(deps())
     await indexOnce(deps())
-    expect(sent).toEqual([`index-stuck:${market.toBase58()}`])
-    expect(sent).toHaveLength(1)
+    // Sent on every stop from the 60th on; the alerter's dedupe throttles the repeats.
+    expect(sent).toEqual(Array(2).fill(`index-stuck:${market.toBase58()}`))
     // Logged at warn, but only once a minute for the market (the fake clock does not move).
     expect(warns.filter((w) => w.msg.includes('not readable'))).toHaveLength(1)
     expect(warns[0]?.obj).toMatchObject({ market: market.toBase58(), sig: 's1' })
@@ -576,14 +586,108 @@ describe('indexOnce does not skip past a transaction it could not read', () => {
     order = ['s1', 's2']
     chain.set('s2', null)
     for (let i = 0; i < 59; i++) await indexOnce(deps())
-    expect(sent).toHaveLength(1)
-    await indexOnce(deps())
     expect(sent).toHaveLength(2)
+    await indexOnce(deps())
+    expect(sent).toHaveLength(3)
 
     chain.set('s2', readable('s2', 2, 1_795_000_002))
     await indexOnce(deps())
     expect(stops.has(market.toBase58())).toBe(false)
   }, 120_000)
+
+  it('still delivers the stall alert on a later stop when the first send is lost', async () => {
+    chain = new Map([['s1', null]])
+    order = ['s1']
+    // Like the real alerter: a failed delivery is swallowed and the key is open again.
+    let attempts = 0
+    const delivered: string[] = []
+    const lossy = (): IndexerDeps => ({
+      ...deps(),
+      alerts: {
+        send: async (key) => {
+          attempts++
+          if (attempts > 1) delivered.push(key)
+        },
+      },
+    })
+    for (let i = 0; i < STUCK_AFTER + 1; i++) await indexOnce(lossy())
+    expect(attempts).toBe(2)
+    expect(delivered).toEqual([`index-stuck:${market.toBase58()}`])
+  }, 120_000)
+
+  it('rate-limits the stall warning per market, not per signature', async () => {
+    let t = NOW
+    const timed = (): IndexerDeps => ({ ...deps(), now: () => t })
+    const stalls = () => warns.filter((w) => w.msg.includes('not readable'))
+    chain = new Map([['s1', null]])
+    order = ['s1']
+    await indexOnce(timed())
+    expect(stalls()).toHaveLength(1)
+
+    // The market moves on to a new stuck signature 5 s later: still the same minute.
+    t += 5
+    chain.set('s1', readable('s1', 1, 1_795_000_001))
+    chain.set('s2', null)
+    order = ['s1', 's2']
+    await indexOnce(timed())
+    expect(stops.get(market.toBase58())).toMatchObject({ sig: 's2', count: 1 })
+    expect(stalls()).toHaveLength(1)
+
+    t += 60
+    await indexOnce(timed())
+    expect(stalls()).toHaveLength(2)
+  })
+
+  it('keeps the stall counter when a pass fetches no signatures', async () => {
+    chain = new Map([['s1', null]])
+    order = ['s1']
+    for (let i = 0; i < 3; i++) await indexOnce(deps())
+    expect(stops.get(market.toBase58())?.count).toBe(3)
+    order = []
+    await indexOnce(deps())
+    expect(stops.get(market.toBase58())?.count).toBe(3)
+    order = ['s1']
+    await indexOnce(deps())
+    expect(stops.get(market.toBase58())?.count).toBe(4)
+  })
+
+  it('alerts index-skip with the signature and instruction when a row is skipped for good', async () => {
+    const swapIx = () =>
+      buildSwapIx({
+        user,
+        market,
+        collateralMint: DEVNET_MUSDC_MINT,
+        authority: program.authority,
+        direction: 'usdcToYes',
+        amountIn: 1n,
+        minOut: 1n,
+      })
+    const two = {
+      slot: 1,
+      blockTime: 1_795_000_001,
+      transaction: {
+        message: new TransactionMessage({
+          payerKey: user,
+          recentBlockhash: 'EkSnNWid2cvwEVnVx9aBqawnmiCNiDgp3gUdkDPTKN1N',
+          instructions: [swapIx(), swapIx()],
+        }).compileToV0Message(),
+        signatures: ['s1'],
+      },
+      meta: { err: null, preTokenBalances: [], postTokenBalances: [] },
+    } as unknown as VersionedTransactionResponse
+    chain = new Map([['s1', two]])
+    order = ['s1']
+    const texts: Array<[string, string]> = []
+    await indexOnce({
+      ...deps(),
+      alerts: { send: async (key, text) => void texts.push([key, text]) },
+    })
+    expect(await sigsIndexed()).toEqual([])
+    const skip = texts.filter(([k]) => k === `index-skip:${market.toBase58()}`)
+    expect(skip.length).toBeGreaterThan(0)
+    expect(skip[0]?.[1]).toContain('s1')
+    expect(skip[0]?.[1]).toContain('instruction 0')
+  })
 
   it('stops on a short batch, a missing meta, and a transaction that is not the one asked for', async () => {
     chain = new Map([
@@ -804,6 +908,8 @@ describe('decodeTransaction per-instruction token flows', () => {
     inner: Array<{ index: number; ixs: TransactionInstruction[] }> | undefined,
     accounts: Array<[PublicKey, string, string]>,
     payer: PublicKey = user,
+    /** Token balances before and after, by account; absent accounts hold 0 both times. */
+    amounts: Map<string, [bigint, bigint]> = new Map(),
   ) {
     const message = new TransactionMessage({
       payerKey: payer,
@@ -812,15 +918,18 @@ describe('decodeTransaction per-instruction token flows', () => {
     }).compileToV0Message()
     const keys = message.staticAccountKeys.map((k) => k.toBase58())
     const idx = (k: PublicKey) => keys.indexOf(k.toBase58())
-    const tokens = accounts.map(([a, owner, mint]) => bal(idx(a), owner, mint, 0n))
+    const at = (n: 0 | 1) =>
+      accounts
+        .filter(([a], i) => accounts.findIndex(([b]) => b.equals(a)) === i)
+        .map(([a, owner, mint]) => bal(idx(a), owner, mint, amounts.get(a.toBase58())?.[n] ?? 0n))
     return {
       slot: 9,
       blockTime: 1_795_000_000,
       transaction: { message, signatures: [] },
       meta: {
         err: null,
-        preTokenBalances: tokens,
-        postTokenBalances: tokens,
+        preTokenBalances: at(0),
+        postTokenBalances: at(1),
         ...(inner
           ? {
               innerInstructions: inner.map((i) => ({
@@ -865,9 +974,23 @@ describe('decodeTransaction per-instruction token flows', () => {
         },
       ],
       [...accountsOf(A), ...accountsOf(B)],
+      user,
+      new Map<string, [bigint, bigint]>([
+        [usdcAta.toBase58(), [1_000_000n, 13_000_000n]],
+        [yesAta(A).toBase58(), [5_000_000n, 0n]],
+        [noAta(B).toBase58(), [7_000_000n, 0n]],
+        [A.vault.toBase58(), [5_000_000n, 0n]],
+        [B.vault.toBase58(), [7_000_000n, 0n]],
+      ]),
     )
     const a = decodeTransaction('claim', tx, ctx(A))
     const b = decodeTransaction('claim', tx, ctx(B))
+    // The per-instruction payouts add up to what the whole transaction paid the user.
+    const whole = wholeTxFlows(tx, user.toBase58(), ctx(A))
+    expect(whole.usdc).toBe(12_000_000n)
+    expect((a.claims[0]?.usdcAmount ?? 0n) + (b.claims[0]?.usdcAmount ?? 0n)).toBe(whole.usdc)
+    expect(a.claims[0]?.yesDelta).toBe(whole.yes)
+    expect(b.claims[0]?.noDelta).toBe(wholeTxFlows(tx, user.toBase58(), ctx(B)).no)
     expect(a.claims).toEqual([
       expect.objectContaining({
         kind: 'claim',
@@ -927,13 +1050,121 @@ describe('decodeTransaction per-instruction token flows', () => {
         },
       ],
       [...accountsOf(A), [daoAta, PROTOCOL_DAO.toBase58(), usdc]],
+      user,
+      new Map<string, [bigint, bigint]>([
+        [usdcAta.toBase58(), [100_000_000n, 85_000_000n]],
+        [yesAta(A).toBase58(), [0n, 28_000_000n]],
+        [A.vault.toBase58(), [50_000_000n, 64_900_000n]],
+        [daoAta.toBase58(), [0n, 100_000n]],
+      ]),
     )
     const d = decodeTransaction('two', tx, ctx(A))
     expect(d.trades.map((t) => [t.ixIndex, t.direction, t.usdcDelta, t.yesDelta, t.fee])).toEqual([
       [0, 'usdcToYes', -20_000_000n, 38_000_000n, 100_000n],
       [1, 'yesToUsdc', 5_000_000n, -10_000_000n, 0n],
     ])
-    expect(d.trades.reduce((n, t) => n + t.usdcDelta, 0n)).toBe(-15_000_000n)
+    const whole = wholeTxFlows(tx, user.toBase58(), ctx(A))
+    expect(whole).toEqual({ usdc: -15_000_000n, yes: 28_000_000n, no: 0n, fee: 100_000n })
+    const sum = (pick: (t: (typeof d.trades)[number]) => bigint) =>
+      d.trades.reduce((n, t) => n + pick(t), 0n)
+    expect(sum((t) => t.usdcDelta)).toBe(whole.usdc)
+    expect(sum((t) => t.yesDelta)).toBe(whole.yes)
+    expect(sum((t) => t.noDelta)).toBe(whole.no)
+    expect(sum((t) => t.fee)).toBe(whole.fee)
+  })
+
+  it('reads TransferChecked, BurnChecked and MintToChecked under Token-2022', () => {
+    const swap = (direction: 'usdcToYes' | 'yesToUsdc', amountIn: bigint) =>
+      buildSwapIx({
+        user,
+        market: A.market,
+        collateralMint: DEVNET_MUSDC_MINT,
+        authority: program.authority,
+        direction,
+        amountIn,
+        minOut: 1n,
+      })
+    const daoAta = ataAddress({ owner: PROTOCOL_DAO, mint: DEVNET_MUSDC_MINT })
+    const t22 = TOKEN_2022_PROGRAM_ID
+    // Last, so it only puts the Token-2022 program among the static keys.
+    const keyHolder = new TransactionInstruction({
+      programId: t22,
+      keys: [],
+      data: Buffer.alloc(0),
+    })
+    const checked = (from: PublicKey, to: PublicKey, amount: bigint) =>
+      createTransferCheckedInstruction(from, DEVNET_MUSDC_MINT, to, user, amount, 6, [], t22)
+    const tx = build(
+      [swap('usdcToYes', 20_000_000n), swap('yesToUsdc', 10_000_000n), keyHolder],
+      [
+        {
+          index: 0,
+          ixs: [
+            checked(usdcAta, A.vault, 19_900_000n),
+            checked(usdcAta, daoAta, 100_000n),
+            createMintToCheckedInstruction(A.yes, yesAta(A), user, 38_000_000n, 6, [], t22),
+          ],
+        },
+        {
+          index: 1,
+          ixs: [
+            createBurnCheckedInstruction(yesAta(A), A.yes, user, 10_000_000n, 6, [], t22),
+            checked(A.vault, usdcAta, 5_000_000n),
+          ],
+        },
+      ],
+      [...accountsOf(A), [daoAta, PROTOCOL_DAO.toBase58(), usdc]],
+      user,
+      new Map<string, [bigint, bigint]>([
+        [usdcAta.toBase58(), [100_000_000n, 85_000_000n]],
+        [yesAta(A).toBase58(), [0n, 28_000_000n]],
+        [A.vault.toBase58(), [50_000_000n, 64_900_000n]],
+        [daoAta.toBase58(), [0n, 100_000n]],
+      ]),
+    )
+    const d = decodeTransaction('t22', tx, ctx(A))
+    expect(d.trades.map((t) => [t.ixIndex, t.usdcDelta, t.yesDelta, t.fee])).toEqual([
+      [0, -20_000_000n, 38_000_000n, 100_000n],
+      [1, 5_000_000n, -10_000_000n, 0n],
+    ])
+    const whole = wholeTxFlows(tx, user.toBase58(), ctx(A))
+    expect(d.trades.reduce((n, t) => n + t.usdcDelta, 0n)).toBe(whole.usdc)
+    expect(d.trades.reduce((n, t) => n + t.yesDelta, 0n)).toBe(whole.yes)
+    expect(d.trades.reduce((n, t) => n + t.fee, 0n)).toBe(whole.fee)
+  })
+
+  it('skips the row when a CPI names a program or account from a lookup table', () => {
+    const fresh = () =>
+      build(
+        [claimIx(A), claimIx(B)],
+        [
+          { index: 0, ixs: [createTransferInstruction(A.vault, usdcAta, user, 1n)] },
+          { index: 1, ixs: [createTransferInstruction(B.vault, usdcAta, user, 1n)] },
+        ],
+        [...accountsOf(A), ...accountsOf(B)],
+      )
+    const warn = vi.fn()
+    const log = { warn } as unknown as Logger
+    const skips: Array<[string, number]> = []
+    const onSkip = (sig: string, ixIndex: number) => skips.push([sig, ixIndex])
+
+    const programPast = fresh()
+    const first = programPast.meta?.innerInstructions?.[0]?.instructions[0]
+    if (first) first.programIdIndex = 200
+    expect(decodeTransaction('lut', programPast, { ...ctx(A, log), onSkip }).claims).toEqual([])
+    // The other instruction is unaffected.
+    expect(decodeTransaction('lut', programPast, ctx(B, log)).claims).toHaveLength(1)
+
+    const accountPast = fresh()
+    const acct = accountPast.meta?.innerInstructions?.[0]?.instructions[0]
+    if (acct) acct.accounts = [200, ...acct.accounts.slice(1)]
+    expect(decodeTransaction('lut2', accountPast, { ...ctx(A, log), onSkip }).claims).toEqual([])
+
+    expect(warn).toHaveBeenCalledTimes(2)
+    expect(skips).toEqual([
+      ['lut', 0],
+      ['lut2', 0],
+    ])
   })
 
   it('records a redeem and a lone claim from the whole-transaction delta', () => {
@@ -992,6 +1223,13 @@ describe('decodeTransaction per-instruction token flows', () => {
     expect(decodeTransaction('y', partial, ctx(B, log)).claims).toHaveLength(1)
     expect(warn).toHaveBeenCalledTimes(2)
     expect(warn.mock.calls[0]?.[0]).toMatchObject({ market: A.row.pubkey, sig: 'x', ixIndex: 0 })
+  })
+
+  it('reports each skipped row to onSkip', () => {
+    const skips: Array<[string, number]> = []
+    const noInner = build([claimIx(A), claimIx(B)], undefined, [...accountsOf(A), ...accountsOf(B)])
+    decodeTransaction('x', noInner, { ...ctx(A), onSkip: (sig, i) => skips.push([sig, i]) })
+    expect(skips).toEqual([['x', 0]])
   })
 
   it('records the token accounts only for the sponsor paying for the user', () => {

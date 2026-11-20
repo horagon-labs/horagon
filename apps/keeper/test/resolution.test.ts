@@ -265,6 +265,18 @@ describe('strict inputs', () => {
         confirmSource: 'nba',
         confirmedAt,
       }),
-    ).toThrow()
+    ).toThrow(/periods add up to 111-106, not 112-106/)
+  })
+
+  it('stores the normalised confirmation URL even when given the raw one', () => {
+    const e = buildEvidence({
+      game,
+      draft,
+      kind: 0,
+      confirmUrl: 'HTTPS://WWW.NBA.COM/game/x',
+      confirmSource: 'nba',
+      confirmedAt,
+    })
+    expect(e.sources[1]?.url).toBe('https://www.nba.com/game/x')
   })
 })
