@@ -1,0 +1,13 @@
+# Checks the keeper heartbeat and alerts Telegram when it is stale during a game window
+# (spec 12: no heartbeat for 2 minutes). Run by horagon-watchdog.timer.
+[Unit]
+Description=Horagon keeper watchdog
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/horagon/apps/keeper
+EnvironmentFile=%h/horagon/.env.keeper
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=%h/horagon/apps/keeper/node_modules/.bin/tsx src/ops/cli.ts watchdog
+# A oneshot has no start timeout by default: a hung run would keep the timer from firing again.
+TimeoutStartSec=90

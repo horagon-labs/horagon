@@ -151,6 +151,13 @@ function driftSyncs(states: readonly GameState[], planned: readonly Action[]): A
 /** Consecutive failed treasury reads before `treasury-unread` goes out. */
 const TREASURY_UNREAD_ALERT_AFTER = 10
 
+/**
+ * The on-chain challenge count (0 before any challenge). The `challenge:`, `draft:` and
+ * `unconfirmed:` alert keys end with it: the alerter drops a repeated key within its window, so
+ * without it a second challenge round inside that window would go unheard.
+ */
+const roundOf = (s: Pick<GameState, 'onchain'>) => s.onchain?.challengeCount ?? 0
+
 export class Keeper {
   private readonly observed = new Map<string, Observed>()
   private readonly lastFetch = new Map<string, number>()
@@ -345,17 +352,18 @@ export class Keeper {
       case 'halt':
         return this.halt(a, s)
       case 'draft':
-        return this.draft(a, s.game, now)
+        return this.draft(a, s, now)
       case 'finalize':
       case 'recycle':
         return this.settle(a, s)
       case 'sync':
         return this.sync(s)
-      case 'alert':
-        await this.d.alerts.send(a.key, a.text)
-        if (a.key.startsWith('unconfirmed:'))
-          await setDraftState(this.d.db, a.gameId, { alertedAt: new Date() })
+      case 'alert': {
+        const unconfirmed = a.key.startsWith('unconfirmed:')
+        await this.d.alerts.send(unconfirmed ? `${a.key}:${roundOf(s)}` : a.key, a.text)
+        if (unconfirmed) await setDraftState(this.d.db, a.gameId, { alertedAt: new Date() })
         return
+      }
     }
   }
 
@@ -553,9 +561,10 @@ export class Keeper {
 
   private async draft(
     a: Extract<Action, { type: 'draft' }>,
-    g: GameRow,
+    s: GameState,
     now: number,
   ): Promise<void> {
+    const g = s.game
     const obs = this.observed.get(g.id)
     await upsertDraft(this.d.db, {
       gameId: g.id,
@@ -572,7 +581,7 @@ export class Keeper {
           `horagon-ops propose ${g.id} --box-score <url> --score ${a.homeScore}-${a.awayScore}`
         : `${g.away}@${g.home} was not played within 7 days. Resolve NO:\n` +
           `horagon-ops propose ${g.id} --postponed --notice <url>`
-    await this.d.alerts.send(`draft:${g.id}`, text)
+    await this.d.alerts.send(`draft:${g.id}:${roundOf(s)}`, text)
   }
 
   private async settle(
@@ -645,9 +654,14 @@ export class Keeper {
         : {}),
     })
     if (newChallenge || (challenged && statusMoved)) {
+      // The count can grow while the chain is already past `challenged`: a re-proposal landed
+      // between two chain reads. Asking for another proposal then would be wrong.
+      const name = `${s.game.away}@${s.game.home}`
       await this.d.alerts.send(
-        `challenge:${s.game.id}`,
-        `Challenged: ${s.game.away}@${s.game.home}. Re-check and propose again.`,
+        `challenge:${s.game.id}:${gm.challengeCount}`,
+        challenged
+          ? `Challenged: ${name}. Re-check and propose again.`
+          : `Challenged: ${name} was challenged and has been re-proposed (now ${gm.status}). Check the new proposal.`,
       )
     }
   }

@@ -331,7 +331,8 @@ describe('Keeper.tick', () => {
       homeScore: 111,
       state: 'pending',
     })
-    const [, text] = alerts.find(([k]) => k === 'draft:nba-401910007') ?? []
+    // The key carries the challenge count (0 before any challenge): each round alerts apart.
+    const [, text] = alerts.find(([k]) => k === 'draft:nba-401910007:0') ?? []
     expect(text).toContain('horagon-ops propose nba-401910007 --box-score <url> --score 111-106')
 
     // Every action went through: nothing was logged as failed.
@@ -360,7 +361,9 @@ describe('Keeper.tick', () => {
 describe('a challenge', () => {
   const ID = 'nba-401910007'
   const row = async () => (await getGame(h.db, ID))?.markets[0]
-  const challengeAlerts = () => alerts.filter(([k]) => k === `challenge:${ID}`)
+  /** Keys carry the on-chain challenge count, so a second round is never deduped away. */
+  const challengeAlerts = () => alerts.filter(([k]) => k.startsWith(`challenge:${ID}:`))
+  const challengeKeys = () => challengeAlerts().map(([k]) => k)
 
   /** The guardian proposes the pending draft; ops marks the draft proposed. */
   const propose = () => setDraftState(h.db, ID, { state: 'proposed' })
@@ -411,7 +414,8 @@ describe('a challenge', () => {
     expect((await keeper.tick()).map((a) => a.type)).toEqual(['sync'])
     expect((await getDraft(h.db, ID))?.state).toBe('rejected')
     expect(await row()).toMatchObject({ status: 'challenged', challengeCount: 1 })
-    expect(challengeAlerts()).toHaveLength(1)
+    expect(challengeKeys()).toEqual([`challenge:${ID}:1`])
+    expect(challengeAlerts()[0]?.[1]).toContain('propose again')
 
     // The corrected Final, stable for 60 s: a new pending draft for the guardian.
     now += 60
@@ -422,8 +426,8 @@ describe('a challenge', () => {
       awayScore: 106,
       state: 'pending',
     })
-    const drafts = alerts.filter(([k]) => k === `draft:${ID}`)
-    expect(drafts).toHaveLength(2)
+    const drafts = alerts.filter(([k]) => k.startsWith(`draft:${ID}:`))
+    expect(drafts.map(([k]) => k)).toEqual([`draft:${ID}:0`, `draft:${ID}:1`])
     expect(drafts[1]?.[1]).toContain('--score 113-106')
 
     // Once drafted again, the challenged market stays quiet: no second rejection.
@@ -445,7 +449,8 @@ describe('a challenge', () => {
     now += 90
     expect(types(await keeper.tick())).toEqual(['sync'])
     expect((await getDraft(h.db, ID))?.state).toBe('rejected')
-    expect(challengeAlerts()).toHaveLength(2)
+    // Within 600 s of the first, the second round still has a key of its own.
+    expect(challengeKeys()).toEqual([`challenge:${ID}:1`, `challenge:${ID}:2`])
     expect(await row()).toMatchObject({
       status: 'challenged',
       challengeCount: 2,
@@ -457,9 +462,48 @@ describe('a challenge', () => {
     now += 5
     expect(types(await keeper.tick())).toEqual(['draft'])
     expect((await getDraft(h.db, ID))?.state).toBe('pending')
+    expect(alerts.map(([k]) => k).filter((k) => k.startsWith(`draft:${ID}:`))).toEqual([
+      `draft:${ID}:0`,
+      `draft:${ID}:1`,
+      `draft:${ID}:2`,
+    ])
     now += 5
     expect(await keeper.tick()).toEqual([])
     expect(challengeAlerts()).toHaveLength(2)
+  })
+
+  it('says so when a challenge and a re-proposal both land between two chain reads', async () => {
+    await firstChallenge()
+    // The guardian proposes the redraft and the keeper sees it land: no alert for that.
+    await propose()
+    const P2 = now + 10
+    settled = { outcome: 0, evidence: new Uint8Array(32).fill(0xcd), proposedAt: P2, challenges: 1 }
+    accounts.set(gm, account(gameMarketBytes(marketId, STATUS.proposed, settled)))
+    now += 20
+    expect(types(await keeper.tick())).toEqual(['sync'])
+    expect(challengeKeys()).toEqual([`challenge:${ID}:1`])
+
+    // A second challenge, then a third proposal, both before the next chain read: the chain is
+    // proposed again with a higher count. The alert must not ask for a proposal.
+    const P3 = now + 60
+    settled = { outcome: 0, evidence: new Uint8Array(32).fill(0xef), proposedAt: P3, challenges: 2 }
+    accounts.set(gm, account(gameMarketBytes(marketId, STATUS.proposed, settled)))
+    now += 90
+    expect(types(await keeper.tick())).toEqual(['sync'])
+    expect(challengeKeys()).toEqual([`challenge:${ID}:1`, `challenge:${ID}:2`])
+    const text = challengeAlerts()[1]?.[1] ?? ''
+    expect(text).toContain('was challenged and has been re-proposed')
+    expect(text).not.toContain('propose again')
+    expect(await row()).toMatchObject({ status: 'proposed', challengeCount: 2 })
+  })
+
+  it('reminds about a redraft under a key of its own round', async () => {
+    await firstChallenge()
+    now += DEFAULT_TIMINGS.missingSourceSecs
+    expect(types(await keeper.tick())).toEqual(['alert'])
+    expect(alerts.map(([k]) => k).filter((k) => k.startsWith('unconfirmed:'))).toEqual([
+      `unconfirmed:${ID}:1`,
+    ])
   })
 
   it('leaves a proposed draft alone while its propose has not landed', async () => {
@@ -619,7 +663,7 @@ describe('the feed', () => {
 describe('a pending draft', () => {
   it('reminds the guardian once after 30 min unconfirmed', async () => {
     await toDraft()
-    const key = 'unconfirmed:nba-401910007'
+    const key = 'unconfirmed:nba-401910007:0'
     now += DEFAULT_TIMINGS.missingSourceSecs - 61
     expect(await keeper.tick()).toEqual([])
     now += 1
