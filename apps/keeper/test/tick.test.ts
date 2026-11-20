@@ -8,6 +8,7 @@ import {
   setDraftState,
   setFeatured,
   updateMarket,
+  upsertMarket,
   upsertScheduledGames,
 } from '@horagon/db'
 import { createTestDb } from '@horagon/db/testing'
@@ -23,10 +24,10 @@ import { asciiField, BorshWriter } from '@horagon/sdk/program'
 import { type AccountInfo, type Connection, Keypair, PublicKey } from '@solana/web3.js'
 import pino from 'pino'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { ProgramFailure, type SendSpec, type TxSender } from '../src/executor'
+import { ProgramFailure, type SendSpec, type TxSender, UnresolvedAttempt } from '../src/executor'
 import type { Feed, FeedGame } from '../src/feeds/types'
 import { DEFAULT_SEEDS, DEFAULT_TIMINGS, type GameState } from '../src/planner'
-import { Keeper, minutesRemaining, stuckAlerts } from '../src/tick'
+import { Keeper, type KeeperDeps, minutesRemaining, stuckAlerts } from '../src/tick'
 
 const S = 1_795_000_000
 const END = S + DEFAULT_TIMINGS.endOffsetSecs
@@ -59,11 +60,12 @@ function configBytes(): Buffer {
     .toBuffer()
 }
 
-/** GameMarket fields set by propose and finalize. */
+/** GameMarket fields set by propose, challenge and finalize. */
 interface Settled {
   outcome?: number
   evidence?: Uint8Array
   proposedAt?: number
+  challenges?: number
   finalizedAt?: number
 }
 
@@ -86,7 +88,7 @@ function gameMarketBytes(marketId: bigint, status: number, x: Settled = {}): Buf
     .string('', 128)
     .i64(x.proposedAt ?? 0)
     .pubkey(PublicKey.default)
-    .u8(0)
+    .u8(x.challenges ?? 0)
     .i64(x.finalizedAt ?? 0)
     .u8(255)
     .toBuffer()
@@ -111,10 +113,16 @@ let fail: ((label: string) => Error | undefined) | undefined
 let settled: Settled
 let accounts: Map<string, AccountInfo<Buffer>>
 let sends: string[]
+let specs: SendSpec[]
+/** isDone answers the fake sender found wrong: done before the send, or not done after it. */
+let doneProblems: string[]
+/** Every fetchDay call, failed or not. */
+let fetches: string[]
 let alerts: Array<[string, string]>
 let logs: LogLine[]
 let marketId: bigint
 let gm: string
+let deps: KeeperDeps
 let keeper: Keeper
 
 const QUARTERS: Array<[number, number]> = [
@@ -157,6 +165,9 @@ beforeEach(async () => {
   fail = undefined
   settled = {}
   sends = []
+  specs = []
+  doneProblems = []
+  fetches = []
   alerts = []
   logs = []
   marketId = await marketIdFor('NBA', '401910007', 0)
@@ -205,6 +216,9 @@ beforeEach(async () => {
     connection,
     async send(spec: SendSpec) {
       sends.push(spec.label)
+      specs.push(spec)
+      // The real sender asks isDone before every retry: it must say no until the effect lands.
+      if (await spec.isDone?.()) doneProblems.push(`${spec.label}: done before it was sent`)
       const failure = fail?.(spec.label)
       if (failure) throw failure
       // What the program would do: create opens the GameMarket, halt halts it.
@@ -219,12 +233,14 @@ beforeEach(async () => {
       }
       if (spec.label.startsWith('recycle'))
         accounts.set(gm, account(gameMarketBytes(marketId, STATUS.recycled, settled)))
+      if (!(await spec.isDone?.())) doneProblems.push(`${spec.label}: not done after it landed`)
       return { signature: `sig${sends.length}`, attempts: 1, alreadyDone: false }
     },
   } as unknown as TxSender
   const feed: Feed = {
     name: 'fake',
     async fetchDay(date) {
+      fetches.push(date)
       if (feedDown) throw new Error('espn answered 503')
       const onDate = date === current.gameDate
       return {
@@ -236,7 +252,7 @@ beforeEach(async () => {
       }
     },
   }
-  keeper = new Keeper({
+  deps = {
     db: h.db,
     sender,
     program,
@@ -251,10 +267,12 @@ beforeEach(async () => {
     sigma: 13,
     priority: { normal: 10_000, halt: 200_000 },
     feedEverySecs: 0,
-  })
+  }
+  keeper = new Keeper(deps)
 })
 afterEach(async () => {
   await h.close()
+  expect(doneProblems).toEqual([])
 })
 
 describe('Keeper.tick', () => {
@@ -340,14 +358,44 @@ describe('Keeper.tick', () => {
 })
 
 describe('a challenge', () => {
+  const ID = 'nba-401910007'
+  const row = async () => (await getGame(h.db, ID))?.markets[0]
+  const challengeAlerts = () => alerts.filter(([k]) => k === `challenge:${ID}`)
+
+  /** The guardian proposes the pending draft; ops marks the draft proposed. */
+  const propose = () => setDraftState(h.db, ID, { state: 'proposed' })
+
+  /** Round one: propose, a challenge before the next tick, then the keeper's redraft. */
+  async function firstChallenge(): Promise<void> {
+    await toDraft()
+    await propose()
+    await updateMarket(h.db, program.addresses(marketId).market.toBase58(), { status: 'proposed' })
+    settled = {
+      outcome: 0,
+      evidence: new Uint8Array(32).fill(0xab),
+      proposedAt: now,
+      challenges: 1,
+    }
+    accounts.set(gm, account(gameMarketBytes(marketId, STATUS.challenged, settled)))
+    now += 5
+    expect(types(await keeper.tick())).toEqual(['sync'])
+    expect((await getDraft(h.db, ID))?.state).toBe('rejected')
+    now += 5
+    expect(types(await keeper.tick())).toEqual(['draft'])
+    expect((await getDraft(h.db, ID))?.state).toBe('pending')
+  }
+
   it('rejects the draft, so the next tick drafts again from the feed', async () => {
     await toDraft()
 
     // The guardian proposes from the draft; someone challenges before the next tick, and ESPN
     // corrects the score (the reason for the challenge).
-    await setDraftState(h.db, 'nba-401910007', { state: 'proposed' })
+    await propose()
     await updateMarket(h.db, program.addresses(marketId).market.toBase58(), { status: 'proposed' })
-    accounts.set(gm, account(gameMarketBytes(marketId, STATUS.challenged)))
+    accounts.set(
+      gm,
+      account(gameMarketBytes(marketId, STATUS.challenged, { proposedAt: now, challenges: 1 })),
+    )
     current = {
       ...current,
       homeScore: 113,
@@ -361,27 +409,210 @@ describe('a challenge', () => {
 
     now += 5
     expect((await keeper.tick()).map((a) => a.type)).toEqual(['sync'])
-    expect((await getDraft(h.db, 'nba-401910007'))?.state).toBe('rejected')
-    expect((await getGame(h.db, 'nba-401910007'))?.markets[0]?.status).toBe('challenged')
-    expect(alerts.map(([k]) => k)).toContain('challenge:nba-401910007')
+    expect((await getDraft(h.db, ID))?.state).toBe('rejected')
+    expect(await row()).toMatchObject({ status: 'challenged', challengeCount: 1 })
+    expect(challengeAlerts()).toHaveLength(1)
 
     // The corrected Final, stable for 60 s: a new pending draft for the guardian.
     now += 60
     expect((await keeper.tick()).map((a) => a.type)).toEqual(['draft'])
-    expect(await getDraft(h.db, 'nba-401910007')).toMatchObject({
+    expect(await getDraft(h.db, ID)).toMatchObject({
       status: 'final',
       homeScore: 113,
       awayScore: 106,
       state: 'pending',
     })
-    const drafts = alerts.filter(([k]) => k === 'draft:nba-401910007')
+    const drafts = alerts.filter(([k]) => k === `draft:${ID}`)
     expect(drafts).toHaveLength(2)
     expect(drafts[1]?.[1]).toContain('--score 113-106')
 
     // Once drafted again, the challenged market stays quiet: no second rejection.
     now += 5
     expect(await keeper.tick()).toEqual([])
-    expect((await getDraft(h.db, 'nba-401910007'))?.state).toBe('pending')
+    expect((await getDraft(h.db, ID))?.state).toBe('pending')
+  })
+
+  it('rejects again when a second challenge lands before the keeper reads the chain', async () => {
+    await firstChallenge()
+    expect(challengeAlerts()).toHaveLength(1)
+
+    // The guardian proposes the redraft and it is challenged again, all between two chain
+    // reads: the row still says challenged, like the chain, but the count moved.
+    await propose()
+    const P2 = now + 30
+    settled = { outcome: 1, evidence: new Uint8Array(32).fill(0xcd), proposedAt: P2, challenges: 2 }
+    accounts.set(gm, account(gameMarketBytes(marketId, STATUS.challenged, settled)))
+    now += 90
+    expect(types(await keeper.tick())).toEqual(['sync'])
+    expect((await getDraft(h.db, ID))?.state).toBe('rejected')
+    expect(challengeAlerts()).toHaveLength(2)
+    expect(await row()).toMatchObject({
+      status: 'challenged',
+      challengeCount: 2,
+      proposedAt: new Date(P2 * 1000),
+      evidenceHash: 'cd'.repeat(32),
+    })
+
+    // The next tick drafts again from the feed.
+    now += 5
+    expect(types(await keeper.tick())).toEqual(['draft'])
+    expect((await getDraft(h.db, ID))?.state).toBe('pending')
+    now += 5
+    expect(await keeper.tick()).toEqual([])
+    expect(challengeAlerts()).toHaveLength(2)
+  })
+
+  it('leaves a proposed draft alone while its propose has not landed', async () => {
+    // Halted, no challenge yet: ops marked the draft proposed ahead of the transaction.
+    await toDraft()
+    await propose()
+    now += 5
+    expect(await keeper.tick()).toEqual([])
+    expect((await getDraft(h.db, ID))?.state).toBe('proposed')
+    expect(challengeAlerts()).toEqual([])
+  })
+
+  it('leaves a proposed redraft alone on a challenged chain whose count has not moved', async () => {
+    await firstChallenge()
+    await propose()
+    now += 5
+    expect(await keeper.tick()).toEqual([])
+    expect((await getDraft(h.db, ID))?.state).toBe('proposed')
+    expect(challengeAlerts()).toHaveLength(1)
+  })
+})
+
+describe('a market on chain with no row', () => {
+  const row = async () => (await getGame(h.db, 'nba-401910007'))?.markets[0]
+
+  it('is adopted with its chain status, without reading the treasury', async () => {
+    accounts.set(gm, account(gameMarketBytes(marketId, STATUS.halted)))
+    let reads = 0
+    connectionOf(keeper).getTokenAccountBalance = async () => {
+      reads++
+      return { context: { slot: 1 }, value: { amount: '0', decimals: 6, uiAmount: 0 } }
+    }
+    expect(types(await keeper.tick())).toEqual(['create'])
+    expect(sends).toEqual([])
+    expect(alerts).toEqual([])
+    expect(reads).toBe(0)
+    expect((await listOps(h.db)).map((o) => o.action)).toEqual(['adopt'])
+    expect(await row()).toMatchObject({
+      marketId: marketId.toString(),
+      status: 'halted',
+      seedAmount: 300_000_000n,
+      endTs: new Date(END * 1000),
+      createSig: null,
+    })
+    now += 5
+    expect(await keeper.tick()).toEqual([])
+  })
+
+  it('is adopted on the next tick after a create that landed unresolved', async () => {
+    fail = (label) => {
+      // The transaction lands after the sender gave up on it.
+      accounts.set(gm, account(gameMarketBytes(marketId, STATUS.open)))
+      return new UnresolvedAttempt(`${label}: still unresolved after 90 s; it may still land`)
+    }
+    expect(types(await keeper.tick())).toEqual(['create'])
+    expect(await row()).toBeUndefined()
+
+    // The seed has left the treasury: a create would now report it empty.
+    fail = undefined
+    connectionOf(keeper).getTokenAccountBalance = async () => ({
+      context: { slot: 1 },
+      value: { amount: '0', decimals: 6, uiAmount: 0 },
+    })
+    now += 5
+    expect(types(await keeper.tick())).toEqual(['create'])
+    expect(sends).toEqual(['create nba-401910007'])
+    expect(alerts).toEqual([])
+    expect((await listOps(h.db)).map((o) => o.action)).toEqual(['adopt'])
+    expect(await row()).toMatchObject({ status: 'open' })
+  })
+})
+
+describe('isDone', () => {
+  it('does not count a GameMarket the RPC cannot see as done', async () => {
+    await keeper.tick() // create
+    now = END - 900
+    current = finalGame()
+    await keeper.tick() // halt
+    settled = { outcome: 0, proposedAt: END }
+    accounts.set(gm, account(gameMarketBytes(marketId, STATUS.proposed, settled)))
+    now = END + 900
+    expect(types(await keeper.tick())).toEqual(['sync', 'finalize'])
+
+    // A lagging RPC answers with no account.
+    accounts.delete(gm)
+    const labels = [
+      'create nba-401910007',
+      'halt nba-401910007 (final-before-end)',
+      'finalize nba-401910007',
+    ]
+    for (const label of labels) {
+      const spec = specs.find((x) => x.label === label)
+      expect(spec, label).toBeDefined()
+      expect(await spec?.isDone?.(), label).toBe(false)
+    }
+  })
+})
+
+describe('a GameMarket that does not decode', () => {
+  it('is skipped with a warning and an alert, and the other games go on', async () => {
+    const other = 'nba-401910008'
+    await upsertScheduledGames(h.db, [
+      {
+        id: other,
+        league: 'NBA',
+        externalId: '401910008',
+        gameDate: '2026-11-18',
+        home: 'BOS',
+        away: 'NYK',
+        scheduledTipoff: new Date(S * 1000),
+        status: 'scheduled',
+        p0: 0.5,
+      },
+    ])
+    const otherId = await marketIdFor('NBA', '401910008', 0)
+    const a = program.addresses(otherId)
+    await upsertMarket(h.db, {
+      pubkey: a.market.toBase58(),
+      gameId: other,
+      kind: 0,
+      marketId: otherId.toString(),
+      gameMarketPda: a.gameMarket.toBase58(),
+      yesMint: a.yesMint.toBase58(),
+      noMint: a.noMint.toBase58(),
+      initialPriceBps: 5_000,
+      endTs: new Date(END * 1000),
+      seedAmount: 300_000_000n,
+      status: 'open',
+    })
+    accounts.set(a.gameMarket.toBase58(), account(Buffer.from('not a GameMarket at all')))
+
+    expect(types(await keeper.tick())).toEqual(['create'])
+    expect(sends).toEqual(['create nba-401910007'])
+    expect(alerts.map(([k]) => k)).toEqual([`decode:${other}`])
+    expect(alerts[0]?.[1]).toContain('account is not a GameMarket')
+    const warns = logs.filter((l) => l.level === WARN)
+    expect(warns).toHaveLength(1)
+    expect(warns[0]).toMatchObject({ gameId: other })
+  })
+})
+
+describe('the feed', () => {
+  it('is polled no faster than feedEverySecs, even while it fails', async () => {
+    const throttled = new Keeper({ ...deps, feedEverySecs: 15 })
+    feedDown = true
+    await throttled.tick()
+    expect(fetches).toEqual(['2026-11-17', '2026-11-18'])
+    now += 14
+    await throttled.tick()
+    expect(fetches).toHaveLength(2)
+    now += 1
+    await throttled.tick()
+    expect(fetches).toHaveLength(4)
   })
 })
 
@@ -478,6 +709,21 @@ describe('a failed action', () => {
     expect(errors[0]).not.toHaveProperty('err')
   })
 
+  it('redacts the rejection it alerts', async () => {
+    fail = (label) =>
+      new ProgramFailure(
+        label,
+        'horagon',
+        null,
+        'see https://rpc.example.test/?api-key=SECRET123',
+        [],
+      )
+    await keeper.tick()
+    expect(alerts.map(([k]) => k)).toEqual(['fail:create:nba-401910007'])
+    expect(alerts[0]?.[1]).toContain('create nba-401910007 rejected: create nba-401910007: horagon')
+    expect(JSON.stringify(alerts)).not.toContain('SECRET123')
+  })
+
   it('logs any other failure without a keyed URL and without an alert', async () => {
     fail = () => new Error('fetch failed: https://rpc.example.test/v1/SECRET123?api-key=SECRET123')
     expect(types(await keeper.tick())).toEqual(['create'])
@@ -539,6 +785,41 @@ describe('the treasury read before a create', () => {
     expect((await keeper.tick()).map((a) => a.type)).toEqual(['create'])
     expect(sends).toEqual(['create nba-401910007'])
     expect(alerts).toEqual([])
+  })
+
+  it('alerts after 10 failed reads in a row, and counts again after a good read', async () => {
+    const conn = connectionOf(keeper)
+    const failing = async () => {
+      throw new Error('429 Too Many Requests from https://rpc.example.test/?api-key=SECRET123')
+    }
+    const unread = () => alerts.filter(([k]) => k === 'treasury-unread')
+    const ticks = async (n: number) => {
+      for (let i = 0; i < n; i++) {
+        await keeper.tick()
+        now += 5
+      }
+    }
+    conn.getTokenAccountBalance = failing
+    await ticks(9)
+    expect(unread()).toEqual([])
+    await ticks(1)
+    expect(unread()).toHaveLength(1)
+    expect(unread()[0]?.[1]).toContain('10 times in a row')
+    expect(unread()[0]?.[1]).toContain('429 Too Many Requests')
+    expect(JSON.stringify(alerts)).not.toContain('SECRET123')
+    expect(sends).toEqual([])
+
+    // A good read (an empty treasury) resets the count.
+    conn.getTokenAccountBalance = async () => ({
+      context: { slot: 1 },
+      value: { amount: '0', decimals: 6, uiAmount: 0 },
+    })
+    await ticks(1)
+    conn.getTokenAccountBalance = failing
+    await ticks(9)
+    expect(unread()).toHaveLength(1)
+    await ticks(1)
+    expect(unread()).toHaveLength(2)
   })
 
   it('treats a treasury account that does not exist as empty', async () => {
@@ -615,6 +896,14 @@ describe('stuckAlerts', () => {
   it('stays quiet with a usable draft', async () => {
     expect(stuckAlerts([await state({ draft: draft('pending') })], STUCK)).toEqual([])
     expect(stuckAlerts([await state({ draft: draft('proposed') })], STUCK)).toEqual([])
+  })
+
+  it('counts a proposed draft as no draft while the chain is challenged', async () => {
+    const proposed = { draft: draft('proposed') }
+    expect(stuckAlerts([await state(proposed, STATUS.challenged)], STUCK)).toHaveLength(1)
+    expect(stuckAlerts([await state(proposed, STATUS.halted)], STUCK)).toEqual([])
+    const pending = { draft: draft('pending') }
+    expect(stuckAlerts([await state(pending, STATUS.challenged)], STUCK)).toEqual([])
   })
 
   it('leaves postponed, canceled and scheduled games to the 7-day path', async () => {

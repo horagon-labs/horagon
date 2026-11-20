@@ -35,6 +35,7 @@ import { ProgramFailure, type TxSender } from './executor'
 import { espnScoreboardUrl } from './feeds/espn'
 import { type Feed, type FeedGame, gameIdOf } from './feeds/types'
 import { type Action, type GameState, plan, type SeedPolicy, type Timings } from './planner'
+import { isMissingAccount } from './treasury'
 
 export interface KeeperDeps {
   db: Db
@@ -92,25 +93,28 @@ const sameLive = (a: FeedGame, b: FeedGame) =>
   a.period === b.period &&
   a.clockSecs === b.clockSecs
 
-/** A token account that does not exist holds nothing; any other RPC failure is not an answer. */
-const isMissingAccount = (err: unknown) =>
-  /could not find account|account does not exist/i.test(errorSummary(err).message)
-
 /** How long after end_ts a market with no result draft counts as stuck. */
 const STUCK_AFTER_SECS = 6 * 3600
 const UNRESOLVED: ReadonlySet<string> = new Set(['open', 'halted', 'challenged'])
 
 /**
  * Markets the planner leaves alone that still need a person: closed over 6 h ago, not proposed,
- * no usable draft (none, or rejected), and a feed that is stale (live), stuck on a Final it
- * cannot draft, or missing. A postponed, canceled or scheduled game has its own 7-day path.
+ * no usable draft, and a feed that is stale (live), stuck on a Final it cannot draft, or missing.
+ * A postponed, canceled or scheduled game has its own 7-day path. A rejected draft is not
+ * usable, nor is a proposed one while the chain is challenged: that proposal is the one
+ * challenged, whatever the DB says.
  */
 export function stuckAlerts(states: readonly GameState[], now: number): Action[] {
   return states.flatMap((s): Action[] => {
     const chain = s.onchain
     if (!chain || !UNRESOLVED.has(chain.status)) return []
     if (now < chain.endTs + STUCK_AFTER_SECS) return []
-    if (s.draft && s.draft.state !== 'rejected') return []
+    const draft = s.draft
+    const usable =
+      draft !== null &&
+      draft.state !== 'rejected' &&
+      !(draft.state === 'proposed' && chain.status === 'challenged')
+    if (usable) return []
     if (s.feed && s.feed.status !== 'live' && s.feed.status !== 'final') return []
     const g = s.game
     return [
@@ -124,10 +128,34 @@ export function stuckAlerts(states: readonly GameState[], now: number): Action[]
   })
 }
 
+const seconds = (d: Date | null) => (d ? Math.floor(d.getTime() / 1000) : 0)
+
+/**
+ * A `sync` for each market whose row is behind the chain although the statuses match: a propose
+ * and a challenge can both land between two chain reads (a sender wait, a restart), leaving the
+ * row `challenged` like the chain, with an older count and proposal. The planner only compares
+ * statuses, so this catches what it cannot see. Never a second sync for the same game.
+ */
+function driftSyncs(states: readonly GameState[], planned: readonly Action[]): Action[] {
+  const syncing = new Set(planned.filter((a) => a.type === 'sync').map((a) => a.gameId))
+  return states.flatMap((s): Action[] => {
+    const { market, onchain } = s
+    if (!market || !onchain || syncing.has(s.game.id)) return []
+    const behind =
+      onchain.challengeCount !== market.challengeCount ||
+      onchain.proposedAt !== seconds(market.proposedAt)
+    return behind ? [{ type: 'sync', gameId: s.game.id, marketId: onchain.marketId }] : []
+  })
+}
+
+/** Consecutive failed treasury reads before `treasury-unread` goes out. */
+const TREASURY_UNREAD_ALERT_AFTER = 10
+
 export class Keeper {
   private readonly observed = new Map<string, Observed>()
   private readonly lastFetch = new Map<string, number>()
   private window: { secs: number; at: number } | null = null
+  private treasuryFailures = 0
 
   constructor(private readonly d: KeeperDeps) {}
 
@@ -144,6 +172,8 @@ export class Keeper {
     const every = this.d.feedEverySecs ?? 15
     for (const date of this.feedDates(now)) {
       if (now - (this.lastFetch.get(date) ?? 0) < every) continue
+      // The attempt counts, not only a success: a failing or rate-limited feed is not hammered.
+      this.lastFetch.set(date, now)
       let snap: Awaited<ReturnType<Feed['fetchDay']>>
       try {
         snap = await this.d.feed.fetchDay(date)
@@ -151,7 +181,6 @@ export class Keeper {
         this.d.log.warn({ date, error: errorSummary(err).message }, 'feed read failed')
         continue
       }
-      this.lastFetch.set(date, now)
       // Events ESPN answered but the parser could not read: a format change must not make
       // games disappear silently.
       if ((snap.skipped ?? 0) > 0) {
@@ -211,22 +240,37 @@ export class Keeper {
     return config.disputeWindowSecs
   }
 
+  /**
+   * Every winner GameMarket, by market id. An account that does not decode is skipped for this
+   * tick, with a warning and a `decode:<id>` alert: one bad account must not stop every game.
+   */
   private async readChain(games: GameWithMarkets[]): Promise<Map<string, GameMarketAccount>> {
     const ids = games.flatMap((g) =>
-      g.markets.filter((m) => m.kind === 0).map((m) => BigInt(m.marketId)),
+      g.markets
+        .filter((m) => m.kind === 0)
+        .map((m) => ({ marketId: BigInt(m.marketId), gameId: g.id })),
     )
     const out = new Map<string, GameMarketAccount>()
     for (let i = 0; i < ids.length; i += 100) {
       const chunk = ids.slice(i, i + 100)
       const infos = await this.d.sender.connection.getMultipleAccountsInfo(
-        chunk.map((id) => deriveGameMarket(id, this.d.program.programId)),
+        chunk.map((m) => deriveGameMarket(m.marketId, this.d.program.programId)),
         'confirmed',
       )
-      infos.forEach((info, j) => {
-        const id = chunk[j]
-        if (info && id !== undefined)
-          out.set(id.toString(), decodeGameMarket(info, this.d.program.programId))
-      })
+      for (const [j, info] of infos.entries()) {
+        const m = chunk[j]
+        if (!info || m === undefined) continue
+        try {
+          out.set(m.marketId.toString(), decodeGameMarket(info, this.d.program.programId))
+        } catch (err) {
+          const error = errorSummary(err).message
+          this.d.log.warn({ gameId: m.gameId, error }, 'GameMarket does not decode; skipped')
+          await this.d.alerts.send(
+            `decode:${m.gameId}`,
+            `${m.gameId}: its GameMarket account does not decode (${error}); the keeper skips this market`,
+          )
+        }
+      }
     }
     return out
   }
@@ -257,14 +301,19 @@ export class Keeper {
         }
       }),
     )
+    const planned = plan({
+      now,
+      states,
+      timings: this.d.timings,
+      seeds: this.d.seeds,
+      disputeWindowSecs,
+    })
+    // The plan comes halts first, then syncs: the drift syncs join right after the halts.
+    const halts = planned.filter((a) => a.type === 'halt')
     const actions = [
-      ...plan({
-        now,
-        states,
-        timings: this.d.timings,
-        seeds: this.d.seeds,
-        disputeWindowSecs,
-      }),
+      ...halts,
+      ...driftSyncs(states, planned),
+      ...planned.filter((a) => a.type !== 'halt'),
       ...stuckAlerts(states, now),
     ]
     const byId = new Map(states.map((s) => [s.game.id, s]))
@@ -282,7 +331,7 @@ export class Keeper {
         if (program)
           await this.d.alerts.send(
             `fail:${a.type}:${a.gameId}`,
-            `${a.type} ${a.gameId} rejected: ${(err as Error).message}`,
+            `${a.type} ${a.gameId} rejected: ${errorSummary(err).message}`,
           )
       }
     }
@@ -328,25 +377,27 @@ export class Keeper {
     throw new Error(`${g.id}: market ids for salts 0-9 all belong to other games`)
   }
 
+  /**
+   * Adopts a GameMarket that is already on chain (a create that landed but was never recorded:
+   * a crash, a DB error, an UnresolvedAttempt that landed later), else seeds and creates one.
+   * The treasury is read only on the path that is about to send: once a create has landed its
+   * seed is gone from the treasury, and reading first would report a false empty treasury.
+   */
   private async create(a: Extract<Action, { type: 'create' }>, g: GameRow): Promise<void> {
-    let balance: bigint
-    try {
-      balance = await this.conn.getTokenAccountBalance(this.d.program.treasury, 'confirmed').then(
-        (r) => BigInt(r.value.amount),
-        (err: unknown) => {
-          if (isMissingAccount(err)) return 0n
-          throw err
-        },
-      )
-    } catch (err) {
-      // An unread balance is not an empty treasury: no alert, no create this tick. The planner
-      // asks for the create again on the next tick while the window is open.
-      this.d.log.warn(
-        { gameId: g.id, error: errorSummary(err).message },
-        'create skipped: treasury balance unread',
-      )
+    const { marketId, existing } = await this.marketIdFor(g)
+    if (existing) {
+      await this.record(g, marketId, {
+        initialPriceBps: a.initialPriceBps,
+        endTs: existing.endTs,
+        seed: existing.seedAmount,
+        status: existing.status,
+        sig: null,
+        action: 'adopt',
+      })
       return
     }
+    const balance = await this.treasuryBalance(g)
+    if (balance === null) return
     let seed = a.seedAmount
     if (balance < seed) {
       if (a.featured && balance >= this.d.seeds.regular) {
@@ -363,39 +414,89 @@ export class Keeper {
         return
       }
     }
-    const { marketId, existing } = await this.marketIdFor(g)
     const tip = Math.floor(g.scheduledTipoff.getTime() / 1000)
-    let sig: string | null = null
-    if (!existing) {
-      const ix = this.d.program.ix.createGameMarket({
-        attestor: this.d.attestor.publicKey,
-        marketId,
-        kind: 0,
+    const ix = this.d.program.ix.createGameMarket({
+      attestor: this.d.attestor.publicKey,
+      marketId,
+      kind: 0,
+      league: g.league,
+      externalGameId: g.externalId,
+      home: g.home,
+      away: g.away,
+      scheduledTipoff: tip,
+      endTs: a.endTs,
+      name: marketName({
         league: g.league,
-        externalGameId: g.externalId,
-        home: g.home,
         away: g.away,
-        scheduledTipoff: tip,
-        endTs: a.endTs,
-        name: marketName({
-          league: g.league,
-          away: g.away,
-          home: g.home,
-          gameDate: g.gameDate,
-          kind: 0,
-        }),
-        initialPriceBps: a.initialPriceBps,
-        seedAmount: seed,
-      })
-      const res = await this.d.sender.send({
-        label: `create ${g.id}`,
-        instructions: [ix],
-        computeUnits: CREATE_MARKET_COMPUTE_UNITS,
-        priorityMicroLamports: this.d.priority.normal,
-        isDone: async () => (await this.d.program.fetchGameMarket(this.conn, marketId)) !== null,
-      })
-      sig = res.signature
+        home: g.home,
+        gameDate: g.gameDate,
+        kind: 0,
+      }),
+      initialPriceBps: a.initialPriceBps,
+      seedAmount: seed,
+    })
+    const res = await this.d.sender.send({
+      label: `create ${g.id}`,
+      instructions: [ix],
+      computeUnits: CREATE_MARKET_COMPUTE_UNITS,
+      priorityMicroLamports: this.d.priority.normal,
+      isDone: async () => (await this.d.program.fetchGameMarket(this.conn, marketId)) !== null,
+    })
+    await this.record(g, marketId, {
+      initialPriceBps: a.initialPriceBps,
+      endTs: a.endTs,
+      seed,
+      status: 'open',
+      sig: res.signature,
+      action: 'create',
+    })
+  }
+
+  /**
+   * The treasury's mUSDC, or null when the RPC cannot say. A missing account holds 0. An unread
+   * balance is not an empty treasury: no alert and no create this tick (the planner asks again),
+   * but 10 failed reads in a row send `treasury-unread`.
+   */
+  private async treasuryBalance(g: GameRow): Promise<bigint | null> {
+    try {
+      const balance = await this.conn
+        .getTokenAccountBalance(this.d.program.treasury, 'confirmed')
+        .then(
+          (r) => BigInt(r.value.amount),
+          (err: unknown) => {
+            if (isMissingAccount(err)) return 0n
+            throw err
+          },
+        )
+      this.treasuryFailures = 0
+      return balance
+    } catch (err) {
+      const error = errorSummary(err).message
+      this.treasuryFailures++
+      this.d.log.warn({ gameId: g.id, error }, 'create skipped: treasury balance unread')
+      if (this.treasuryFailures >= TREASURY_UNREAD_ALERT_AFTER) {
+        await this.d.alerts.send(
+          'treasury-unread',
+          `Treasury balance could not be read ${this.treasuryFailures} times in a row (${error}); no market is created until it can`,
+        )
+      }
+      return null
     }
+  }
+
+  /** The market row and the ops log entry, for a create or an adoption. */
+  private async record(
+    g: GameRow,
+    marketId: bigint,
+    m: {
+      initialPriceBps: number
+      endTs: number
+      seed: bigint
+      status: string
+      sig: string | null
+      action: 'create' | 'adopt'
+    },
+  ): Promise<void> {
     const addrs = this.d.program.addresses(marketId)
     await upsertMarket(this.d.db, {
       pubkey: addrs.market.toBase58(),
@@ -405,19 +506,19 @@ export class Keeper {
       gameMarketPda: addrs.gameMarket.toBase58(),
       yesMint: addrs.yesMint.toBase58(),
       noMint: addrs.noMint.toBase58(),
-      initialPriceBps: a.initialPriceBps,
-      endTs: new Date((existing?.endTs ?? a.endTs) * 1000),
-      seedAmount: existing?.seedAmount ?? seed,
-      status: existing?.status ?? 'open',
-      createSig: sig,
+      initialPriceBps: m.initialPriceBps,
+      endTs: new Date(m.endTs * 1000),
+      seedAmount: m.seed,
+      status: m.status,
+      createSig: m.sig,
     })
     await logOps(this.d.db, {
       actor: 'keeper',
-      action: existing ? 'adopt' : 'create',
+      action: m.action,
       gameId: g.id,
       market: addrs.market.toBase58(),
-      sig,
-      detail: { seed: seed.toString(), priceBps: a.initialPriceBps, endTs: a.endTs },
+      sig: m.sig,
+      detail: { seed: m.seed.toString(), priceBps: m.initialPriceBps, endTs: m.endTs },
     })
   }
 
@@ -431,8 +532,11 @@ export class Keeper {
       instructions: ixs,
       computeUnits: HEAVY_IX_COMPUTE_UNITS,
       priorityMicroLamports: this.d.priority.halt,
-      isDone: async () =>
-        (await this.d.program.fetchGameMarket(this.conn, a.marketId))?.status !== 'open',
+      // A null read (a lagging RPC) is not proof of anything: only a GameMarket seen not open is.
+      isDone: async () => {
+        const gm = await this.d.program.fetchGameMarket(this.conn, a.marketId)
+        return gm !== null && gm.status !== 'open'
+      },
     })
     if (s.market)
       await updateMarket(this.d.db, s.market.pubkey, { status: 'halted', haltSig: res.signature })
@@ -487,8 +591,11 @@ export class Keeper {
       instructions,
       computeUnits: HEAVY_IX_COMPUTE_UNITS,
       priorityMicroLamports: this.d.priority.normal,
-      isDone: async () =>
-        done((await this.d.program.fetchGameMarket(this.conn, a.marketId))?.status ?? ''),
+      // Only a GameMarket actually read can say the step is done; a null read is not "not proposed".
+      isDone: async () => {
+        const gm = await this.d.program.fetchGameMarket(this.conn, a.marketId)
+        return gm !== null && done(gm.status)
+      },
     })
     if (s.market) {
       await updateMarket(
@@ -515,9 +622,15 @@ export class Keeper {
     if (!gm) return
     // A challenge rejects the draft. The planner ignores only rejected drafts and upsertDraft
     // never overwrites a proposed one, so without this the market would wait on the challenged
-    // draft forever. Rejected before the row is synced: if this write fails, the row still
-    // differs from the chain and the next tick syncs (and rejects) again.
-    if (gm.status === 'challenged' && s.draft && s.draft.state !== 'rejected')
+    // draft forever. A challenge is a status change into `challenged`, or a count that grew (a
+    // propose and a second challenge between two chain reads). A `challenged` chain alone is
+    // not one: ops may mark a draft proposed before its propose lands. Rejected before the row
+    // is synced: if this write fails, the row still differs from the chain and the next tick
+    // syncs (and rejects) again.
+    const challenged = gm.status === 'challenged'
+    const newChallenge = gm.challengeCount > s.market.challengeCount
+    const statusMoved = s.market.status !== gm.status
+    if (challenged && (statusMoved || newChallenge) && s.draft && s.draft.state !== 'rejected')
       await setDraftState(this.d.db, s.game.id, { state: 'rejected' })
     const settled = gm.status === 'finalized' || gm.status === 'recycled'
     await updateMarket(this.d.db, s.market.pubkey, {
@@ -531,7 +644,7 @@ export class Keeper {
         ? { recycledAt: new Date() }
         : {}),
     })
-    if (gm.status === 'challenged' && s.market.status !== 'challenged') {
+    if (newChallenge || (challenged && statusMoved)) {
       await this.d.alerts.send(
         `challenge:${s.game.id}`,
         `Challenged: ${s.game.away}@${s.game.home}. Re-check and propose again.`,
