@@ -89,10 +89,18 @@ describe('pmAmmFaucet', () => {
     ['amount 0', { ok: true, signature: SIG, amount: 0 }],
     ['a fractional amount', { ok: true, signature: SIG, amount: 1.5 }],
     ['no amount', { ok: true, signature: SIG }],
+    // 1,000 mUSDC in base units: the upstream changed its unit, which must not pay out 1e9.
+    ['an amount in base units', { ok: true, signature: SIG, amount: 1_000_000_000 }],
+    ['an amount above 1,000,000', { ok: true, signature: SIG, amount: 1_000_001 }],
   ])('maps a 200 with %s to NETWORK 502', async (_, body) => {
     const err = await failure(faucetWith(() => json(200, body)).claim(WALLET))
     expect(err.code).toBe('NETWORK')
     expect(err.extra.status).toBe(502)
+  })
+
+  it('accepts an amount of exactly 1,000,000', async () => {
+    const { claim } = faucetWith(() => json(200, { ok: true, signature: SIG, amount: 1_000_000 }))
+    expect(await claim(WALLET)).toEqual({ signature: SIG, amount: 1_000_000 })
   })
 
   it('maps a 200 that is not JSON to NETWORK 502', async () => {

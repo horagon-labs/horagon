@@ -176,7 +176,12 @@ export interface TestEnv {
 }
 
 export async function makeEnv(
-  opts: { txPerHour?: number; capSol?: number; atasPerWalletDay?: number } = {},
+  opts: {
+    txPerHour?: number
+    capSol?: number
+    atasPerWalletDay?: number
+    atasPerIpDay?: number
+  } = {},
 ): Promise<TestEnv> {
   const h = await createTestDb()
   const chain = new FakeChain()
@@ -212,7 +217,7 @@ export async function makeEnv(
       keypair: sponsor,
       dailyCapLamports: BigInt(Math.round((opts.capSol ?? 2) * 1e9)),
       txPerHour: opts.txPerHour ?? 30,
-      atasPerDay: { wallet: opts.atasPerWalletDay ?? 26, ip: 78 },
+      atasPerDay: { wallet: opts.atasPerWalletDay ?? 26, ip: opts.atasPerIpDay ?? 78 },
     },
     faucet,
     publicUrl: 'https://horagon.test',

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { HoragonClient } from '../src/client'
+import { errorSignature, HoragonClient } from '../src/client'
 import { isHoragonError } from '../src/errors'
 
 type Step = Response | Error | (() => Promise<Response>)
@@ -200,7 +200,23 @@ describe('query and path building', () => {
 })
 
 describe('trade.submit', () => {
-  it('tells the caller not to rebuild after a lost answer', async () => {
+  /** The API's answer to a send whose outcome is unknown (RFC 9457 extension `signature`). */
+  const unsureSend = (extra: Record<string, unknown> = { signature: SIG }) =>
+    json(
+      {
+        type: 'about:blank',
+        title: 'Network',
+        status: 502,
+        detail: 'The RPC did not confirm it received the transaction',
+        code: 'NETWORK',
+        hint: `It may still land. Check GET /api/v1/tx/${SIG} before building a new trade.`,
+        requestId: 'req-9',
+        ...extra,
+      },
+      502,
+    )
+
+  it('tells the caller not to rebuild after a lost answer, and never to resend', async () => {
     const { c } = client([new TypeError('boom')])
     const err = (await c.trade.submit('AAAA').catch((e: unknown) => e)) as {
       code: string
@@ -208,6 +224,47 @@ describe('trade.submit', () => {
     }
     expect(err.code).toBe('NETWORK')
     expect(err.hint).toContain('Do not rebuild')
+    expect(err.hint).not.toMatch(/resend|send (it|the same)/i)
+    expect(errorSignature(err)).toBeUndefined()
+  })
+
+  it('keeps the signature of a send that may have landed, pointing at its status', async () => {
+    const { c, s } = client([unsureSend()])
+    const err = await c.trade.submit('AAAA').catch((e: unknown) => e)
+    expect(isHoragonError(err)).toBe(true)
+    expect(s.calls).toHaveLength(1)
+    expect(err).toMatchObject({ code: 'NETWORK', signature: SIG })
+    expect(errorSignature(err)).toBe(SIG)
+    const { hint } = err as { hint: string }
+    expect(hint).toContain(`GET /api/v1/tx/${SIG}`)
+    expect(hint).toContain('trade.status')
+    expect(hint).toMatch(/blockhash has expired/)
+    expect(hint).not.toMatch(/resend|send (it|the same)/i)
+  })
+
+  it('reads the signature on any problem, keeping the API hint outside submit', async () => {
+    const { c } = client([unsureSend()])
+    const err = await c.faucet('w').catch((e: unknown) => e)
+    expect(errorSignature(err)).toBe(SIG)
+    expect(err).toMatchObject({
+      code: 'NETWORK',
+      hint: `It may still land. Check GET /api/v1/tx/${SIG} before building a new trade.`,
+    })
+  })
+
+  it('ignores a signature member that is not a signature', async () => {
+    for (const signature of ['not a signature', 42, null]) {
+      const { c } = client([unsureSend({ signature })])
+      const err = await c.trade.submit('AAAA').catch((e: unknown) => e)
+      expect(err).toMatchObject({ code: 'NETWORK' })
+      expect(errorSignature(err)).toBeUndefined()
+      expect(err).not.toHaveProperty('signature')
+    }
+  })
+
+  it('reads no signature from anything but a HoragonError', () => {
+    expect(errorSignature(Object.assign(new Error('x'), { signature: SIG }))).toBeUndefined()
+    expect(errorSignature(undefined)).toBeUndefined()
   })
 })
 
@@ -246,10 +303,12 @@ describe('trade.waitFor', () => {
         })) as typeof fetch,
     })
     const t0 = Date.now()
-    await expect(c.trade.waitFor(SIG, { timeoutMs: 80, pollMs: 5 })).rejects.toMatchObject({
+    const err = await c.trade.waitFor(SIG, { timeoutMs: 80, pollMs: 5 }).catch((e: unknown) => e)
+    expect(err).toMatchObject({
       code: 'NETWORK',
       message: expect.stringContaining('not confirmed in time'),
     })
+    expect((err as { hint: string }).hint).not.toMatch(/resend/i)
     expect(Date.now() - t0).toBeLessThan(2000)
   })
 

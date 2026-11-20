@@ -20,6 +20,7 @@ import { Buffer } from 'node:buffer'
 import {
   atasClosedAway,
   listMarketMints,
+  rateLimitRefund,
   rateLimitTake,
   sponsorRelease,
   sponsorReserve,
@@ -264,7 +265,7 @@ export async function submitSponsored(
         ...(err.programCode === undefined ? {} : { programCode: err.programCode }),
       })
     }
-    if (ataCreates > 0) await takeAtaBudget(deps.db, sponsor, wallet, ipHash, ataCreates)
+    if (ataCreates > 0) await takeAtaBudget(deps, sponsor, wallet, ipHash, ataCreates)
   } catch (e) {
     // Nothing was sent: the reservation goes back.
     await sponsorRelease(deps.db, signature)
@@ -290,9 +291,13 @@ export async function submitSponsored(
   return { signature }
 }
 
-/** Each new ATA costs its rent for good, so a wallet and an IP get a daily number of them. */
+/**
+ * Each new ATA costs its rent for good, so a wallet and an IP get a daily number of them. When
+ * a later bucket refuses, the tokens already taken from the earlier ones go back: nothing was
+ * opened.
+ */
 async function takeAtaBudget(
-  db: ApiDeps['db'],
+  deps: ApiDeps,
   sponsor: SponsorConfig,
   wallet: string,
   ipHash: string,
@@ -302,17 +307,30 @@ async function takeAtaBudget(
     [`ata:w:${wallet}`, sponsor.atasPerDay.wallet],
     [`ata:ip:${ipHash}`, sponsor.atasPerDay.ip],
   ]
+  const taken: Array<[string, number]> = []
   for (const [key, capacity] of buckets) {
     const wait =
       creates > capacity
         ? 86_400
-        : await rateLimitTake(db, key, { cost: creates, capacity, refillPerSec: capacity / 86_400 })
+        : await rateLimitTake(deps.db, key, {
+            cost: creates,
+            capacity,
+            refillPerSec: capacity / 86_400,
+          })
     if (wait > 0) {
+      for (const [k, cap] of taken) {
+        try {
+          await rateLimitRefund(deps.db, k, { cost: creates, capacity: cap })
+        } catch (e) {
+          deps.log.warn({ error: errorSummary(e), key: k }, 'sponsor ATA refund failed')
+        }
+      }
       throw new ApiError('RATE_LIMITED', `Sponsor limit: ${capacity} new token accounts a day`, {
         hint: 'Trade in a market where you already hold YES and NO, or come back later.',
         retryAfterSecs: wait,
       })
     }
+    taken.push([key, capacity])
   }
 }
 

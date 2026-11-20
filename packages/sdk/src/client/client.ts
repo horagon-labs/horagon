@@ -4,6 +4,9 @@
 // retry transient failures; POSTs never retry, since a build or a submit is not idempotent
 // from the caller's point of view. Every failure is a HoragonError: a body that cannot be read
 // (bad JSON, an HTML error page, an aborted read) is a NETWORK error too, and GETs retry it.
+// A problem that names a transaction (the RFC 9457 extension member `signature`, sent with a
+// sponsored send whose outcome is unknown) keeps it as `signature` on the HoragonError; read
+// it with `errorSignature`.
 import type { z } from 'zod'
 import { HORAGON_ERROR_CODES, HoragonError, type HoragonErrorCode, isHoragonError } from '../errors'
 import {
@@ -31,6 +34,7 @@ import {
   type Quote,
   type QuoteRequest,
   QuoteSchema,
+  SignatureSchema,
   SubmitResponseSchema,
   type TradeBuildRequest,
   type TxStatus,
@@ -61,6 +65,35 @@ interface RequestOpts {
 }
 
 const GamesSchema = GameSchema.array()
+
+/**
+ * The transaction a HoragonError names, if any: set from the API's `signature` problem member
+ * (a sponsored send that may have landed), and kept by `trade.submit`. Check it with
+ * `trade.status` before building another trade.
+ */
+export function errorSignature(err: unknown): string | undefined {
+  if (!isHoragonError(err)) return undefined
+  const signature = (err as { signature?: unknown }).signature
+  return typeof signature === 'string' ? signature : undefined
+}
+
+/** Puts `signature` on the error as a read-only property; a missing one adds nothing. */
+function withSignature(err: HoragonError, signature: string | undefined): HoragonError {
+  if (signature !== undefined) {
+    Object.defineProperty(err, 'signature', { value: signature, enumerable: true })
+  }
+  return err
+}
+
+/**
+ * What to do after a submit whose answer did not arrive. Never "send it again": the API answers
+ * a signed transaction it already holds as a duplicate, without sending it a second time.
+ */
+function unsureSubmitHint(signature: string | undefined): string {
+  return signature === undefined
+    ? 'The transaction may already have been sent. Do not rebuild or sign a new one yet: wait until its blockhash has expired (about 90 seconds), check the wallet positions, and build a new trade only if they did not change.'
+    : `The transaction may still land. Check trade.status('${signature}') (GET /api/v1/tx/${signature}). Do not rebuild while it can land: build a new trade only if that signature is still unknown once its blockhash has expired (about 90 seconds).`
+}
 const isCode = (c: unknown): c is HoragonErrorCode =>
   typeof c === 'string' && (HORAGON_ERROR_CODES as readonly string[]).includes(c)
 
@@ -109,10 +142,14 @@ export class HoragonClient {
       } catch (err) {
         if (isHoragonError(err) && err.code === 'NETWORK') {
           // The sponsor may have sent it before the answer was lost. Rebuilding would trade twice.
-          throw new HoragonError('NETWORK', err.message, {
-            hint: 'The transaction may already have been sent. Do not rebuild or sign a new one: check trade.status and the wallet positions first, or resend the same signed transaction.',
-            cause: err,
-          })
+          const signature = errorSignature(err)
+          throw withSignature(
+            new HoragonError('NETWORK', err.message, {
+              hint: unsureSubmitHint(signature),
+              cause: err,
+            }),
+            signature,
+          )
         }
         throw err
       }
@@ -152,7 +189,7 @@ export class HoragonClient {
         }
         if (Date.now() >= deadline) {
           throw new HoragonError('NETWORK', `${signature} not confirmed in time`, {
-            hint: 'The transaction may still land; check its status again before resending.',
+            hint: 'The transaction may still land; check its status again, and build a new trade only once its blockhash has expired.',
             ...(lastErr === undefined ? {} : { cause: lastErr }),
           })
         }
@@ -309,11 +346,16 @@ async function problemError(res: Response, what: string): Promise<HoragonError> 
   const rid = requestId === undefined ? '' : ` (request id ${requestId})`
   if (p.success && isCode(p.data.code)) {
     const reason = p.data.reason === undefined ? '' : ` [${p.data.reason}]`
-    return new HoragonError(p.data.code, `${p.data.detail}${reason}${rid}`, {
-      ...(p.data.hint === undefined ? {} : { hint: p.data.hint }),
-      ...(p.data.programCode === undefined ? {} : { programCode: p.data.programCode }),
-      ...(retryAfterSecs === undefined ? {} : { retryAfterSecs }),
-    })
+    // ProblemSchema drops extension members; `signature` is read from the raw body.
+    const sig = SignatureSchema.safeParse((raw as { signature?: unknown }).signature)
+    return withSignature(
+      new HoragonError(p.data.code, `${p.data.detail}${reason}${rid}`, {
+        ...(p.data.hint === undefined ? {} : { hint: p.data.hint }),
+        ...(p.data.programCode === undefined ? {} : { programCode: p.data.programCode }),
+        ...(retryAfterSecs === undefined ? {} : { retryAfterSecs }),
+      }),
+      sig.success ? sig.data : undefined,
+    )
   }
   const code: HoragonErrorCode =
     res.status === 404

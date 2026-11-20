@@ -9,11 +9,18 @@ import { hashIp } from './sponsor/submit'
 
 export const PM_AMM_FAUCET_URL = 'https://pm-amm-devnet.vercel.app/api/faucet'
 
-/** What the pm-AMM faucet answers on success (S5): `amount` is whole mUSDC, e.g. 1000. */
+/** The most whole mUSDC one claim may report; S5 saw 1000. */
+const MAX_FAUCET_AMOUNT = 1_000_000
+
+/**
+ * What the pm-AMM faucet answers on success (S5): `amount` is whole mUSDC, e.g. 1000. The upper
+ * bound catches a switch to base units (1000 mUSDC = 1e9), which would otherwise show a claim a
+ * million times too large: it is a NETWORK error instead, and the buckets are refunded.
+ */
 const FaucetAnswerSchema = z.object({
   ok: z.literal(true),
   signature: SignatureSchema,
-  amount: z.number().int().positive(),
+  amount: z.number().int().positive().max(MAX_FAUCET_AMOUNT),
 })
 
 /** Real faucet client. `fetchImpl` is injectable for tests. */

@@ -428,6 +428,22 @@ describe('POST /tx/submit', () => {
     )
   })
 
+  it('gives the wallet its token-account budget back when the IP budget refuses', async () => {
+    const { ataCreates } = inspect((await builtTrade()).tx)
+    // The wallet can open two trades' worth a day, each IP one trade's worth.
+    await replaceEnv({ atasPerWalletDay: 2 * ataCreates, atasPerIpDay: ataCreates })
+    const from = (ip: string) => ({ 'x-forwarded-for': ip })
+    const submit = async (amount: string, ip: string) =>
+      post('/tx/submit', { tx: signAsUser((await builtTrade(amount)).tx) }, from(ip))
+    expect((await submit('20', '198.51.100.1')).status).toBe(200)
+    const refused = await submit('21', '198.51.100.1')
+    expect(refused.status).toBe(429)
+    expect(await refused.json()).toMatchObject({ code: 'RATE_LIMITED' })
+    // Without the refund the wallet would be out too, and this would be a 429.
+    expect((await submit('22', '198.51.100.2')).status).toBe(200)
+    expect(env.chain.sent).toHaveLength(2)
+  })
+
   it('opens no token accounts for a wallet that closed sponsor-paid ones elsewhere', async () => {
     const wallet = env.user.publicKey.toBase58()
     const createdAt = new Date('2026-11-24T01:00:00Z')
