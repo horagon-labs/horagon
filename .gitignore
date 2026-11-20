@@ -19,3 +19,11 @@ spikes/recordings/
 # Agent working notes and Vitest caches stay local.
 .superpowers/
 **/.vitest/
+
+# Next.js output; `next typegen` (run by typecheck) regenerates next-env.d.ts.
+.next/
+next-env.d.ts
+*.tsbuildinfo
+
+# Keeper data: raw ESPN archive, Elo build cache, elo.json (copied to the VPS by hand).
+apps/keeper/data/

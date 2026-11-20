@@ -12,13 +12,18 @@
       "!**/coverage",
       "!spikes/results",
       "!spikes/recordings",
-      "!spikes/s2-cpi/idls"
+      "!spikes/s2-cpi/idls",
+      "!idls",
+      "!packages/sdk/idl",
+      "!**/.next",
+      "!**/next-env.d.ts"
     ]
   },
   "formatter": { "enabled": true, "indentStyle": "space", "indentWidth": 2, "lineWidth": 100 },
   "javascript": {
     "formatter": { "quoteStyle": "single", "semicolons": "asNeeded", "trailingCommas": "all" }
   },
+  "css": { "parser": { "tailwindDirectives": true } },
   "linter": { "enabled": true, "rules": { "preset": "recommended" } },
   "assist": { "actions": { "source": { "organizeImports": "on" } } }
 }
