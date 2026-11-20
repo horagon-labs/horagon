@@ -47,6 +47,7 @@ describe('ReplayGameSchema', () => {
     { schema: 'horagon.replay.v9' },
     { home: 'cle' },
     { frames: [] },
+    { tipoffUtc: '2026-13-45T25:99Z' },
   ])('refuses %o', (patch) => {
     expect(ReplayGameSchema.safeParse(game(patch)).success).toBe(false)
   })
@@ -62,6 +63,8 @@ describe('clockToSecs', () => {
     ['12:00', 720],
     ['PT05M30.00S', 330],
     ['PT00M00.00S', 0],
+    ['PT1.2.3S', 0],
+    ['', 0],
     ['garbage', 0],
     ['-3', 0],
   ])('%s is %d s', (clock, secs) => {

@@ -1,7 +1,7 @@
 # @horagon/sdk
 
 TypeScript SDK for Horagon: play-money prediction markets on NBA games, traded while the game
-is on, on pm-AMM (Solana devnet). Devnet only: no real value, no prizes.
+is on, on pm-AMM (Solana devnet). Play-money on devnet. No real value. No prizes.
 
 ```bash
 npm install @horagon/sdk @solana/web3.js

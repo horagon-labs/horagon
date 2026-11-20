@@ -15,6 +15,7 @@ const ISO_UTC = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,9})?)?Z$/
 const UtcTimeSchema = z
   .string()
   .regex(ISO_UTC, 'must be an ISO time in UTC')
+  .refine((s) => !Number.isNaN(Date.parse(s)), 'must be a real date and time')
   .transform((s) => new Date(s).toISOString())
 
 export const ReplayFrameSchema = z.object({
@@ -52,7 +53,10 @@ export type ReplayGameInput = z.input<typeof ReplayGameSchema>
 /** "11:16", "45.3", "0.0" (ESPN) or "PT11M16.00S" (NBA) to whole seconds; 0 when unreadable. */
 export function clockToSecs(clock: string): number {
   const iso = /^PT(?:(\d+)M)?(?:([\d.]+)S)?$/.exec(clock)
-  if (iso) return Math.round(Number(iso[1] ?? 0) * 60 + Number(iso[2] ?? 0))
+  if (iso) {
+    const secs = Math.round(Number(iso[1] ?? 0) * 60 + Number(iso[2] ?? 0))
+    return Number.isFinite(secs) ? secs : 0
+  }
   const mmss = /^(\d+):(\d{2})$/.exec(clock)
   if (mmss) return Number(mmss[1]) * 60 + Number(mmss[2])
   const secs = Number(clock)
