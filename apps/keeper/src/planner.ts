@@ -198,8 +198,8 @@ function planGame(s: GameState, input: PlanInput): Action[] {
     const rule = haltRule(s, chain, now, t, chainTip)
     if (rule) out.push({ type: 'halt', gameId: g.id, marketId, rule })
     else {
-      const text = silenceAlert(s, chain, now, t)
-      if (text) out.push({ type: 'alert', gameId: g.id, key: `feed-silent:${g.id}`, text })
+      const silence = silenceAlert(s, chain, now, t)
+      if (silence) out.push({ type: 'alert', gameId: g.id, ...silence })
     }
   }
 
@@ -208,19 +208,18 @@ function planGame(s: GameState, input: PlanInput): Action[] {
   const draft = s.draft?.state === 'rejected' ? null : s.draft
   if (chain.status === 'open' || chain.status === 'halted' || chain.status === 'challenged') {
     if (!draft) {
-      const draft = draftFor(s, now, t, chainTip)
-      if (draft) out.push(draft)
-      else if (feed?.status === 'final' && !periodsConsistent(feed)) {
-        out.push(periodsAlert(s, feed))
-      }
+      const next = draftFor(s, now, t, chainTip)
+      if (next) out.push(next)
+      else out.push(...draftBlocked(s, now, t, chainTip))
     } else if (draft.state === 'pending' && scoreCorrected(s)) {
       // ESPN corrected the Final score after the draft (a stat correction): draft again once
       // the new score is stable, so the guardian confirms that one. A proposed draft stays.
       const again = draftFor(s, now, t, chainTip)
       if (again) out.push(again)
-      else if (feed?.status === 'final' && !periodsConsistent(feed)) {
-        // The corrected score does not add up: the old draft must not be confirmed unwarned.
-        out.push(periodsAlert(s, feed))
+      else {
+        // A corrected score that does not add up (or is tied) must not leave the old draft
+        // to be confirmed unwarned.
+        out.push(...draftBlocked(s, now, t, chainTip))
       }
     } else if (
       draft.state === 'pending' &&
@@ -231,7 +230,7 @@ function planGame(s: GameState, input: PlanInput): Action[] {
         type: 'alert',
         gameId: g.id,
         key: `unconfirmed:${g.id}`,
-        text: `${g.away}@${g.home}: Final for 30 min, still waiting for the guardian's box-score check`,
+        text: `${g.away}@${g.home}: ${draft.status} draft waiting 30 min for the guardian's box-score check`,
       })
     }
   }
@@ -278,26 +277,65 @@ function silenceAlert(
   chain: GameMarketAccount,
   now: number,
   t: Timings,
-): string | null {
+): { key: string; text: string } | null {
   const { game: g, feed } = s
   if (now >= chain.endTs) return null
   if (feed && feed.status !== 'scheduled' && feed.status !== 'live') return null
   const name = `${g.away}@${g.home}`
+  const key = `feed-silent:${g.id}`
   const halt = `If the game may end before the close: horagon-ops halt ${g.id}`
   const q4 = q4Silence(s, chain, now)
   if (q4 !== null) {
     if (q4 <= t.feedSilentAlertSecs) return null
-    return `${name}: no feed for ${Math.floor(q4 / 60)} min in Q4/OT, market still open; the keeper halts at ${Math.round(t.feedSilentSecs / 60)} min. ${halt}`
+    // Its own key: the watch-window alert must not hide this pre-halt warning from the alerter.
+    return {
+      key: `feed-silent-q4:${g.id}`,
+      text: `${name}: no feed for ${Math.floor(q4 / 60)} min in Q4/OT, market still open; the keeper halts at ${Math.round(t.feedSilentSecs / 60)} min. ${halt}`,
+    }
   }
   if (now < chain.endTs - t.feedSilentWatchSecs) return null
   const closes = `the market closes in ${Math.ceil((chain.endTs - now) / 60)} min and this alert does not halt it`
   if (!feed || s.feedSeenAt === null) {
-    return `${name}: no feed read since the keeper started; ${closes}. ${halt}`
+    return { key, text: `${name}: no feed read since the keeper started; ${closes}. ${halt}` }
   }
   const silent = now - s.feedSeenAt
   if (silent <= t.feedSilentAlertSecs) return null
   const last = feed.status === 'live' && feed.period > 0 ? `in Q${feed.period}` : 'before tip-off'
-  return `${name}: no feed for ${Math.floor(silent / 60)} min, last seen ${last}; ${closes}. ${halt}`
+  return {
+    key,
+    text: `${name}: no feed for ${Math.floor(silent / 60)} min, last seen ${last}; ${closes}. ${halt}`,
+  }
+}
+
+/** Why no draft came out of draftFor, as alerts: bad data the guardian must resolve by hand. */
+function draftBlocked(s: GameState, now: number, t: Timings, tip: number): Action[] {
+  const { feed, game: g } = s
+  const name = `${g.away}@${g.home}`
+  if (feed?.status === 'final') {
+    if (feed.homeScore === feed.awayScore) {
+      return [
+        {
+          type: 'alert',
+          gameId: g.id,
+          key: `tie:${g.id}`,
+          text: `${name}: ESPN Final is tied ${feed.homeScore}-${feed.awayScore}; resolve by hand`,
+        },
+      ]
+    }
+    if (!periodsConsistent(feed)) return [periodsAlert(s, feed)]
+    return []
+  }
+  if (!feed && now >= tip + t.postponedResolveSecs) {
+    return [
+      {
+        type: 'alert',
+        gameId: g.id,
+        key: `no-feed:${g.id}`,
+        text: `${name}: no feed 7 days after tip-off; resolve by hand`,
+      },
+    ]
+  }
+  return []
 }
 
 function scoreCorrected(s: GameState): boolean {
@@ -315,6 +353,7 @@ function draftFor(s: GameState, now: number, t: Timings, tip: number): Action | 
     feed?.status === 'final' &&
     s.finalSince !== null &&
     now - s.finalSince >= t.finalStableSecs &&
+    feed.homeScore !== feed.awayScore &&
     periodsConsistent(feed)
   ) {
     return {
@@ -326,11 +365,11 @@ function draftFor(s: GameState, now: number, t: Timings, tip: number): Action | 
       periods: feed.periods,
     }
   }
+  // NO needs positive evidence: a feed that says the game was not played. A missing feed
+  // (an outage, a restart) is not evidence, and alerts instead (draftBlocked).
   const notPlayed =
-    !feed ||
-    feed.status === 'scheduled' ||
-    feed.status === 'postponed' ||
-    feed.status === 'canceled'
+    feed !== null &&
+    (feed.status === 'scheduled' || feed.status === 'postponed' || feed.status === 'canceled')
   if (notPlayed && now >= tip + t.postponedResolveSecs) {
     return {
       type: 'draft',

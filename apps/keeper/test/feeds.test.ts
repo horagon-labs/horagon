@@ -87,9 +87,21 @@ describe('ESPN scoreboard', () => {
     expect(espnStatus({ name: 'STATUS_POSTPONED', state: 'post', completed: true })).toBe(
       'postponed',
     )
-    expect(espnStatus({ name: 'STATUS_WHATEVER', state: 'post', completed: false })).toBe(
-      'postponed',
-    )
+    expect(espnStatus({ name: 'STATUS_WHATEVER', state: 'post', completed: false })).toBeNull()
+  })
+
+  it('skips and counts an event with an unrecognised post status', () => {
+    const odd = structuredClone(scoreboard.events[0]) as {
+      competitions: [{ status: { type: unknown } }]
+    }
+    odd.competitions[0].status.type = {
+      name: 'STATUS_WHATEVER',
+      state: 'post',
+      completed: false,
+    }
+    const r = parseEspnScoreboard({ events: [odd] })
+    expect(r.games).toHaveLength(0)
+    expect(r.skipped).toBe(1)
   })
 
   it('skips and counts malformed events instead of throwing', () => {

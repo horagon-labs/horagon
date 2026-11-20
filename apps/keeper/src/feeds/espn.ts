@@ -57,13 +57,18 @@ const Event = z.object({
  * ESPN marks a postponed game `post` without `completed`: only `post` AND `completed` is
  * final (Tier 0 review). Postponed and canceled are read from the status name first.
  */
-export function espnStatus(type: { name: string; state: string; completed: boolean }): FeedStatus {
+export function espnStatus(type: {
+  name: string
+  state: string
+  completed: boolean
+}): FeedStatus | null {
   // A delayed tip-off stays 'pre' (scheduled); only postponed or suspended halts the market.
   if (/POSTPONED|SUSPENDED/.test(type.name)) return 'postponed'
   if (/CANCEL/.test(type.name)) return 'canceled'
   if (type.state === 'in') return 'live'
   if (type.state === 'pre') return 'scheduled'
-  return type.completed ? 'final' : 'postponed'
+  // A post state whose name we do not know is not read: one odd read must not halt a market.
+  return type.completed ? 'final' : null
 }
 
 /**
@@ -106,6 +111,10 @@ export function parseEspnScoreboard(body: unknown): ParseResult {
       continue
     }
     const status = espnStatus(c.status.type)
+    if (status === null) {
+      skipped++
+      continue
+    }
     const scoreOptional = status !== 'live' && status !== 'final'
     const homeScore = points(home.score, scoreOptional)
     const awayScore = points(away.score, scoreOptional)

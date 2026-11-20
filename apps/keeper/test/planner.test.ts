@@ -205,7 +205,7 @@ describe('halt (spec 6.2)', () => {
     const now = END - 900
     expect(run(now, open({ feed: live, feedSeenAt: now - 120 }))).toEqual([])
     expect(run(now, open({ feed: live, feedSeenAt: now - 121 }))).toEqual([
-      expect.objectContaining({ type: 'alert', key: 'feed-silent:nba-401910007' }),
+      expect.objectContaining({ type: 'alert', key: 'feed-silent-q4:nba-401910007' }),
     ])
     expect(types(run(now, open({ feed: live, feedSeenAt: now - 600 })))).toEqual(['alert'])
     const halted = run(now, open({ feed: live, feedSeenAt: now - 601 }))
@@ -246,6 +246,74 @@ describe('halt (spec 6.2)', () => {
     const other = state({ game: game({ id: 'nba-2' }) })
     const actions = run(S - 100, other, open({ feed: feed({ status: 'postponed' }) }))
     expect(types(actions)).toEqual(['halt', 'create'])
+  })
+})
+
+describe('hardening', () => {
+  const halted = (patch: Partial<GameState>) =>
+    state({ market: market('halted'), onchain: chain('halted'), ...patch })
+
+  it('refuses a tied Final: alerts instead of drafting a side', () => {
+    const tied = feed({
+      status: 'final',
+      period: 4,
+      homeScore: 100,
+      awayScore: 100,
+      periods: [
+        [25, 25],
+        [25, 25],
+        [25, 25],
+        [25, 25],
+      ],
+    })
+    const now = END + 100
+    expect(run(now, halted({ feed: tied, finalSince: now - 600 }))).toEqual([
+      {
+        type: 'alert',
+        gameId: 'nba-401910007',
+        key: 'tie:nba-401910007',
+        text: 'MEM@CLE: ESPN Final is tied 100-100; resolve by hand',
+      },
+    ])
+  })
+
+  it('needs a feed to draft NO: a missing feed 7 days on only alerts', () => {
+    const at = S + 7 * 86_400
+    expect(run(at - 1, halted({ feed: null }))).toEqual([])
+    expect(run(at, halted({ feed: null }))).toEqual([
+      {
+        type: 'alert',
+        gameId: 'nba-401910007',
+        key: 'no-feed:nba-401910007',
+        text: 'MEM@CLE: no feed 7 days after tip-off; resolve by hand',
+      },
+    ])
+    expect(run(at, halted({ feed: feed({ status: 'postponed' }) }))[0]).toMatchObject({
+      type: 'draft',
+      status: 'postponed',
+    })
+  })
+
+  it('does nothing for a market row whose account was not read', () => {
+    expect(run(END, state({ market: market('open'), onchain: null }))).toEqual([])
+  })
+
+  it('treats Final at exactly end_ts as after the close: no halt, draft path', () => {
+    const s = state({ market: market('open'), onchain: chain('open'), feed: finalFeed })
+    expect(run(END, { ...s, finalSince: END - 60 })).toEqual([
+      expect.objectContaining({ type: 'draft', status: 'final' }),
+    ])
+  })
+
+  it('creates through S + 1799 and not at S + 1800', () => {
+    expect(types(run(S + 1_799, state()))).toEqual(['create'])
+    expect(run(S + 1_800, state())).toEqual([])
+  })
+
+  it('halts not-started with no feed read at chain tip + 24 h', () => {
+    const s = state({ market: market('open'), onchain: chain('open'), feed: null })
+    expect(run(S + 86_399, s)).toEqual([])
+    expect(run(S + 86_400, s)[0]).toMatchObject({ type: 'halt', rule: 'not-started' })
   })
 })
 
@@ -295,12 +363,25 @@ describe('draft, finalize, recycle', () => {
   it('reminds once when the guardian has not confirmed 30 min after Final', () => {
     const draft = {
       state: 'pending',
+      status: 'final',
+      homeScore: 111,
+      awayScore: 106,
       alertedAt: null,
       fetchedAt: new Date((END + 100) * 1000),
     } as DraftRow
     const s = halted({ feed: finalFeed, finalSince: END, draft })
     expect(run(END + 100 + 1_799, s)).toEqual([])
-    expect(types(run(END + 100 + 1_800, s))).toEqual(['alert'])
+    expect(run(END + 100 + 1_800, s)).toEqual([
+      expect.objectContaining({
+        type: 'alert',
+        key: 'unconfirmed:nba-401910007',
+        text: "MEM@CLE: final draft waiting 30 min for the guardian's box-score check",
+      }),
+    ])
+    const nobody = { ...draft, status: 'postponed' } as DraftRow
+    expect(run(END + 100 + 1_800, halted({ feed: finalFeed, draft: nobody }))[0]).toMatchObject({
+      text: expect.stringContaining('postponed draft waiting 30 min'),
+    })
     const reminded = { ...draft, alertedAt: new Date() } as DraftRow
     expect(run(END + 100 + 3_600, halted({ feed: finalFeed, draft: reminded }))).toEqual([])
   })
@@ -371,6 +452,30 @@ describe('draft, finalize, recycle', () => {
         key: 'periods:nba-401910007',
         text: 'MEM@CLE: ESPN periods do not add up to 111-106; resolve by hand',
       },
+    ])
+    // Half an hour on, the periods alert keeps firing (the guardian must not confirm the old
+    // 110-106 draft unwarned) and the 30-minute reminder stays out: one warning, not two.
+    expect(
+      types(run(END + 100 + 1_800, halted({ feed: bad, finalSince: now - 600, draft: old }))),
+    ).toEqual(['alert'])
+    expect(
+      run(END + 100 + 1_800, halted({ feed: bad, finalSince: now - 600, draft: old }))[0],
+    ).toMatchObject({ key: 'periods:nba-401910007' })
+  })
+
+  it('alerts when ESPN corrects the Final score to a tie, never drafting it', () => {
+    const now = END + 400
+    const old = {
+      state: 'pending',
+      status: 'final',
+      homeScore: 110,
+      awayScore: 106,
+      alertedAt: null,
+      fetchedAt: new Date((END + 100) * 1000),
+    } as DraftRow
+    const tied = feed({ ...finalFeed, homeScore: 106, awayScore: 106, periods: QUARTERS })
+    expect(run(now, halted({ feed: tied, finalSince: now - 600, draft: old }))).toEqual([
+      expect.objectContaining({ type: 'alert', key: 'tie:nba-401910007' }),
     ])
   })
 

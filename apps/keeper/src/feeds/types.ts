@@ -30,7 +30,7 @@ export interface FeedSnapshot {
   fetchedAt: Date
   games: FeedGame[]
   /**
-   * Events the feed answered but could not read (format change, bad score). The planner alerts
+   * Events the feed answered but could not read (format change, bad score). Keeper.tick (Task 19) alerts
    * when this is above 0, so a silent ESPN change cannot make games disappear.
    */
   skipped?: number
