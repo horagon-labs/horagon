@@ -94,6 +94,7 @@ describe('evidence', () => {
     expect(checkBoxScoreUrl('https://www.nba.com/game/x/box-score')).toEqual({
       ok: true,
       source: 'nba',
+      url: 'https://www.nba.com/game/x/box-score',
     })
     expect(checkBoxScoreUrl('https://www.basketball-reference.com/boxscores/x.html')).toMatchObject(
       { ok: true },
@@ -188,5 +189,82 @@ describe('treasury and ops helpers', () => {
     expect(heartbeatStale(60, [tip], tip)).toBe(false)
     expect(heartbeatStale(300, [tip], tip + 5 * 3600)).toBe(false)
     expect(heartbeatStale(300, [], tip)).toBe(false)
+  })
+})
+
+describe('strict inputs', () => {
+  it('normalises box-score URLs and refuses userinfo and ports', () => {
+    expect(checkBoxScoreUrl('  HTTPS://WWW.NBA.COM/game/x  ')).toEqual({
+      ok: true,
+      source: 'nba',
+      url: 'https://www.nba.com/game/x',
+    })
+    expect(checkBoxScoreUrl('https://user:pw@www.nba.com/x')).toMatchObject({ ok: false })
+    expect(checkBoxScoreUrl('https://user@www.nba.com/x')).toMatchObject({ ok: false })
+    expect(checkBoxScoreUrl('https://www.nba.com:8443/x')).toMatchObject({ ok: false })
+    expect(checkBoxScoreUrl('https://www.nba.com:443/x')).toMatchObject({ ok: true })
+    expect(checkBoxScoreUrl(`https://www.nba.com/${'a'.repeat(300)}`)).toMatchObject({ ok: false })
+  })
+
+  it('never turns a live draft into evidence', () => {
+    expect(() =>
+      buildEvidence({
+        game,
+        draft: { ...draft, status: 'live' },
+        kind: 0,
+        confirmUrl: 'https://www.nba.com/x',
+        confirmSource: 'nba',
+        confirmedAt,
+      }),
+    ).toThrow(/final or postponed/)
+  })
+
+  it('parses SOL amounts like the SDK parses token amounts', () => {
+    expect(solToLamports('1.5')).toBe(1_500_000_000)
+    expect(solToLamports('0.000000001')).toBe(1)
+    expect(solToLamports('10')).toBe(10_000_000_000)
+    expect(() => solToLamports('10.000000001')).toThrow(/\(0, 10\]/)
+    expect(solToLamports('20', 20)).toBe(20_000_000_000)
+    for (const bad of [
+      '0x1',
+      '0b1',
+      '0o7',
+      '1e0',
+      '1e-9',
+      ' 2 ',
+      '+1',
+      '-1',
+      '.5',
+      '5.',
+      '0',
+      '0.0',
+      '0.0000000001',
+      '1.0000000004',
+      '01',
+      '',
+      '1000',
+    ])
+      expect(() => solToLamports(bad), bad).toThrow()
+    for (const max of [Number.NaN, Number.POSITIVE_INFINITY, 0, -5])
+      expect(() => solToLamports('1', max), String(max)).toThrow(/max/)
+  })
+
+  it('gives periods their own error and rejects 13 periods', () => {
+    expect(() => parsePeriods('30-25,x,26-30,27-24')).toThrow(/--periods must look like/)
+    expect(() => parsePeriods('30-25,x,26-30,27-24')).not.toThrow(/--score/)
+    expect(() => parsePeriods(Array(13).fill('1-1').join(','))).toThrow(/4 to 12/)
+  })
+
+  it('refuses periods whose sums differ from the final score', () => {
+    expect(() =>
+      buildEvidence({
+        game,
+        draft: { ...draft, homeScore: 112 },
+        kind: 0,
+        confirmUrl: 'https://www.nba.com/x',
+        confirmSource: 'nba',
+        confirmedAt,
+      }),
+    ).toThrow()
   })
 })

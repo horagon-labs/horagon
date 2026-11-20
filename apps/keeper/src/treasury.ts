@@ -12,6 +12,7 @@ import type { Keypair } from '@solana/web3.js'
 import type { Logger } from 'pino'
 import type { Alerter } from './alerts'
 import type { TxSender } from './executor'
+import { easternDate } from './feeds/types'
 import type { SeedPolicy } from './planner'
 
 /**
@@ -50,20 +51,29 @@ export interface TreasuryDeps {
   priorityMicroLamports: number
 }
 
-/** Seeds of the games starting in the next 36 h that have no market yet. */
-export async function upcomingSeeds(
-  deps: Pick<TreasuryDeps, 'db' | 'seeds' | 'now'>,
-): Promise<bigint[]> {
+/** Games starting in the next 36 h that have no market yet, earliest first. */
+async function upcomingGames(deps: Pick<TreasuryDeps, 'db' | 'now'>) {
   const now = deps.now()
   const games = await listGames(deps.db, {
     from: new Date(now * 1000),
     to: new Date((now + 36 * 3600) * 1000),
     statuses: ['scheduled'],
   })
-  return games
-    .filter((g) => g.markets.length === 0)
-    .map((g) => (g.featured ? deps.seeds.featured : deps.seeds.regular))
+  return games.filter((g) => g.markets.length === 0)
 }
+
+/** Seeds of the games starting in the next 36 h that have no market yet. */
+export async function upcomingSeeds(
+  deps: Pick<TreasuryDeps, 'db' | 'seeds' | 'now'>,
+): Promise<bigint[]> {
+  return (await upcomingGames(deps)).map((g) =>
+    g.featured ? deps.seeds.featured : deps.seeds.regular,
+  )
+}
+
+/** A token account that does not exist holds nothing; any other RPC failure is not an answer. */
+const isMissingAccount = (err: unknown) =>
+  /could not find account|account does not exist/i.test(errorSummary(err).message)
 
 export async function treasuryTick(deps: TreasuryDeps): Promise<{ moved: bigint; target: bigint }> {
   const conn = deps.sender.connection
@@ -74,60 +84,102 @@ export async function treasuryTick(deps: TreasuryDeps): Promise<{ moved: bigint;
   } catch (err) {
     deps.log.info({ error: errorSummary(err).message }, 'faucet skipped')
   }
-  const seeds = await upcomingSeeds(deps)
+  const games = await upcomingGames(deps)
+  const seeds = games.map((g) => (g.featured ? deps.seeds.featured : deps.seeds.regular))
   const target = topUpTarget(seeds)
+
+  // The SOL checks come first: a keeper out of SOL is the likeliest reason a send fails.
+  try {
+    const [authoritySol, keeperSol] = await Promise.all([
+      conn.getBalance(deps.program.authority, 'confirmed').then(BigInt),
+      conn.getBalance(keeper, 'confirmed').then(BigInt),
+    ])
+    // Spec 6.3: alert when the Authority's SOL covers fewer than 2 nights of markets. A night is
+    // the next game date (US Eastern), not the whole 36 h window.
+    const nextDate = games[0] ? easternDate(games[0].scheduledTipoff) : undefined
+    const tonight = games.filter((g) => easternDate(g.scheduledTipoff) === nextDate).length
+    const perNight = BigInt(Math.max(tonight, 4))
+    if (authoritySol < 2n * perNight * LAMPORTS_PER_MARKET) {
+      await deps.alerts.send(
+        'sol-authority',
+        `Authority holds ${Number(authoritySol) / 1e9} SOL, under 2 nights of markets: horagon-ops fund-authority`,
+      )
+    }
+    if (keeperSol < KEEPER_MIN_LAMPORTS) {
+      await deps.alerts.send(
+        'sol-keeper',
+        `Keeper wallet holds ${Number(keeperSol) / 1e9} SOL; fees need ${Number(KEEPER_MIN_LAMPORTS) / 1e9}`,
+      )
+    }
+  } catch (err) {
+    deps.log.warn({ error: errorSummary(err).message }, 'SOL balance check skipped')
+  }
+
   const keeperAta = getAssociatedTokenAddressSync(mint, keeper)
-  const balance = async (ata: typeof keeperAta) =>
+  const balance = (ata: typeof keeperAta) =>
     conn.getTokenAccountBalance(ata, 'confirmed').then(
       (r) => BigInt(r.value.amount),
-      () => 0n,
+      (err: unknown) => {
+        if (isMissingAccount(err)) return 0n
+        throw err
+      },
     )
-  const [treasury, held] = await Promise.all([balance(deps.program.treasury), balance(keeperAta)])
-  const moved = transferAmount(treasury, held, target)
+  let treasury: bigint
+  let held: bigint
+  try {
+    ;[treasury, held] = await Promise.all([balance(deps.program.treasury), balance(keeperAta)])
+  } catch (err) {
+    // Unknown balances: moving mUSDC or paging about them would act on a guess.
+    deps.log.warn({ error: errorSummary(err).message }, 'treasury top-up skipped: balance unread')
+    return { moved: 0n, target }
+  }
+  let moved = transferAmount(treasury, held, target)
   if (moved > 0n) {
-    const res = await deps.sender.send({
-      label: 'treasury top-up',
-      instructions: [
-        createAssociatedTokenAccountIdempotentInstruction(
-          keeper,
-          deps.program.treasury,
-          deps.program.authority,
-          mint,
-        ),
-        createTransferCheckedInstruction(keeperAta, mint, deps.program.treasury, keeper, moved, 6),
-      ],
-      computeUnits: 60_000,
-      priorityMicroLamports: deps.priorityMicroLamports,
-    })
-    await logOps(deps.db, {
-      actor: 'keeper',
-      action: 'top-up',
-      sig: res.signature,
-      detail: { amount: moved.toString() },
-    })
+    try {
+      const res = await deps.sender.send({
+        label: 'treasury top-up',
+        instructions: [
+          createAssociatedTokenAccountIdempotentInstruction(
+            keeper,
+            deps.program.treasury,
+            deps.program.authority,
+            mint,
+          ),
+          createTransferCheckedInstruction(
+            keeperAta,
+            mint,
+            deps.program.treasury,
+            keeper,
+            moved,
+            6,
+          ),
+        ],
+        computeUnits: 60_000,
+        priorityMicroLamports: deps.priorityMicroLamports,
+        // An unreadable balance means "not done"; the sender then checks its own signatures.
+        isDone: async () => {
+          try {
+            return (await balance(deps.program.treasury)) >= treasury + moved
+          } catch {
+            return false
+          }
+        },
+      })
+      await logOps(deps.db, {
+        actor: 'keeper',
+        action: 'top-up',
+        sig: res.signature,
+        detail: { amount: moved.toString() },
+      })
+    } catch (err) {
+      deps.log.warn({ error: errorSummary(err).message }, 'treasury top-up failed')
+      moved = 0n
+    }
   }
   if (treasury + moved < target) {
     await deps.alerts.send(
       'treasury-low',
       `Treasury ${(treasury + moved) / 1_000_000n} mUSDC, next 36 h needs ${target / 1_000_000n}`,
-    )
-  }
-  const [authoritySol, keeperSol] = await Promise.all([
-    conn.getBalance(deps.program.authority, 'confirmed').then(BigInt),
-    conn.getBalance(keeper, 'confirmed').then(BigInt),
-  ])
-  // Spec 6.3: alert when the Authority's SOL covers fewer than 2 nights of markets.
-  const perNight = BigInt(Math.max(seeds.length, 4))
-  if (authoritySol < 2n * perNight * LAMPORTS_PER_MARKET) {
-    await deps.alerts.send(
-      'sol-authority',
-      `Authority holds ${Number(authoritySol) / 1e9} SOL, under 2 nights of markets: horagon-ops fund-authority`,
-    )
-  }
-  if (keeperSol < KEEPER_MIN_LAMPORTS) {
-    await deps.alerts.send(
-      'sol-keeper',
-      `Keeper wallet holds ${Number(keeperSol) / 1e9} SOL; fees need ${Number(KEEPER_MIN_LAMPORTS) / 1e9}`,
     )
   }
   return { moved, target }

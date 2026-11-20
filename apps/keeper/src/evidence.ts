@@ -25,7 +25,12 @@ const BOX_SCORE_HOSTS: Readonly<Record<string, string>> = {
 }
 
 export type BoxScoreCheck =
-  | { ok: true; source: string; warning?: string }
+  | {
+      ok: true
+      source: string
+      warning?: string /** Normalised href: store this one. */
+      url?: string
+    }
   | { ok: false; reason: string }
 
 export function checkBoxScoreUrl(raw: string): BoxScoreCheck {
@@ -36,16 +41,19 @@ export function checkBoxScoreUrl(raw: string): BoxScoreCheck {
     return { ok: false, reason: 'not a URL' }
   }
   if (url.protocol !== 'https:') return { ok: false, reason: 'must be https' }
-  if (raw.length > 256) return { ok: false, reason: 'longer than 256 characters' }
+  if (url.username || url.password) return { ok: false, reason: 'must not carry credentials' }
+  if (url.port) return { ok: false, reason: 'must not set a port' }
+  if (url.href.length > 256) return { ok: false, reason: 'longer than 256 characters' }
   const source = BOX_SCORE_HOSTS[url.hostname]
   if (!source) return { ok: false, reason: `${url.hostname} is not an allowed box-score host` }
   return source === 'espn-box-score'
     ? {
         ok: true,
         source,
+        url: url.href,
         warning: 'ESPN is also the automated feed: prefer nba.com or basketball-reference.com',
       }
-    : { ok: true, source }
+    : { ok: true, source, url: url.href }
 }
 
 /** ISO 8601 UTC with second precision, as `EvidenceSourceSchema` requires. */
@@ -58,13 +66,18 @@ export interface EvidenceInput {
     'status' | 'homeScore' | 'awayScore' | 'periods' | 'sourceUrl' | 'fetchedAt'
   >
   kind: 0
-  /** The guardian's box score (final) or postponement notice (postponed). */
+  /**
+   * The guardian's box score (final) or postponement notice (postponed). Pass the `url` that
+   * `checkBoxScoreUrl` returned, not the raw input.
+   */
   confirmUrl: string
   confirmSource: string
   confirmedAt: Date
 }
 
 export function buildEvidence(p: EvidenceInput): ResolutionEvidence {
+  if (p.draft.status !== 'final' && p.draft.status !== 'postponed')
+    throw new Error(`draft status must be final or postponed, got "${p.draft.status}"`)
   const postponed = p.draft.status === 'postponed'
   const periods = postponed ? [] : p.draft.periods.map(([h, a]) => [h, a] as [number, number])
   const evidence: ResolutionEvidence = {
