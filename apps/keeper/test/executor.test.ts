@@ -9,7 +9,13 @@ import {
 import pino from 'pino'
 import { describe, expect, it } from 'vitest'
 import { logAlerter, telegramAlerter } from '../src/alerts'
-import { ProgramFailure, TxSender, type TxSenderOptions } from '../src/executor'
+import {
+  base58,
+  ProgramFailure,
+  TxSender,
+  type TxSenderOptions,
+  UnresolvedAttempt,
+} from '../src/executor'
 
 const log = pino({ level: 'silent' })
 const payer = Keypair.generate()
@@ -70,12 +76,11 @@ function fakeConnection(script: Script) {
       return { context: { slot: 1 }, value: { err: r?.err ?? null } }
     },
   }
-  if (script.statuses) {
-    const statuses = script.statuses
-    conn.getSignatureStatuses = async (sigs: string[]) => {
-      calls.asked.push(sigs)
-      return { context: { slot: 1 }, value: statuses(sigs) }
-    }
+  // Unless a test says otherwise the chain has never seen any signature.
+  const statuses = script.statuses ?? ((sigs: string[]) => sigs.map(() => null))
+  conn.getSignatureStatuses = async (sigs: string[]) => {
+    calls.asked.push(sigs)
+    return { context: { slot: 1 }, value: statuses(sigs) }
   }
   return { conn: conn as unknown as Connection, calls }
 }
@@ -176,7 +181,8 @@ describe('TxSender', () => {
     })
     expect(r.attempts).toBe(5)
     expect(calls.priorities).toEqual([1_000, 2_000, 4_000, 8_000, 16_000])
-    expect(sleeps.map((ms) => Math.floor(ms / 100) * 100)).toEqual([100, 200, 400, 800])
+    const backoffs = sleeps.filter((ms) => ms !== 1_000)
+    expect(backoffs.map((ms) => Math.floor(ms / 100) * 100)).toEqual([100, 200, 400, 800])
     expect(a.sent).toEqual(['tx:halt x'])
   })
 
@@ -317,7 +323,7 @@ describe('TxSender: landed transactions', () => {
     })
     const r = await sender([conn]).send(spec())
     expect(calls.send).toBe(2)
-    expect(r.signature).toBe(calls.asked[1]?.[1])
+    expect(r.signature).toBe(calls.asked[calls.asked.length - 1]?.[1])
     expect(r.attempts).toBe(2)
   })
 
@@ -354,6 +360,43 @@ describe('TxSender: landed transactions', () => {
     expect(distinct.size).toBe(2)
     expect(r.attempts).toBe(2)
     expect(calls.send).toBeGreaterThan(2)
+    // The returned signature is the rebuilt attempt's (the fake names a send by its count).
+    expect(r.signature).toBe(`sig${calls.send}`)
+    expect(
+      Buffer.from(calls.rawSigs[calls.rawSigs.length - 1] as Uint8Array).toString('hex'),
+    ).not.toBe(Buffer.from(calls.rawSigs[0] as Uint8Array).toString('hex'))
+  })
+
+  it('does not rebuild on one clean null read when the next poll shows it confirmed', async () => {
+    let n = 0
+    const { conn, calls } = fakeConnection({
+      send: [new Error('502 Bad Gateway')],
+      statuses: () => [n++ === 0 ? null : { err: null, confirmationStatus: 'confirmed' }],
+    })
+    const r = await sender([conn]).send(spec())
+    expect(calls.blockhashes).toBe(1)
+    expect(r.signature).toBe(calls.asked[0]?.[0])
+    expect(r.attempts).toBe(1)
+  })
+
+  it('rebuilds once after two clean null reads past the last valid height', async () => {
+    const { conn, calls } = fakeConnection({ send: [new Error('502 Bad Gateway')] })
+    const r = await sender([conn]).send(spec())
+    expect(calls.blockhashes).toBe(2)
+    expect(r.attempts).toBe(2)
+  })
+
+  it('reads the height before the statuses and ignores a height not yet past', async () => {
+    // Statuses say null, the height is still valid: the attempt may be in flight.
+    const { conn, calls } = fakeConnection({
+      send: [new Error('timeout')],
+      height: () => 10,
+    })
+    const err = await sender([conn])
+      .send(spec())
+      .catch((x: Error) => x)
+    expect(err).toBeInstanceOf(UnresolvedAttempt)
+    expect(calls.blockhashes).toBe(1)
   })
 
   it('waits for the last attempt before giving up, and succeeds if it confirms', async () => {
@@ -362,23 +405,42 @@ describe('TxSender: landed transactions', () => {
     const { conn, calls } = fakeConnection({
       send: [e, e],
       statuses: (sigs) => {
+        // The first attempt is dead (null). The second goes processed, then confirmed.
+        if (sigs.length < 2) return [null]
         const call = n++
-        const last =
+        return [
+          null,
           call === 0
-            ? null
-            : call === 1
-              ? { err: null, confirmationStatus: 'processed' }
-              : { err: null, confirmationStatus: 'confirmed' }
-        return sigs.map((_, i) => (i === sigs.length - 1 ? last : null))
+            ? { err: null, confirmationStatus: 'processed' }
+            : { err: null, confirmationStatus: 'confirmed' },
+        ]
       },
     })
     const r = await sender([conn], { maxAttempts: 2 }).send(spec())
-    expect(r.signature).toBe(calls.asked[2]?.[1])
+    expect(r.signature).toBe(calls.asked[calls.asked.length - 1]?.[1])
     expect(r.attempts).toBe(2)
     expect(calls.send).toBe(2)
   })
 
-  it('stops waiting after 90 s when the RPC cannot answer, then rebuilds', async () => {
+  it('gives up with an unresolved error, not a rebuild, when the status stays processed', async () => {
+    const { conn, calls } = fakeConnection({
+      send: [new Error('timeout')],
+      statuses: () => [{ err: null, confirmationStatus: 'processed' }],
+    })
+    const a = alerts()
+    const sleeps: number[] = []
+    const p = sender([conn], { alerts: a.alerter, sleep: async (ms) => void sleeps.push(ms) }).send(
+      spec(),
+    )
+    await expect(p).rejects.toBeInstanceOf(UnresolvedAttempt)
+    await expect(p).rejects.toThrow(/x: unresolved after 90 s, [A-Za-z0-9]+ may still land/)
+    expect(calls.blockhashes).toBe(1)
+    expect(new Set(calls.rawSigs.map((x) => Buffer.from(x).toString('hex'))).size).toBe(1)
+    expect(a.sent).toEqual(['tx:x'])
+    expect(sleeps.filter((ms) => ms === 1_000)).toHaveLength(90)
+  })
+
+  it('treats failing status and height reads as unknown and gives up at the cap', async () => {
     const { conn, calls } = fakeConnection({
       send: [new Error('timeout')],
       statuses: () => {
@@ -388,36 +450,62 @@ describe('TxSender: landed transactions', () => {
         throw new Error('down')
       },
     })
+    const a = alerts()
     const sleeps: number[] = []
-    const r = await sender([conn], { sleep: async (ms) => void sleeps.push(ms) }).send(spec())
-    expect(r.attempts).toBe(2)
-    expect(calls.blockhashes).toBe(2)
+    await expect(
+      sender([conn], { alerts: a.alerter, sleep: async (ms) => void sleeps.push(ms) }).send(spec()),
+    ).rejects.toBeInstanceOf(UnresolvedAttempt)
+    expect(calls.blockhashes).toBe(1)
+    expect(a.sent).toEqual(['tx:x'])
     expect(sleeps.filter((ms) => ms === 1_000)).toHaveLength(90)
   })
 
-  it.each(['connect ECONNREFUSED 1.2.3.4:443', 'getaddrinfo ENOTFOUND rpc', 'EAI_AGAIN rpc'])(
-    'does not wait when the node never got the request: %s',
-    async (message) => {
-      const primary = fakeConnection({
-        send: [new Error(message)],
-        statuses: (sigs) => sigs.map(() => null),
-        height: () => 0,
-      })
-      const backup = fakeConnection({})
-      const sleeps: number[] = []
-      const s = sender([primary.conn, backup.conn], {
-        sleep: async (ms) => void sleeps.push(ms),
-        baseDelayMs: 100,
-      })
-      await s.send(spec())
-      expect(primary.calls.asked).toHaveLength(0)
-      expect(sleeps).toHaveLength(1)
-      expect(backup.calls.send).toBe(1)
-    },
-  )
+  it('still returns alreadyDone at the cap when isDone says so', async () => {
+    const { conn } = fakeConnection({
+      send: [new Error('timeout')],
+      statuses: () => [{ err: null, confirmationStatus: 'processed' }],
+    })
+    let polls = 0
+    const r = await sender([conn]).send(spec({ isDone: async () => ++polls > 90 }))
+    expect(r).toEqual({ signature: null, attempts: 1, alreadyDone: true })
+  })
 
-  it('decodes base58 with leading zero bytes', () => {
-    expect('1'.repeat(64)).toBe('1'.repeat(64))
+  it.each([
+    ['ECONNREFUSED', 'connect'],
+    ['ENOTFOUND', 'getaddrinfo'],
+    ['EAI_AGAIN', 'getaddrinfo'],
+  ])('does not wait when the node never got the request: %s', async (code, text) => {
+    const refused = new TypeError('fetch failed', {
+      cause: Object.assign(new Error(text), { code }),
+    })
+    const primary = fakeConnection({ send: [refused] })
+    // If the refused attempt were still tracked, this backup would report it unseen and in flight.
+    const backup = fakeConnection({ statuses: () => [null], height: () => 0 })
+    const sleeps: number[] = []
+    const s = sender([primary.conn, backup.conn], {
+      sleep: async (ms) => void sleeps.push(ms),
+      baseDelayMs: 100,
+    })
+    await s.send(spec())
+    expect(primary.calls.asked).toHaveLength(0)
+    expect(backup.calls.asked).toHaveLength(0)
+    expect(sleeps).toHaveLength(1)
+    expect(backup.calls.send).toBe(1)
+  })
+
+  it('does not treat an HTTP error body that names ECONNREFUSED as not sent', async () => {
+    const { conn, calls } = fakeConnection({
+      send: [new Error('502 Bad Gateway: upstream ECONNREFUSED')],
+      height: () => 10,
+    })
+    await expect(sender([conn]).send(spec())).rejects.toBeInstanceOf(UnresolvedAttempt)
+    expect(calls.blockhashes).toBe(1)
+  })
+
+  it('encodes base58 with leading zero bytes through the keeper encoder', () => {
+    expect(base58(new Uint8Array(64))).toBe('1'.repeat(64))
+    expect(base58(Uint8Array.from([0, 0, 1]))).toBe('112')
+    expect(base58(Uint8Array.from([0, 1, 0]))).toBe('15R')
     expect(fromBase58('1'.repeat(64)).equals(Buffer.alloc(64))).toBe(true)
     expect(fromBase58('112').equals(Buffer.from([0, 0, 1]))).toBe(true)
   })
@@ -438,7 +526,7 @@ describe('TxSender: landed transactions', () => {
     expect(r.attempts).toBe(2)
   })
 
-  it('retries when the status lookup fails, and logs it without the URL', async () => {
+  it('does not rebuild on a failed status read, even with the height past, and logs it safely', async () => {
     const { lines, log: capture } = captureLog()
     const { conn, calls } = fakeConnection({
       send: [new Error('timeout')],
@@ -446,9 +534,14 @@ describe('TxSender: landed transactions', () => {
         throw new Error('lookup failed https://rpc.example.com/v2/SECRETKEY?k=SECRETKEY')
       },
     })
-    const r = await sender([conn], { log: capture }).send(spec())
-    expect(r.attempts).toBe(2)
-    expect(calls.send).toBe(2)
+    const a = alerts()
+    const err = await sender([conn], { log: capture, alerts: a.alerter })
+      .send(spec())
+      .catch((x: Error) => x)
+    expect(err).toBeInstanceOf(UnresolvedAttempt)
+    expect(calls.blockhashes).toBe(1)
+    expect(new Set(calls.rawSigs.map((x) => Buffer.from(x).toString('hex'))).size).toBe(1)
+    expect(a.sent).toEqual(['tx:x'])
     expect(lines.join(',')).toContain('signature status lookup failed')
     expect(lines.join(',')).not.toContain('SECRETKEY')
   })
@@ -506,8 +599,7 @@ describe('TxSender: landed transactions', () => {
       send: [new Error('timeout')],
       simulate: [{ err: null }, { err: { InstructionError: [2, { Custom: 6005 }] } }],
     })
-    let n = 0
-    const r = await sender([conn]).send(spec({ isDone: async () => ++n >= 2 }))
+    const r = await sender([conn]).send(spec({ isDone: async () => calls.simulate >= 2 }))
     expect(r).toEqual({ signature: null, attempts: 1, alreadyDone: true })
     expect(calls.send).toBe(1)
   })
@@ -524,10 +616,9 @@ describe('TxSender: landed transactions', () => {
 
   it('checks isDone once more before giving up', async () => {
     const e = new Error('timeout')
-    const { conn } = fakeConnection({ send: [e, e, e, e, e] })
-    let n = 0
-    // Four checks before retries 2..5 say no; the fifth, after the loop, says yes.
-    const r = await sender([conn]).send(spec({ isDone: async () => ++n === 5 }))
+    const { conn, calls } = fakeConnection({ send: [e, e, e, e, e] })
+    // No before the fifth send has failed; yes only in the check after the loop.
+    const r = await sender([conn]).send(spec({ isDone: async () => calls.send >= 5 }))
     expect(r).toEqual({ signature: null, attempts: 5, alreadyDone: true })
   })
 

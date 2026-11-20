@@ -2,15 +2,22 @@
 // retry up to 5 times with exponential backoff and a rising priority fee, moving to the backup
 // RPC on a 429 or a network error. A program error is deterministic and is never retried.
 //
-// When can a transaction be sent twice? Never because of a retry we start. A retry rebuilds with
-// a new blockhash, hence a new signature, so before it (and before giving up) the newest sent
-// attempt must be unable to land: its status is looked up, and while it is `processed`, or
-// unseen with its blockhash still valid (or the RPC cannot say), we wait, polling once a second
-// and re-broadcasting the same bytes (same signature, so it cannot land twice), for at most
-// 90 s. We rebuild only once the block height passed `lastValidBlockHeight`, or when the send
-// error proves the node never got the request (ECONNREFUSED, ENOTFOUND, EAI_AGAIN). Landed
-// attempts are returned, and `isDone` is asked as well when given. Left open: an RPC that
-// cannot answer for the whole 90 s wait.
+// A retry rebuilds with a new blockhash, hence a new signature, so it must never start while an
+// earlier attempt can still land. Before a rebuild, and before giving up, the newest sent
+// attempt is looked up (block height first, then statuses). Landed attempts are returned
+// (`isDone` is asked on every poll as well). Then:
+//   - REBUILD only after two clean reads in a row, one poll apart: the status read succeeded,
+//     showed the attempt unseen (null), and came after a height read past its
+//     `lastValidBlockHeight`; or when the send error proves the node never got the request
+//     (error code ECONNREFUSED, ENOTFOUND or EAI_AGAIN, on the error or its cause).
+//   - WAIT, polling once a second and re-broadcasting the same bytes (same signature, so it
+//     cannot land twice), while the attempt is `processed`, or unseen with its height still
+//     valid, or a status or height read failed (unknown: only a successful read proves
+//     anything).
+//   - GIVE UP at the 90 s cap with an UnresolvedAttempt error ("may still land"): rebuilding
+//     there is exactly the double landing. The caller's next tick re-plans from chain state.
+// Left open: the cap counts injected sleeps, and each poll's RPC calls have no timeout of their
+// own, so the wall-clock wait can be longer (Task 20 sets a fetch timeout on the Connection).
 import {
   errorSummary,
   failedProgramError,
@@ -64,6 +71,12 @@ export class ProgramFailure extends Error {
   }
 }
 
+/**
+ * An attempt was sent and the sender could not tell whether it landed or is dead: it may still
+ * land, so it is not rebuilt. The caller's next tick re-plans from chain state.
+ */
+export class UnresolvedAttempt extends Error {}
+
 export interface TxSenderOptions {
   /** Primary first, then backups. */
   connections: Connection[]
@@ -83,10 +96,24 @@ const isRateLimit = (err: unknown) => /\b429\b|Too Many Requests/i.test(messageO
 /** Network-level trouble or an HTTP 5xx: another RPC may answer where this one does not. */
 const NETWORK_ERROR =
   /fetch failed|ECONNREFUSED|ECONNRESET|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|socket hang up|time(?:d)?[ -]?out|(?:HTTP|status|error)\D{0,12}5\d\d\b|\b5\d\d (?:Internal|Bad Gateway|Service|Gateway)/i
-const isNetworkError = (err: unknown) => NETWORK_ERROR.test(messageOf(err))
+const NOT_SENT_CODES = new Set(['ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN'])
+
+/** `code` of the error and of its `cause` chain (Node fetch puts it on the cause). */
+function errorCodes(err: unknown): string[] {
+  const codes: string[] = []
+  let cur: unknown = err
+  for (let depth = 0; depth < 4 && typeof cur === 'object' && cur !== null; depth++) {
+    const code = (cur as { code?: unknown }).code
+    if (typeof code === 'string') codes.push(code)
+    cur = (cur as { cause?: unknown }).cause
+  }
+  return codes
+}
 
 /** The send failed before the node could have received the request: nothing is in flight. */
-const NOT_SENT = /ECONNREFUSED|ENOTFOUND|EAI_AGAIN/i
+const isNotSent = (err: unknown) => errorCodes(err).some((c) => NOT_SENT_CODES.has(c))
+
+const isNetworkError = (err: unknown) => NETWORK_ERROR.test(messageOf(err)) || isNotSent(err)
 
 /** An attempt that was sent (or may have been): what we need to look it up or rebroadcast it. */
 interface Sent {
@@ -105,7 +132,7 @@ function instructionError(err: unknown): boolean {
 const BASE58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
 
 /** Base58 of a signature, the form RPC methods take. */
-function base58(bytes: Uint8Array): string {
+export function base58(bytes: Uint8Array): string {
   const digits: number[] = []
   for (const byte of bytes) {
     let carry = byte
@@ -229,14 +256,16 @@ export class TxSender {
   /**
    * Did an earlier attempt land, or does the caller say the effect is on chain? Returns null
    * only when it is safe to build a new transaction: nothing was sent, or the newest sent
-   * attempt can no longer land. While it still can, waits for it (see the header). Throws
-   * ProgramFailure when an attempt landed with a program error.
+   * attempt is provably dead (two clean reads, see the header). Otherwise waits for it, and at
+   * the cap throws UnresolvedAttempt. Throws ProgramFailure when an attempt landed with a
+   * program error.
    */
   private async alreadyLanded(
     spec: SendSpec,
     sent: Sent[],
     attempts: number,
   ): Promise<SendResult | null> {
+    let clean = 0
     for (let waited = 0; ; waited += POLL_MS) {
       const state = await this.lookup(spec, sent)
       if (state.landed) return { signature: state.landed, attempts, alreadyDone: false }
@@ -250,21 +279,45 @@ export class TxSender {
           )
         }
       }
-      if (!state.inflight || waited >= MAX_WAIT_MS) return null
+      if (state.settled) return null
+      clean = state.dead ? clean + 1 : 0
+      if (clean >= 2) return null
       const newest = sent[sent.length - 1] as Sent
-      if (!state.processed) await this.rebroadcast(spec, newest)
+      if (waited >= MAX_WAIT_MS) {
+        const message = `${spec.label}: unresolved after ${MAX_WAIT_MS / 1000} s, ${newest.signature} may still land`
+        this.opts.log.warn(
+          { label: spec.label, error: errorSummary(new Error(message)).message },
+          'tx unresolved',
+        )
+        await this.opts.alerts.send(`tx:${spec.label}`, message)
+        throw new UnresolvedAttempt(message)
+      }
+      if (!state.dead && !state.processed) await this.rebroadcast(spec, newest)
       await this.sleep(POLL_MS)
     }
   }
 
-  /** Looks the sent attempts up on chain. */
+  /**
+   * Looks the sent attempts up on chain, height first and then statuses. `dead` is one clean
+   * read (status read fine, newest unseen, height already past its last valid height);
+   * `settled` means there is nothing left to wait for (nothing sent, or it landed and failed).
+   */
   private async lookup(
     spec: SendSpec,
     sent: Sent[],
-  ): Promise<{ landed?: string; inflight: boolean; processed: boolean }> {
+  ): Promise<{ landed?: string; settled: boolean; dead: boolean; processed: boolean }> {
     const newest = sent[sent.length - 1]
-    if (!newest) return { inflight: false, processed: false }
-    let statuses: Array<SignatureStatus | null> | undefined
+    if (!newest) return { settled: true, dead: false, processed: false }
+    let height: number | undefined
+    try {
+      height = await this.connection.getBlockHeight('confirmed')
+    } catch (err) {
+      this.opts.log.warn(
+        { label: spec.label, error: errorSummary(err).message },
+        'block height lookup failed',
+      )
+    }
+    let statuses: Array<SignatureStatus | null>
     try {
       const res = await this.connection.getSignatureStatuses(
         sent.map((s) => s.signature),
@@ -272,39 +325,33 @@ export class TxSender {
       )
       statuses = res.value
     } catch (err) {
+      // A failed read proves nothing, whatever the height says.
       this.opts.log.warn(
         { label: spec.label, error: errorSummary(err).message },
         'signature status lookup failed',
       )
+      return { settled: false, dead: false, processed: false }
     }
-    if (statuses) {
-      // A success anywhere wins; only then do errors count.
-      for (const [i, status] of statuses.entries()) {
-        if (
-          status &&
-          !status.err &&
-          (status.confirmationStatus === 'confirmed' || status.confirmationStatus === 'finalized')
-        ) {
-          return { landed: (sent[i] as Sent).signature, inflight: false, processed: false }
-        }
+    // A success anywhere wins; only then do errors count.
+    for (const [i, status] of statuses.entries()) {
+      if (
+        status &&
+        !status.err &&
+        (status.confirmationStatus === 'confirmed' || status.confirmationStatus === 'finalized')
+      ) {
+        return { landed: (sent[i] as Sent).signature, settled: true, dead: false, processed: false }
       }
-      for (const status of statuses) {
-        if (status?.err && instructionError(status.err)) throw chainProgramFailure(spec, status.err)
-      }
-      const last = statuses[statuses.length - 1]
-      if (last?.err) return { inflight: false, processed: false }
-      if (last) return { inflight: true, processed: true }
     }
-    // Unseen, or the lookup failed: only the block height says whether it can still land.
-    try {
-      const height = await this.connection.getBlockHeight('confirmed')
-      return { inflight: height <= newest.lastValidBlockHeight, processed: false }
-    } catch (err) {
-      this.opts.log.warn(
-        { label: spec.label, error: errorSummary(err).message },
-        'block height lookup failed',
-      )
-      return { inflight: true, processed: false }
+    for (const status of statuses) {
+      if (status?.err && instructionError(status.err)) throw chainProgramFailure(spec, status.err)
+    }
+    const last = statuses[statuses.length - 1]
+    if (last?.err) return { settled: true, dead: false, processed: false }
+    if (last) return { settled: false, dead: false, processed: true }
+    return {
+      settled: false,
+      dead: height !== undefined && height > newest.lastValidBlockHeight,
+      processed: false,
     }
   }
 
@@ -359,7 +406,7 @@ export class TxSender {
       signature = await conn.sendRawTransaction(raw, { skipPreflight: true, maxRetries: 0 })
     } catch (err) {
       // The node never got it: nothing can be in flight.
-      if (NOT_SENT.test(messageOf(err))) sent.splice(sent.indexOf(entry), 1)
+      if (isNotSent(err)) sent.splice(sent.indexOf(entry), 1)
       throw err
     }
     const res = await conn.confirmTransaction(
