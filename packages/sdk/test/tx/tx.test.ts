@@ -7,7 +7,7 @@ import {
 } from '@solana/web3.js'
 import { describe, expect, it } from 'vitest'
 import { DEVNET_MUSDC_MINT, PM_AMM_PROGRAM_ID, PROTOCOL_DAO } from '../../src/pm-amm/constants'
-import { deriveYesMint } from '../../src/pm-amm/pda'
+import { deriveNoMint, deriveYesMint } from '../../src/pm-amm/pda'
 import { buildClaimTransactions } from '../../src/tx/claim'
 import {
   ataAddress,
@@ -124,6 +124,66 @@ describe('buildClaimTransactions', () => {
     const yesAta = ataAddress({ owner: user, mint: deriveYesMint(markets[0]?.market as PublicKey) })
     const first = closes[0]?.accountKeyIndexes.map((i) => keys[i]?.toBase58())
     expect(first).toEqual([yesAta.toBase58(), sponsor.toBase58(), user.toBase58()])
+  })
+
+  it('splits correctly when the collateral ATA must be created first', () => {
+    const txs = buildClaimTransactions({
+      user,
+      feePayer: sponsor,
+      recentBlockhash: BLOCKHASH,
+      markets,
+      closeAccounts: true,
+      rentDestination: sponsor,
+      createCollateralAta: { owner: user, mint: DEVNET_MUSDC_MINT },
+    })
+    expect(txs.length).toBeGreaterThan(1)
+    for (const tx of txs) expect(tx.serialize().length).toBeLessThanOrEqual(MAX_TX_BYTES)
+    expect(txs.flatMap(claimedMarkets)).toEqual(markets.map((m) => m.market.toBase58()))
+  })
+
+  it('splits correctly when some markets need their YES or NO ATA created', () => {
+    const withAtas = markets.map((m, i) =>
+      i === 0
+        ? { ...m, createAtas: [{ owner: user, mint: deriveNoMint(m.market) }] }
+        : i === 5
+          ? { ...m, createAtas: [{ owner: user, mint: deriveYesMint(m.market) }] }
+          : m,
+    )
+    const txs = buildClaimTransactions({
+      user,
+      feePayer: sponsor,
+      recentBlockhash: BLOCKHASH,
+      markets: withAtas,
+      closeAccounts: true,
+      rentDestination: sponsor,
+    })
+    for (const tx of txs) expect(tx.serialize().length).toBeLessThanOrEqual(MAX_TX_BYTES)
+    expect(txs.flatMap(claimedMarkets)).toEqual(markets.map((m) => m.market.toBase58()))
+  })
+
+  it('refuses to close sponsor-paid accounts to anyone but the sponsor', () => {
+    expect(() =>
+      buildClaimTransactions({
+        user,
+        feePayer: sponsor,
+        recentBlockhash: BLOCKHASH,
+        markets: markets.slice(0, 1),
+        closeAccounts: true,
+        rentDestination: user,
+      }),
+    ).toThrow(/rent/)
+  })
+
+  it('lets the user close their own accounts to themselves when they pay', () => {
+    const txs = buildClaimTransactions({
+      user,
+      feePayer: user,
+      recentBlockhash: BLOCKHASH,
+      markets: markets.slice(0, 1),
+      closeAccounts: true,
+      rentDestination: user,
+    })
+    expect(txs).toHaveLength(1)
   })
 
   it('returns no transaction for no market', () => {
