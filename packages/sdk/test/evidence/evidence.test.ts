@@ -54,6 +54,17 @@ describe('canonicalize', () => {
     )
   })
 
+  it('orders a key outside the BMP by its UTF-16 surrogates, not by code point', async () => {
+    // RFC 8785 3.2.3. U+1F3C0 (surrogates D83C DFC0) sorts before U+FB01 in UTF-16 order, after
+    // it by code point. Python's sort_keys=True orders by code point, so a Python verifier must
+    // sort with key=lambda k: k.encode('utf-16-be'). Golden hash from that Python code.
+    const value = { ﬁ: 1, '\u{1F3C0}': 2, z: 3 }
+    expect(canonicalize(value)).toBe('{"z":3,"\u{1F3C0}":2,"ﬁ":1}')
+    expect(await evidenceHash(value)).toBe(
+      'a4678b707445c9a53e7e7ad6a16acca0ca8c9c2b5b3019e3dccfbdcaad8e488e',
+    )
+  })
+
   it.each([
     ['a float', { x: 1.5 }],
     ['an unsafe integer', { x: 2 ** 53 }],
