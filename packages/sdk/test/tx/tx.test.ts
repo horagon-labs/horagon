@@ -186,6 +186,20 @@ describe('buildClaimTransactions', () => {
     expect(txs).toHaveLength(1)
   })
 
+  it('returns no transaction for no market, even with a collateral ATA to create', () => {
+    expect(
+      buildClaimTransactions({
+        user,
+        feePayer: sponsor,
+        recentBlockhash: BLOCKHASH,
+        markets: [],
+        closeAccounts: false,
+        rentDestination: sponsor,
+        createCollateralAta: { owner: user, mint: DEVNET_MUSDC_MINT },
+      }),
+    ).toEqual([])
+  })
+
   it('returns no transaction for no market', () => {
     expect(
       buildClaimTransactions({

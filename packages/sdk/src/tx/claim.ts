@@ -57,6 +57,7 @@ function size(tx: VersionedTransaction): number {
  * Send the returned transactions in order: later ones use the collateral ATA the first creates.
  */
 export function buildClaimTransactions(input: BuildClaimTxsInput): VersionedTransaction[] {
+  if (input.markets.length === 0) return []
   if (
     input.closeAccounts &&
     !input.feePayer.equals(input.user) &&
