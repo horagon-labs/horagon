@@ -19,6 +19,9 @@ export interface TelegramOptions {
   prefix?: string
 }
 
+/** After a failed delivery the same key may be sent again after this long. */
+const RETRY_AFTER_FAILURE_SECS = 60
+
 export function telegramAlerter(opts: TelegramOptions): Alerter {
   const sent = new Map<string, number>()
   const fetchImpl = opts.fetchImpl ?? fetch
@@ -31,6 +34,7 @@ export function telegramAlerter(opts: TelegramOptions): Alerter {
       const last = sent.get(key)
       if (last !== undefined && t - last < window) return
       sent.set(key, t)
+      let delivered = false
       const body = { chat_id: opts.chatId, text: opts.prefix ? `${opts.prefix} ${text}` : text }
       try {
         const res = await fetchImpl(url, {
@@ -39,11 +43,14 @@ export function telegramAlerter(opts: TelegramOptions): Alerter {
           body: JSON.stringify(body),
           signal: AbortSignal.timeout(10_000),
         })
+        delivered = res.ok
         if (!res.ok) opts.log.warn({ key, status: res.status }, 'telegram rejected the alert')
       } catch (err) {
         // The error may carry the URL, which holds the bot token: log the name only.
         opts.log.warn({ key, error: (err as Error).name }, 'telegram unreachable')
       }
+      // A failed delivery must not silence the key for the whole window, nor retry on every call.
+      if (!delivered) sent.set(key, t - window + Math.min(RETRY_AFTER_FAILURE_SECS, window))
       opts.log.info({ key, alert: text }, 'alert')
     },
   }

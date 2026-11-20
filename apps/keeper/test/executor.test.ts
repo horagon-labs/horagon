@@ -1,8 +1,15 @@
-import { type Connection, Keypair, SystemProgram } from '@solana/web3.js'
+import { HORAGON_PROGRAM_ID } from '@horagon/sdk'
+import {
+  type Connection,
+  Keypair,
+  SystemProgram,
+  TransactionInstruction,
+  VersionedTransaction,
+} from '@solana/web3.js'
 import pino from 'pino'
 import { describe, expect, it } from 'vitest'
-import { telegramAlerter } from '../src/alerts'
-import { ProgramFailure, TxSender } from '../src/executor'
+import { logAlerter, telegramAlerter } from '../src/alerts'
+import { ProgramFailure, TxSender, type TxSenderOptions } from '../src/executor'
 
 const log = pino({ level: 'silent' })
 const payer = Keypair.generate()
@@ -16,11 +23,21 @@ const BLOCKHASH = 'EkSnNWid2cvwEVnVx9aBqawnmiCNiDgp3gUdkDPTKN1N'
 interface Script {
   simulate?: Array<{ err: unknown; logs?: string[] }>
   send?: Array<Error | null>
+  confirm?: Array<Error | { err: unknown } | null>
+  /** When set the fake exposes getSignatureStatuses; it gets the signatures asked about. */
+  statuses?: (sigs: string[]) => Array<{ err: unknown; confirmationStatus?: string } | null>
 }
 
 function fakeConnection(script: Script) {
-  const calls = { simulate: 0, send: 0, priorities: [] as number[] }
-  const conn = {
+  const calls = {
+    simulate: 0,
+    send: 0,
+    confirm: 0,
+    priorities: [] as number[],
+    rawSigs: [] as Uint8Array[],
+    asked: [] as string[][],
+  }
+  const conn: Record<string, unknown> = {
     async getLatestBlockhash() {
       return { blockhash: BLOCKHASH, lastValidBlockHeight: 10 }
     },
@@ -33,23 +50,80 @@ function fakeConnection(script: Script) {
       calls.simulate++
       return { context: { slot: 1 }, value: { err: r.err, logs: r.logs ?? [] } }
     },
-    async sendRawTransaction() {
+    async sendRawTransaction(raw: Uint8Array) {
+      calls.rawSigs.push(VersionedTransaction.deserialize(raw).signatures[0] as Uint8Array)
       const e = script.send?.[calls.send] ?? null
       calls.send++
       if (e) throw e
       return `sig${calls.send}`
     },
     async confirmTransaction() {
-      return { context: { slot: 1 }, value: { err: null } }
+      const r = script.confirm?.[calls.confirm++] ?? null
+      if (r instanceof Error) throw r
+      return { context: { slot: 1 }, value: { err: r?.err ?? null } }
     },
+  }
+  if (script.statuses) {
+    const statuses = script.statuses
+    conn.getSignatureStatuses = async (sigs: string[]) => {
+      calls.asked.push(sigs)
+      return { context: { slot: 1 }, value: statuses(sigs) }
+    }
   }
   return { conn: conn as unknown as Connection, calls }
 }
 
 const alerts = () => {
   const sent: string[] = []
-  return { sent, alerter: { send: async (key: string) => void sent.push(key) } }
+  const texts: string[] = []
+  return {
+    sent,
+    texts,
+    alerter: {
+      send: async (key: string, text: string) => {
+        sent.push(key)
+        texts.push(text)
+      },
+    },
+  }
 }
+
+const BASE58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
+function fromBase58(text: string): Buffer {
+  let n = 0n
+  for (const ch of text) n = n * 58n + BigInt(BASE58.indexOf(ch))
+  const hex = n.toString(16)
+  return Buffer.from(hex.length % 2 ? `0${hex}` : hex, 'hex')
+}
+
+const spec = (extra: Record<string, unknown> = {}) => ({
+  label: 'x',
+  instructions: [ix],
+  computeUnits: 10_000,
+  priorityMicroLamports: 1_000,
+  ...extra,
+})
+
+const captureLog = () => {
+  const lines: string[] = []
+  return { lines, log: pino({ level: 'trace' }, { write: (l: string) => void lines.push(l) }) }
+}
+
+const horagonIx = new TransactionInstruction({
+  programId: HORAGON_PROGRAM_ID,
+  keys: [],
+  data: Buffer.alloc(0),
+})
+
+const sender = (conns: Connection[], extra: Partial<TxSenderOptions> = {}) =>
+  new TxSender({
+    connections: conns,
+    payer,
+    log,
+    alerts: alerts().alerter,
+    sleep: async () => {},
+    ...extra,
+  })
 
 describe('TxSender', () => {
   it('sends once when all goes well', async () => {
@@ -199,6 +273,253 @@ describe('TxSender', () => {
   })
 })
 
+describe('TxSender: landed transactions', () => {
+  it('does not resend when the confirmation was lost but the transaction landed', async () => {
+    const { conn, calls } = fakeConnection({
+      confirm: [new Error('block height exceeded')],
+      statuses: () => [{ err: null, confirmationStatus: 'confirmed' }],
+    })
+    const r = await sender([conn]).send(spec())
+    expect(calls.send).toBe(1)
+    expect(r.alreadyDone).toBe(false)
+    expect(r.attempts).toBe(1)
+    const asked = calls.asked[0]?.[0] as string
+    expect(r.signature).toBe(asked)
+    // The signature we look up is the real base58 of the signed transaction.
+    expect(fromBase58(asked).equals(Buffer.from(calls.rawSigs[0] as Uint8Array))).toBe(true)
+  })
+
+  it('does not resend when the send threw after the node accepted it', async () => {
+    const { conn, calls } = fakeConnection({
+      send: [new Error('socket hang up')],
+      statuses: () => [{ err: null, confirmationStatus: 'finalized' }],
+    })
+    const r = await sender([conn]).send(spec())
+    expect(calls.send).toBe(1)
+    expect(r.signature).toBe(calls.asked[0]?.[0])
+  })
+
+  it('looks at every earlier signature and ignores one not yet processed', async () => {
+    const { conn, calls } = fakeConnection({
+      send: [new Error('timeout'), new Error('timeout'), null],
+      statuses: (sigs) =>
+        sigs.map((_, i) => (i === 1 ? { err: null, confirmationStatus: 'confirmed' } : null)),
+    })
+    const r = await sender([conn]).send(spec())
+    expect(calls.send).toBe(2)
+    expect(r.signature).toBe(calls.asked[1]?.[1])
+    expect(r.attempts).toBe(2)
+  })
+
+  it('ignores a status that has not reached confirmed', async () => {
+    const { conn, calls } = fakeConnection({
+      send: [new Error('timeout')],
+      statuses: () => [{ err: null, confirmationStatus: 'processed' }],
+    })
+    const r = await sender([conn]).send(spec())
+    expect(calls.send).toBe(2)
+    expect(r.attempts).toBe(2)
+  })
+
+  it('retries when the status lookup fails, and logs it without the URL', async () => {
+    const { lines, log: capture } = captureLog()
+    const { conn, calls } = fakeConnection({
+      send: [new Error('timeout')],
+      statuses: () => {
+        throw new Error('lookup failed https://rpc.example.com/v2/SECRETKEY?k=SECRETKEY')
+      },
+    })
+    const r = await sender([conn], { log: capture }).send(spec())
+    expect(r.attempts).toBe(2)
+    expect(calls.send).toBe(2)
+    expect(lines.join(',')).toContain('signature status lookup failed')
+    expect(lines.join(',')).not.toContain('SECRETKEY')
+  })
+
+  it('reports a transaction that landed with a program error, with its code', async () => {
+    const { conn, calls } = fakeConnection({
+      send: [new Error('timeout')],
+      statuses: () => [{ err: { InstructionError: [2, { Custom: 6005 }] } }],
+    })
+    const p = sender([conn]).send(spec({ instructions: [horagonIx] }))
+    await expect(p).rejects.toBeInstanceOf(ProgramFailure)
+    await expect(p).rejects.toMatchObject({
+      program: 'horagon',
+      code: 6005,
+      errorName: 'BadStatus',
+    })
+    expect(calls.send).toBe(1)
+  })
+
+  it('skips a landed status whose error is not an instruction error', async () => {
+    const { conn, calls } = fakeConnection({
+      send: [new Error('timeout')],
+      statuses: () => [{ err: 'BlockhashNotFound' }],
+    })
+    const r = await sender([conn]).send(spec())
+    expect(r.attempts).toBe(2)
+    expect(calls.send).toBe(2)
+  })
+
+  it('parses a confirmation-time program error into a code', async () => {
+    const { conn } = fakeConnection({
+      confirm: [{ err: { InstructionError: [2, { Custom: 6005 }] } }],
+    })
+    const p = sender([conn]).send(spec({ instructions: [horagonIx] }))
+    await expect(p).rejects.toMatchObject({
+      program: 'horagon',
+      code: 6005,
+      errorName: 'BadStatus',
+    })
+  })
+
+  it('names a builtin instruction error when there is no custom code', async () => {
+    const { conn } = fakeConnection({
+      confirm: [{ err: { InstructionError: [2, 'InvalidAccountData'] } }],
+    })
+    await expect(sender([conn]).send(spec())).rejects.toMatchObject({
+      program: 'runtime',
+      code: null,
+      errorName: 'InvalidAccountData',
+    })
+  })
+
+  it('treats a program failure on a retry as done when isDone says so', async () => {
+    const { conn, calls } = fakeConnection({
+      send: [new Error('timeout')],
+      simulate: [{ err: null }, { err: { InstructionError: [2, { Custom: 6005 }] } }],
+    })
+    let n = 0
+    const r = await sender([conn]).send(spec({ isDone: async () => ++n >= 2 }))
+    expect(r).toEqual({ signature: null, attempts: 1, alreadyDone: true })
+    expect(calls.send).toBe(1)
+  })
+
+  it('rethrows a program failure on a retry when nothing landed', async () => {
+    const { conn } = fakeConnection({
+      send: [new Error('timeout')],
+      simulate: [{ err: null }, { err: { InstructionError: [2, { Custom: 6005 }] } }],
+    })
+    await expect(sender([conn]).send(spec({ isDone: async () => false }))).rejects.toBeInstanceOf(
+      ProgramFailure,
+    )
+  })
+
+  it('checks isDone once more before giving up', async () => {
+    const e = new Error('timeout')
+    const { conn } = fakeConnection({ send: [e, e, e, e, e] })
+    let n = 0
+    // Four checks before retries 2..5 say no; the fifth, after the loop, says yes.
+    const r = await sender([conn]).send(spec({ isDone: async () => ++n === 5 }))
+    expect(r).toEqual({ signature: null, attempts: 5, alreadyDone: true })
+  })
+
+  it('logs an isDone failure without the URL and carries on', async () => {
+    const { lines, log: capture } = captureLog()
+    const { conn } = fakeConnection({ send: [new Error('timeout')] })
+    const r = await sender([conn], { log: capture }).send(
+      spec({
+        isDone: async () => {
+          throw new Error('rpc down https://rpc.example.com/v2/SECRETKEY?k=SECRETKEY')
+        },
+      }),
+    )
+    expect(r.attempts).toBe(2)
+    expect(lines.join(',')).toContain('isDone failed')
+    expect(lines.join(',')).not.toContain('SECRETKEY')
+  })
+})
+
+describe('TxSender: retries and failover', () => {
+  it('caps the priority fee', async () => {
+    const e = new Error('timeout')
+    const { conn, calls } = fakeConnection({ send: [e, e, e, e, null] })
+    await sender([conn], { maxPriorityMicroLamports: 3_000 }).send(spec())
+    expect(calls.priorities).toEqual([1_000, 2_000, 3_000, 3_000, 3_000])
+  })
+
+  it('retries a simulation error that is not a program error', async () => {
+    const { conn, calls } = fakeConnection({ simulate: [{ err: 'AccountNotFound' }] })
+    const r = await sender([conn]).send(spec())
+    expect(r.attempts).toBe(2)
+    expect(calls.simulate).toBe(2)
+  })
+
+  it('retries a confirmation error that is not a program error', async () => {
+    const { conn } = fakeConnection({ confirm: [{ err: 'BlockhashNotFound' }] })
+    const r = await sender([conn]).send(spec())
+    expect(r.attempts).toBe(2)
+  })
+
+  it('stays on the only connection after a 429', async () => {
+    const { conn, calls } = fakeConnection({ send: [new Error('429 Too Many Requests')] })
+    const s = sender([conn])
+    const r = await s.send(spec())
+    expect(r.attempts).toBe(2)
+    expect(calls.send).toBe(2)
+    expect(s.connection).toBe(conn)
+  })
+
+  it.each([
+    'fetch failed',
+    'connect ECONNREFUSED 127.0.0.1:8899',
+    'read ECONNRESET',
+    'Request timed out',
+    'Server responded with 503 Service Unavailable',
+    'HTTP error 502',
+  ])('moves to the backup RPC on a network error: %s', async (message) => {
+    const primary = fakeConnection({ send: [new Error(message)] })
+    const backup = fakeConnection({})
+    const s = sender([primary.conn, backup.conn])
+    await s.send(spec())
+    expect(backup.calls.send).toBe(1)
+    expect(s.connection).toBe(backup.conn)
+  })
+
+  it('stays on the primary RPC for an error that is not about the connection', async () => {
+    const primary = fakeConnection({ send: [new Error('blockhash not found')] })
+    const backup = fakeConnection({})
+    const s = sender([primary.conn, backup.conn])
+    await s.send(spec())
+    expect(primary.calls.send).toBe(2)
+    expect(backup.calls.send).toBe(0)
+  })
+
+  it('stays on the primary RPC for a program failure', async () => {
+    const primary = fakeConnection({
+      simulate: [{ err: { InstructionError: [2, { Custom: 6005 }] } }],
+    })
+    const backup = fakeConnection({})
+    const s = sender([primary.conn, backup.conn])
+    await expect(s.send(spec())).rejects.toBeInstanceOf(ProgramFailure)
+    expect(s.connection).toBe(primary.conn)
+  })
+
+  it('alerts on the last attempt when fewer than 4 are allowed, with the reason', async () => {
+    const e = new Error('timeout')
+    const { conn } = fakeConnection({ send: [e, e] })
+    const a = alerts()
+    await expect(
+      sender([conn], { maxAttempts: 2, alerts: a.alerter }).send(spec()),
+    ).rejects.toThrow(/gave up after 2 attempts/)
+    expect(a.sent).toEqual(['tx:x'])
+    expect(a.texts[0]).toContain('failed 2 times (timeout)')
+    expect(a.texts[0]).toContain('giving up')
+  })
+
+  it('says how many attempts are left in the alert', async () => {
+    const e = new Error('timeout')
+    const { conn } = fakeConnection({ send: [e, e, e, e, null] })
+    const a = alerts()
+    await sender([conn], { alerts: a.alerter }).send(spec())
+    expect(a.texts[0]).toContain('failed 4 times (timeout); 1 attempt left')
+  })
+
+  it('refuses to start without a connection', () => {
+    expect(() => sender([])).toThrow(/at least one connection/)
+  })
+})
+
 describe('telegramAlerter', () => {
   it('sends a key once per dedupe window and never throws', async () => {
     let t = 1_000
@@ -253,5 +574,82 @@ describe('telegramAlerter', () => {
     await rejected.send('b', 'x')
     expect(lines.length).toBeGreaterThan(0)
     expect(lines.join(',')).not.toContain('BOTSECRET')
+  })
+
+  it('keeps different keys apart', async () => {
+    const bodies: string[] = []
+    const alerter = telegramAlerter({
+      token: 'T',
+      chatId: '42',
+      log,
+      now: () => 1_000,
+      fetchImpl: (async (_url: string, init: { body: string }) => {
+        bodies.push(init.body)
+        return new Response('{}', { status: 200 })
+      }) as unknown as typeof fetch,
+    })
+    await alerter.send('a', 'one')
+    await alerter.send('b', 'two')
+    expect(bodies).toHaveLength(2)
+  })
+
+  it.each([
+    ['a network error', async () => Promise.reject(new Error('fetch failed'))],
+    ['a non-2xx answer', async () => new Response('no', { status: 500 })],
+  ])('sends again after 60 s, not before, when delivery failed with %s', async (_n, reply) => {
+    let t = 1_000
+    let calls = 0
+    const alerter = telegramAlerter({
+      token: 'T',
+      chatId: '42',
+      log,
+      now: () => t,
+      fetchImpl: (async () => {
+        calls++
+        return reply()
+      }) as unknown as typeof fetch,
+    })
+    await alerter.send('k', 'x')
+    t += 59
+    await alerter.send('k', 'x')
+    expect(calls).toBe(1)
+    t += 1
+    await alerter.send('k', 'x')
+    expect(calls).toBe(2)
+    t += 59
+    await alerter.send('k', 'x')
+    expect(calls).toBe(2)
+  })
+
+  it('does not retry early after a failure when the window is shorter than 60 s', async () => {
+    let t = 1_000
+    let calls = 0
+    const alerter = telegramAlerter({
+      token: 'T',
+      chatId: '42',
+      log,
+      dedupeSecs: 10,
+      now: () => t,
+      fetchImpl: (async () => {
+        calls++
+        throw new Error('down')
+      }) as unknown as typeof fetch,
+    })
+    await alerter.send('k', 'x')
+    t += 9
+    await alerter.send('k', 'x')
+    expect(calls).toBe(1)
+    t += 1
+    await alerter.send('k', 'x')
+    expect(calls).toBe(2)
+  })
+})
+
+describe('logAlerter', () => {
+  it('only logs the alert', async () => {
+    const { lines, log: capture } = captureLog()
+    await logAlerter(capture).send('k', 'Halted')
+    expect(lines).toHaveLength(1)
+    expect(JSON.parse(lines[0] as string)).toMatchObject({ key: 'k', alert: 'Halted' })
   })
 })
