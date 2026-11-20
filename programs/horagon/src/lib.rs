@@ -32,10 +32,17 @@ use pm_amm::types::Side as PmSide;
 pub const CONFIG_SEED: &[u8] = b"config";
 pub const AUTHORITY_SEED: &[u8] = b"authority";
 pub const GAME_MARKET_SEED: &[u8] = b"game_market";
+/// pm-AMM's PDAs (idls/pm_amm.json): `["lp", market, owner]`, `["yes_mint", market]`,
+/// `["no_mint", market]`. Pinning them keeps a caller from steering halt and recycle.
+pub const PM_LP_SEED: &[u8] = b"lp";
+pub const PM_YES_MINT_SEED: &[u8] = b"yes_mint";
+pub const PM_NO_MINT_SEED: &[u8] = b"no_mint";
 /// pm-AMM refuses end_ts closer than 300 s (InvalidMarketDuration); fail earlier and clearer.
 pub const MIN_MARKET_SECS: i64 = 300;
 pub const MIN_PRICE_BPS: u16 = 500;
 pub const MAX_PRICE_BPS: u16 = 9_500;
+/// finalize reads the window at call time, so a floor keeps every proposal challengeable.
+pub const MIN_DISPUTE_WINDOW_SECS: u32 = 60;
 pub const MAX_DISPUTE_WINDOW_SECS: u32 = 7 * 24 * 3600;
 /// `shares: u128` in a pm-AMM LpPosition follows the discriminator, `owner` and `market`.
 const LP_SHARES_OFFSET: usize = 8 + 32 + 32;
@@ -74,7 +81,7 @@ pub mod horagon {
         args: InitializeConfigArgs,
     ) -> Result<()> {
         require!(
-            args.dispute_window_secs <= MAX_DISPUTE_WINDOW_SECS,
+            (MIN_DISPUTE_WINDOW_SECS..=MAX_DISPUTE_WINDOW_SECS).contains(&args.dispute_window_secs),
             HoragonError::InvalidArgument
         );
         ctx.accounts.config.set_inner(Config {
@@ -98,7 +105,10 @@ pub mod horagon {
             config.guardians = guardians;
         }
         if let Some(window) = args.dispute_window_secs {
-            require!(window <= MAX_DISPUTE_WINDOW_SECS, HoragonError::InvalidArgument);
+            require!(
+                (MIN_DISPUTE_WINDOW_SECS..=MAX_DISPUTE_WINDOW_SECS).contains(&window),
+                HoragonError::InvalidArgument
+            );
             config.dispute_window_secs = window;
         }
         if let Some(paused) = args.creation_paused {
@@ -227,31 +237,32 @@ pub mod horagon {
             HoragonError::Unauthorized
         );
         require!(a.game_market.status == MarketStatus::Open, HoragonError::BadStatus);
+        // While Open, the Authority's LpPosition holds the seed's shares. Setting Halted without
+        // a withdrawal would leave trading on, and halt could never run again.
         let shares =
             lp_shares(&a.lp_position.to_account_info(), &a.market.key(), &a.authority.key())?
                 .unwrap_or(0);
-        if shares > 0 {
-            let bump = [ctx.bumps.authority];
-            let seeds: &[&[&[u8]]] = &[&[AUTHORITY_SEED, &bump]];
-            pm_amm::cpi::withdraw_liquidity(
-                CpiContext::new_with_signer(
-                    a.pm_amm_program.key(),
-                    WithdrawLiquidity {
-                        signer: a.authority.to_account_info(),
-                        market: a.market.to_account_info(),
-                        collateral_mint: a.collateral_mint.to_account_info(),
-                        yes_mint: a.yes_mint.to_account_info(),
-                        no_mint: a.no_mint.to_account_info(),
-                        lp_position: a.lp_position.to_account_info(),
-                        user_yes: a.authority_yes.to_account_info(),
-                        user_no: a.authority_no.to_account_info(),
-                        token_program: a.token_program.to_account_info(),
-                    },
-                    seeds,
-                ),
-                shares,
-            )?;
-        }
+        require!(shares > 0, HoragonError::BadLpPosition);
+        let bump = [ctx.bumps.authority];
+        let seeds: &[&[&[u8]]] = &[&[AUTHORITY_SEED, &bump]];
+        pm_amm::cpi::withdraw_liquidity(
+            CpiContext::new_with_signer(
+                a.pm_amm_program.key(),
+                WithdrawLiquidity {
+                    signer: a.authority.to_account_info(),
+                    market: a.market.to_account_info(),
+                    collateral_mint: a.collateral_mint.to_account_info(),
+                    yes_mint: a.yes_mint.to_account_info(),
+                    no_mint: a.no_mint.to_account_info(),
+                    lp_position: a.lp_position.to_account_info(),
+                    user_yes: a.authority_yes.to_account_info(),
+                    user_no: a.authority_no.to_account_info(),
+                    token_program: a.token_program.to_account_info(),
+                },
+                seeds,
+            ),
+            shares,
+        )?;
         let by = a.signer.key();
         let game_market = &mut ctx.accounts.game_market;
         game_market.status = MarketStatus::Halted;
@@ -380,6 +391,8 @@ pub mod horagon {
         let seeds: &[&[&[u8]]] = &[&[AUTHORITY_SEED, &bump]];
         let before = ctx.accounts.treasury.amount;
 
+        // lp_position is pinned to `["lp", market, authority]`, so None can only mean halt's
+        // full withdrawal closed it (docs/spikes.md, S1).
         let a = &ctx.accounts;
         if lp_shares(&a.lp_position.to_account_info(), &a.market.key(), &a.authority.key())?
             .is_some()
@@ -555,11 +568,21 @@ pub struct CreateGameMarket<'info> {
     /// CHECK: must be the configured collateral; pm-AMM validates the mint itself.
     #[account(address = config.collateral_mint @ HoragonError::InvalidArgument)]
     pub collateral_mint: UncheckedAccount<'info>,
-    /// CHECK: pm-AMM creates and validates it.
-    #[account(mut)]
+    /// CHECK: pm-AMM creates it at `["yes_mint", market]`.
+    #[account(
+        mut,
+        seeds = [PM_YES_MINT_SEED, market.key().as_ref()],
+        bump,
+        seeds::program = pm_amm_program.key()
+    )]
     pub yes_mint: UncheckedAccount<'info>,
-    /// CHECK: pm-AMM creates and validates it.
-    #[account(mut)]
+    /// CHECK: pm-AMM creates it at `["no_mint", market]`.
+    #[account(
+        mut,
+        seeds = [PM_NO_MINT_SEED, market.key().as_ref()],
+        bump,
+        seeds::program = pm_amm_program.key()
+    )]
     pub no_mint: UncheckedAccount<'info>,
     /// CHECK: pm-AMM creates and validates it.
     #[account(mut)]
@@ -577,7 +600,12 @@ pub struct CreateGameMarket<'info> {
     )]
     pub treasury: Box<Account<'info, TokenAccount>>,
     /// CHECK: pm-AMM creates it at `["lp", market, authority]`.
-    #[account(mut)]
+    #[account(
+        mut,
+        seeds = [PM_LP_SEED, market.key().as_ref(), authority.key().as_ref()],
+        bump,
+        seeds::program = pm_amm_program.key()
+    )]
     pub lp_position: UncheckedAccount<'info>,
     /// CHECK: pm-AMM checks the Metaplex program address.
     pub token_metadata_program: UncheckedAccount<'info>,
@@ -607,25 +635,40 @@ pub struct Halt<'info> {
     /// CHECK: must be the configured collateral.
     #[account(address = config.collateral_mint @ HoragonError::InvalidArgument)]
     pub collateral_mint: UncheckedAccount<'info>,
-    /// CHECK: pm-AMM validates it.
-    #[account(mut)]
+    /// CHECK: pm-AMM's `["yes_mint", market]`.
+    #[account(
+        mut,
+        seeds = [PM_YES_MINT_SEED, market.key().as_ref()],
+        bump,
+        seeds::program = pm_amm_program.key()
+    )]
     pub yes_mint: UncheckedAccount<'info>,
-    /// CHECK: pm-AMM validates it.
-    #[account(mut)]
+    /// CHECK: pm-AMM's `["no_mint", market]`.
+    #[account(
+        mut,
+        seeds = [PM_NO_MINT_SEED, market.key().as_ref()],
+        bump,
+        seeds::program = pm_amm_program.key()
+    )]
     pub no_mint: UncheckedAccount<'info>,
-    /// CHECK: the Authority's LpPosition; read by `lp_shares`, validated again by pm-AMM.
-    #[account(mut)]
+    /// CHECK: the Authority's LpPosition at `["lp", market, authority]`; read by `lp_shares`.
+    #[account(
+        mut,
+        seeds = [PM_LP_SEED, market.key().as_ref(), authority.key().as_ref()],
+        bump,
+        seeds::program = pm_amm_program.key()
+    )]
     pub lp_position: UncheckedAccount<'info>,
     #[account(
         mut,
-        constraint = authority_yes.mint == yes_mint.key() @ HoragonError::InvalidArgument,
-        constraint = authority_yes.owner == authority.key() @ HoragonError::InvalidArgument
+        associated_token::mint = yes_mint,
+        associated_token::authority = authority
     )]
     pub authority_yes: Box<Account<'info, TokenAccount>>,
     #[account(
         mut,
-        constraint = authority_no.mint == no_mint.key() @ HoragonError::InvalidArgument,
-        constraint = authority_no.owner == authority.key() @ HoragonError::InvalidArgument
+        associated_token::mint = no_mint,
+        associated_token::authority = authority
     )]
     pub authority_no: Box<Account<'info, TokenAccount>>,
     pub pm_amm_program: Program<'info, PmAmm>,
@@ -703,28 +746,43 @@ pub struct Recycle<'info> {
     /// CHECK: must be the configured collateral.
     #[account(address = config.collateral_mint @ HoragonError::InvalidArgument)]
     pub collateral_mint: UncheckedAccount<'info>,
-    /// CHECK: pm-AMM validates it.
-    #[account(mut)]
+    /// CHECK: pm-AMM's `["yes_mint", market]`.
+    #[account(
+        mut,
+        seeds = [PM_YES_MINT_SEED, market.key().as_ref()],
+        bump,
+        seeds::program = pm_amm_program.key()
+    )]
     pub yes_mint: UncheckedAccount<'info>,
-    /// CHECK: pm-AMM validates it.
-    #[account(mut)]
+    /// CHECK: pm-AMM's `["no_mint", market]`.
+    #[account(
+        mut,
+        seeds = [PM_NO_MINT_SEED, market.key().as_ref()],
+        bump,
+        seeds::program = pm_amm_program.key()
+    )]
     pub no_mint: UncheckedAccount<'info>,
     /// CHECK: pm-AMM validates it.
     #[account(mut)]
     pub vault: UncheckedAccount<'info>,
-    /// CHECK: the Authority's LpPosition, possibly closed; read by `lp_shares`.
-    #[account(mut)]
+    /// CHECK: the Authority's LpPosition at `["lp", market, authority]`, possibly closed.
+    #[account(
+        mut,
+        seeds = [PM_LP_SEED, market.key().as_ref(), authority.key().as_ref()],
+        bump,
+        seeds::program = pm_amm_program.key()
+    )]
     pub lp_position: UncheckedAccount<'info>,
     #[account(
         mut,
-        constraint = authority_yes.mint == yes_mint.key() @ HoragonError::InvalidArgument,
-        constraint = authority_yes.owner == authority.key() @ HoragonError::InvalidArgument
+        associated_token::mint = yes_mint,
+        associated_token::authority = authority
     )]
     pub authority_yes: Box<Account<'info, TokenAccount>>,
     #[account(
         mut,
-        constraint = authority_no.mint == no_mint.key() @ HoragonError::InvalidArgument,
-        constraint = authority_no.owner == authority.key() @ HoragonError::InvalidArgument
+        associated_token::mint = no_mint,
+        associated_token::authority = authority
     )]
     pub authority_no: Box<Account<'info, TokenAccount>>,
     #[account(

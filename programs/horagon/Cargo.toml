@@ -26,7 +26,7 @@ custom-panic = []
 # Keep both equal to `anchor --version` (1.2.2). With default features off, anchor-spl needs
 # a Solana cohort named; `solana-v3` matches anchor-lang's default.
 anchor-lang = "1.2.2"
-anchor-spl = { version = "1.2.2", default-features = false, features = ["token", "solana-v3"] }
+anchor-spl = { version = "1.2.2", default-features = false, features = ["token", "associated_token", "solana-v3"] }
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("solana"))'] }

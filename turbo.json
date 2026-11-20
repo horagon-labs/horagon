@@ -11,6 +11,10 @@
     "test": {
       "dependsOn": ["^build"],
       "outputs": ["coverage/**"]
+    },
+    "@horagon/spikes#test": {
+      "dependsOn": ["^build"],
+      "outputs": []
     }
   }
 }
