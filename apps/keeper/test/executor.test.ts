@@ -26,6 +26,8 @@ interface Script {
   confirm?: Array<Error | { err: unknown } | null>
   /** When set the fake exposes getSignatureStatuses; it gets the signatures asked about. */
   statuses?: (sigs: string[]) => Array<{ err: unknown; confirmationStatus?: string } | null>
+  /** Block height per getBlockHeight call (default: far past every lastValidBlockHeight). */
+  height?: () => number
 }
 
 function fakeConnection(script: Script) {
@@ -33,12 +35,14 @@ function fakeConnection(script: Script) {
     simulate: 0,
     send: 0,
     confirm: 0,
+    blockhashes: 0,
     priorities: [] as number[],
     rawSigs: [] as Uint8Array[],
     asked: [] as string[][],
   }
   const conn: Record<string, unknown> = {
     async getLatestBlockhash() {
+      calls.blockhashes++
       return { blockhash: BLOCKHASH, lastValidBlockHeight: 10 }
     },
     async simulateTransaction(tx: {
@@ -56,6 +60,9 @@ function fakeConnection(script: Script) {
       calls.send++
       if (e) throw e
       return `sig${calls.send}`
+    },
+    async getBlockHeight() {
+      return script.height ? script.height() : 1_000
     },
     async confirmTransaction() {
       const r = script.confirm?.[calls.confirm++] ?? null
@@ -93,7 +100,10 @@ function fromBase58(text: string): Buffer {
   let n = 0n
   for (const ch of text) n = n * 58n + BigInt(BASE58.indexOf(ch))
   const hex = n.toString(16)
-  return Buffer.from(hex.length % 2 ? `0${hex}` : hex, 'hex')
+  const body = n === 0n ? Buffer.alloc(0) : Buffer.from(hex.length % 2 ? `0${hex}` : hex, 'hex')
+  let zeros = 0
+  while (text[zeros] === '1') zeros++
+  return Buffer.concat([Buffer.alloc(zeros), body])
 }
 
 const spec = (extra: Record<string, unknown> = {}) => ({
@@ -311,13 +321,120 @@ describe('TxSender: landed transactions', () => {
     expect(r.attempts).toBe(2)
   })
 
-  it('ignores a status that has not reached confirmed', async () => {
+  it('waits for a processed attempt instead of rebuilding it', async () => {
+    let n = 0
     const { conn, calls } = fakeConnection({
       send: [new Error('timeout')],
-      statuses: () => [{ err: null, confirmationStatus: 'processed' }],
+      statuses: () => [
+        n++ === 0
+          ? { err: null, confirmationStatus: 'processed' }
+          : { err: null, confirmationStatus: 'confirmed' },
+      ],
+    })
+    const sleeps: number[] = []
+    const r = await sender([conn], { sleep: async (ms) => void sleeps.push(ms) }).send(spec())
+    expect(calls.send).toBe(1)
+    expect(calls.blockhashes).toBe(1)
+    expect(new Set(calls.rawSigs.map((x) => Buffer.from(x).toString('hex'))).size).toBe(1)
+    expect(r.signature).toBe(calls.asked[0]?.[0])
+    expect(r.alreadyDone).toBe(false)
+    expect(sleeps.filter((ms) => ms === 1_000)).toHaveLength(1)
+  })
+
+  it('rebuilds once an unseen attempt can no longer land, rebroadcasting meanwhile', async () => {
+    const heights = [5, 5, 11]
+    const { conn, calls } = fakeConnection({
+      send: [new Error('502 Bad Gateway')],
+      statuses: (sigs) => sigs.map(() => null),
+      height: () => heights.shift() ?? 11,
     })
     const r = await sender([conn]).send(spec())
+    expect(calls.blockhashes).toBe(2)
+    const distinct = new Set(calls.rawSigs.map((x) => Buffer.from(x).toString('hex')))
+    expect(distinct.size).toBe(2)
+    expect(r.attempts).toBe(2)
+    expect(calls.send).toBeGreaterThan(2)
+  })
+
+  it('waits for the last attempt before giving up, and succeeds if it confirms', async () => {
+    const e = new Error('timeout')
+    let n = 0
+    const { conn, calls } = fakeConnection({
+      send: [e, e],
+      statuses: (sigs) => {
+        const call = n++
+        const last =
+          call === 0
+            ? null
+            : call === 1
+              ? { err: null, confirmationStatus: 'processed' }
+              : { err: null, confirmationStatus: 'confirmed' }
+        return sigs.map((_, i) => (i === sigs.length - 1 ? last : null))
+      },
+    })
+    const r = await sender([conn], { maxAttempts: 2 }).send(spec())
+    expect(r.signature).toBe(calls.asked[2]?.[1])
+    expect(r.attempts).toBe(2)
     expect(calls.send).toBe(2)
+  })
+
+  it('stops waiting after 90 s when the RPC cannot answer, then rebuilds', async () => {
+    const { conn, calls } = fakeConnection({
+      send: [new Error('timeout')],
+      statuses: () => {
+        throw new Error('down')
+      },
+      height: () => {
+        throw new Error('down')
+      },
+    })
+    const sleeps: number[] = []
+    const r = await sender([conn], { sleep: async (ms) => void sleeps.push(ms) }).send(spec())
+    expect(r.attempts).toBe(2)
+    expect(calls.blockhashes).toBe(2)
+    expect(sleeps.filter((ms) => ms === 1_000)).toHaveLength(90)
+  })
+
+  it.each(['connect ECONNREFUSED 1.2.3.4:443', 'getaddrinfo ENOTFOUND rpc', 'EAI_AGAIN rpc'])(
+    'does not wait when the node never got the request: %s',
+    async (message) => {
+      const primary = fakeConnection({
+        send: [new Error(message)],
+        statuses: (sigs) => sigs.map(() => null),
+        height: () => 0,
+      })
+      const backup = fakeConnection({})
+      const sleeps: number[] = []
+      const s = sender([primary.conn, backup.conn], {
+        sleep: async (ms) => void sleeps.push(ms),
+        baseDelayMs: 100,
+      })
+      await s.send(spec())
+      expect(primary.calls.asked).toHaveLength(0)
+      expect(sleeps).toHaveLength(1)
+      expect(backup.calls.send).toBe(1)
+    },
+  )
+
+  it('decodes base58 with leading zero bytes', () => {
+    expect('1'.repeat(64)).toBe('1'.repeat(64))
+    expect(fromBase58('1'.repeat(64)).equals(Buffer.alloc(64))).toBe(true)
+    expect(fromBase58('112').equals(Buffer.from([0, 0, 1]))).toBe(true)
+  })
+
+  it('finds a success before it throws on an earlier failed signature', async () => {
+    const { conn } = fakeConnection({
+      send: [new Error('timeout'), new Error('timeout')],
+      statuses: (sigs) =>
+        sigs.length < 2
+          ? [null]
+          : [
+              { err: { InstructionError: [2, { Custom: 6005 }] } },
+              { err: null, confirmationStatus: 'confirmed' },
+            ],
+    })
+    const r = await sender([conn], { maxAttempts: 2 }).send(spec())
+    expect(r.signature).not.toBeNull()
     expect(r.attempts).toBe(2)
   })
 

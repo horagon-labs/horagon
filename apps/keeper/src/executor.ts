@@ -1,9 +1,16 @@
 // Sends the keeper's transactions (spec 12): simulate, send, confirm; on a transient failure
 // retry up to 5 times with exponential backoff and a rising priority fee, moving to the backup
 // RPC on a 429 or a network error. A program error is deterministic and is never retried.
-// A transaction is not sent twice because, before every retry and before giving up, the
-// signatures of the earlier attempts are looked up on chain (a send or confirmation that threw
-// may still have landed), plus the caller's `isDone` when given.
+//
+// When can a transaction be sent twice? Never because of a retry we start. A retry rebuilds with
+// a new blockhash, hence a new signature, so before it (and before giving up) the newest sent
+// attempt must be unable to land: its status is looked up, and while it is `processed`, or
+// unseen with its blockhash still valid (or the RPC cannot say), we wait, polling once a second
+// and re-broadcasting the same bytes (same signature, so it cannot land twice), for at most
+// 90 s. We rebuild only once the block height passed `lastValidBlockHeight`, or when the send
+// error proves the node never got the request (ECONNREFUSED, ENOTFOUND, EAI_AGAIN). Landed
+// attempts are returned, and `isDone` is asked as well when given. Left open: an RPC that
+// cannot answer for the whole 90 s wait.
 import {
   errorSummary,
   failedProgramError,
@@ -16,6 +23,7 @@ import {
   ComputeBudgetProgram,
   type Connection,
   type Keypair,
+  type SignatureStatus,
   type TransactionInstruction,
   TransactionMessage,
   VersionedTransaction,
@@ -76,6 +84,19 @@ const isRateLimit = (err: unknown) => /\b429\b|Too Many Requests/i.test(messageO
 const NETWORK_ERROR =
   /fetch failed|ECONNREFUSED|ECONNRESET|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|socket hang up|time(?:d)?[ -]?out|(?:HTTP|status|error)\D{0,12}5\d\d\b|\b5\d\d (?:Internal|Bad Gateway|Service|Gateway)/i
 const isNetworkError = (err: unknown) => NETWORK_ERROR.test(messageOf(err))
+
+/** The send failed before the node could have received the request: nothing is in flight. */
+const NOT_SENT = /ECONNREFUSED|ENOTFOUND|EAI_AGAIN/i
+
+/** An attempt that was sent (or may have been): what we need to look it up or rebroadcast it. */
+interface Sent {
+  signature: string
+  lastValidBlockHeight: number
+  raw: Uint8Array
+}
+
+const POLL_MS = 1_000
+const MAX_WAIT_MS = 90_000
 
 function instructionError(err: unknown): boolean {
   return typeof err === 'object' && err !== null && 'InstructionError' in err
@@ -157,21 +178,21 @@ export class TxSender {
 
   async send(spec: SendSpec): Promise<SendResult> {
     let lastError: unknown
-    const sigs: string[] = []
+    const sent: Sent[] = []
     for (let attempt = 1; attempt <= this.maxAttempts; attempt++) {
       if (attempt > 1) {
-        const done = await this.alreadyLanded(spec, sigs, attempt - 1)
+        const done = await this.alreadyLanded(spec, sent, attempt - 1)
         if (done) return done
       }
       const priority = Math.min(this.maxPriority, spec.priorityMicroLamports * 2 ** (attempt - 1))
       try {
-        const signature = await this.attempt(spec, priority, sigs)
+        const signature = await this.attempt(spec, priority, sent)
         this.opts.log.info({ label: spec.label, sig: signature, attempt }, 'tx confirmed')
         return { signature, attempts: attempt, alreadyDone: false }
       } catch (err) {
         if (err instanceof ProgramFailure) {
           // An earlier attempt may have done the work this one now fails on.
-          const done = attempt > 1 ? await this.alreadyLanded(spec, sigs, attempt - 1) : null
+          const done = attempt > 1 ? await this.alreadyLanded(spec, sent, attempt - 1) : null
           if (done) return done
           throw err
         }
@@ -197,7 +218,7 @@ export class TxSender {
         }
       }
     }
-    const done = await this.alreadyLanded(spec, sigs, this.maxAttempts)
+    const done = await this.alreadyLanded(spec, sent, this.maxAttempts)
     if (done) return done
     // The last error may carry an RPC URL with a key: redact it like every other log line.
     throw new Error(
@@ -206,52 +227,100 @@ export class TxSender {
   }
 
   /**
-   * Did an earlier attempt land, or does the caller say the effect is on chain? A send or a
-   * confirmation that threw may still have landed, and resending with a new blockhash would
-   * then do it twice. Throws ProgramFailure when an attempt landed with a program error.
+   * Did an earlier attempt land, or does the caller say the effect is on chain? Returns null
+   * only when it is safe to build a new transaction: nothing was sent, or the newest sent
+   * attempt can no longer land. While it still can, waits for it (see the header). Throws
+   * ProgramFailure when an attempt landed with a program error.
    */
   private async alreadyLanded(
     spec: SendSpec,
-    sigs: string[],
+    sent: Sent[],
     attempts: number,
   ): Promise<SendResult | null> {
-    if (sigs.length > 0) {
-      try {
-        const { value } = await this.connection.getSignatureStatuses(sigs, {
-          searchTransactionHistory: true,
-        })
-        for (const [i, status] of value.entries()) {
-          if (!status) continue
-          if (status.err) {
-            if (instructionError(status.err)) throw chainProgramFailure(spec, status.err)
-            continue
-          }
-          if (
-            status.confirmationStatus === 'confirmed' ||
-            status.confirmationStatus === 'finalized'
-          ) {
-            return { signature: sigs[i] as string, attempts, alreadyDone: false }
-          }
+    for (let waited = 0; ; waited += POLL_MS) {
+      const state = await this.lookup(spec, sent)
+      if (state.landed) return { signature: state.landed, attempts, alreadyDone: false }
+      if (spec.isDone) {
+        try {
+          if (await spec.isDone()) return { signature: null, attempts, alreadyDone: true }
+        } catch (err) {
+          this.opts.log.warn(
+            { label: spec.label, error: errorSummary(err).message },
+            'isDone failed',
+          )
         }
-      } catch (err) {
-        if (err instanceof ProgramFailure) throw err
-        this.opts.log.warn(
-          { label: spec.label, error: errorSummary(err).message },
-          'signature status lookup failed',
-        )
       }
+      if (!state.inflight || waited >= MAX_WAIT_MS) return null
+      const newest = sent[sent.length - 1] as Sent
+      if (!state.processed) await this.rebroadcast(spec, newest)
+      await this.sleep(POLL_MS)
     }
-    if (spec.isDone) {
-      try {
-        if (await spec.isDone()) return { signature: null, attempts, alreadyDone: true }
-      } catch (err) {
-        this.opts.log.warn({ label: spec.label, error: errorSummary(err).message }, 'isDone failed')
-      }
-    }
-    return null
   }
 
-  private async attempt(spec: SendSpec, priority: number, sigs: string[]): Promise<string> {
+  /** Looks the sent attempts up on chain. */
+  private async lookup(
+    spec: SendSpec,
+    sent: Sent[],
+  ): Promise<{ landed?: string; inflight: boolean; processed: boolean }> {
+    const newest = sent[sent.length - 1]
+    if (!newest) return { inflight: false, processed: false }
+    let statuses: Array<SignatureStatus | null> | undefined
+    try {
+      const res = await this.connection.getSignatureStatuses(
+        sent.map((s) => s.signature),
+        { searchTransactionHistory: true },
+      )
+      statuses = res.value
+    } catch (err) {
+      this.opts.log.warn(
+        { label: spec.label, error: errorSummary(err).message },
+        'signature status lookup failed',
+      )
+    }
+    if (statuses) {
+      // A success anywhere wins; only then do errors count.
+      for (const [i, status] of statuses.entries()) {
+        if (
+          status &&
+          !status.err &&
+          (status.confirmationStatus === 'confirmed' || status.confirmationStatus === 'finalized')
+        ) {
+          return { landed: (sent[i] as Sent).signature, inflight: false, processed: false }
+        }
+      }
+      for (const status of statuses) {
+        if (status?.err && instructionError(status.err)) throw chainProgramFailure(spec, status.err)
+      }
+      const last = statuses[statuses.length - 1]
+      if (last?.err) return { inflight: false, processed: false }
+      if (last) return { inflight: true, processed: true }
+    }
+    // Unseen, or the lookup failed: only the block height says whether it can still land.
+    try {
+      const height = await this.connection.getBlockHeight('confirmed')
+      return { inflight: height <= newest.lastValidBlockHeight, processed: false }
+    } catch (err) {
+      this.opts.log.warn(
+        { label: spec.label, error: errorSummary(err).message },
+        'block height lookup failed',
+      )
+      return { inflight: true, processed: false }
+    }
+  }
+
+  /** Same bytes, same signature: cannot land twice. */
+  private async rebroadcast(spec: SendSpec, sent: Sent): Promise<void> {
+    try {
+      await this.connection.sendRawTransaction(sent.raw, { skipPreflight: true, maxRetries: 0 })
+    } catch (err) {
+      this.opts.log.warn(
+        { label: spec.label, error: errorSummary(err).message },
+        'rebroadcast failed',
+      )
+    }
+  }
+
+  private async attempt(spec: SendSpec, priority: number, sent: Sent[]): Promise<string> {
     const conn = this.connection
     const { blockhash, lastValidBlockHeight } = await conn.getLatestBlockhash('confirmed')
     const message = new TransactionMessage({
@@ -282,11 +351,17 @@ export class TxSender {
       throw new Error(`simulation failed: ${JSON.stringify(sim.value.err)}`)
     }
     // Known before the send, so a send or confirmation that throws can still be looked up.
-    sigs.push(base58(tx.signatures[0] as Uint8Array))
-    const signature = await conn.sendRawTransaction(tx.serialize(), {
-      skipPreflight: true,
-      maxRetries: 0,
-    })
+    const raw = tx.serialize()
+    const entry = { signature: base58(tx.signatures[0] as Uint8Array), lastValidBlockHeight, raw }
+    sent.push(entry)
+    let signature: string
+    try {
+      signature = await conn.sendRawTransaction(raw, { skipPreflight: true, maxRetries: 0 })
+    } catch (err) {
+      // The node never got it: nothing can be in flight.
+      if (NOT_SENT.test(messageOf(err))) sent.splice(sent.indexOf(entry), 1)
+      throw err
+    }
     const res = await conn.confirmTransaction(
       { signature, blockhash, lastValidBlockHeight },
       'confirmed',
