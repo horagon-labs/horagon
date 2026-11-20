@@ -1,12 +1,11 @@
 import { PublicKey } from '@solana/web3.js'
-import idl from '../../idl/horagon.json'
 
 /**
- * The `horagon` program. The address comes from the committed IDL
- * (`packages/sdk/idl/horagon.json`, copied from `target/idl/` after each `anchor build`), so a
- * redeploy to a new address changes one file.
+ * The `horagon` program. Hard-coded so the IDL JSON stays out of web bundles; the test
+ * 'uses the IDL address as the program id' pins it to `packages/sdk/idl/horagon.json`, so a
+ * redeploy to a new address changes this line and that file.
  */
-export const HORAGON_PROGRAM_ID = new PublicKey(idl.address)
+export const HORAGON_PROGRAM_ID = new PublicKey('HtDJ3vfx8vtFSmskm2Ks39kBMuDmFZH3H2B173BB9qHF')
 
 export const CONFIG_SEED = 'config'
 export const AUTHORITY_SEED = 'authority'

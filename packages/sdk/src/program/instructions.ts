@@ -92,6 +92,16 @@ export interface ProgramIds {
   pmAmmProgramId?: PublicKey
 }
 
+/** The program accepts a dispute window of 60 s to 7 days, inclusive (lib.rs). */
+function assertDisputeWindow(secs: number): void {
+  if (secs > MAX_DISPUTE_WINDOW_SECS) {
+    throw new HoragonError('INVALID_INPUT', `dispute window above ${MAX_DISPUTE_WINDOW_SECS} s`)
+  }
+  if (secs < MIN_DISPUTE_WINDOW_SECS) {
+    throw new HoragonError('INVALID_INPUT', `dispute window below ${MIN_DISPUTE_WINDOW_SECS} s`)
+  }
+}
+
 export interface InitializeConfigParams extends ProgramIds {
   /** The program's upgrade authority; becomes `admin`. */
   admin: PublicKey
@@ -104,12 +114,7 @@ export interface InitializeConfigParams extends ProgramIds {
 
 export function buildInitializeConfigIx(p: InitializeConfigParams): TransactionInstruction {
   const programId = p.programId ?? HORAGON_PROGRAM_ID
-  if (p.disputeWindowSecs > MAX_DISPUTE_WINDOW_SECS) {
-    throw new HoragonError('INVALID_INPUT', `dispute window above ${MAX_DISPUTE_WINDOW_SECS} s`)
-  }
-  if (p.disputeWindowSecs < MIN_DISPUTE_WINDOW_SECS) {
-    throw new HoragonError('INVALID_INPUT', `dispute window below ${MIN_DISPUTE_WINDOW_SECS} s`)
-  }
+  assertDisputeWindow(p.disputeWindowSecs)
   const args = new BorshWriter()
     .pubkey(p.attestor)
     .pubkey(p.guardians[0])
@@ -141,14 +146,7 @@ export interface UpdateConfigParams extends ProgramIds {
 
 export function buildUpdateConfigIx(p: UpdateConfigParams): TransactionInstruction {
   const programId = p.programId ?? HORAGON_PROGRAM_ID
-  if (p.disputeWindowSecs !== undefined) {
-    if (p.disputeWindowSecs > MAX_DISPUTE_WINDOW_SECS) {
-      throw new HoragonError('INVALID_INPUT', `dispute window above ${MAX_DISPUTE_WINDOW_SECS} s`)
-    }
-    if (p.disputeWindowSecs < MIN_DISPUTE_WINDOW_SECS) {
-      throw new HoragonError('INVALID_INPUT', `dispute window below ${MIN_DISPUTE_WINDOW_SECS} s`)
-    }
-  }
+  if (p.disputeWindowSecs !== undefined) assertDisputeWindow(p.disputeWindowSecs)
   const args = new BorshWriter()
     .option(p.attestor, (wr, v) => wr.pubkey(v))
     .option(p.guardians, (wr, v) => wr.pubkey(v[0]).pubkey(v[1]))

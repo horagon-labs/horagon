@@ -1,10 +1,13 @@
 // The SDK encodes `horagon` by hand; this file holds it to the IDL that `anchor build`
-// generates (packages/sdk/idl/horagon.json). Any drift in account order, signer or writable
-// flags, argument layout, account layout, events or error order fails here.
+// generates (packages/sdk/idl/horagon.json). Any drift in the identity of any account of any
+// instruction (checked key by key, and proven non-vacuous by swapping every pair of keys),
+// signer or writable flags, argument layout, account layout, events or error order fails here.
 import { PublicKey, type TransactionInstruction } from '@solana/web3.js'
 import { Buffer } from 'buffer'
 import { describe, expect, it } from 'vitest'
 import idlJson from '../../idl/horagon.json'
+import { HoragonError } from '../../src/errors'
+import { METAPLEX_PROGRAM_ID } from '../../src/pm-amm'
 import {
   buildChallengeIx,
   buildCreateGameMarketIx,
@@ -18,11 +21,16 @@ import {
   decodeConfig,
   decodeGameMarket,
   decodeHoragonEvent,
+  deriveConfig,
+  deriveProgramData,
+  deriveTreasury,
+  GAME_MARKET_MARKET_OFFSET,
   HORAGON_ACCOUNT_DISCRIMINATORS,
   HORAGON_EVENT_DISCRIMINATORS,
   HORAGON_IX_DISCRIMINATORS,
   HORAGON_PROGRAM_ERRORS,
   HORAGON_PROGRAM_ID,
+  marketAddresses,
 } from '../../src/program'
 import { encodeIdl, type IdlType, type IdlTypeDef, key } from './idl-borsh'
 
@@ -38,7 +46,13 @@ interface IdlPda {
 interface IdlIx {
   name: string
   discriminator: number[]
-  accounts: Array<{ name: string; writable?: boolean; signer?: boolean; pda?: IdlPda }>
+  accounts: Array<{
+    name: string
+    writable?: boolean
+    signer?: boolean
+    pda?: IdlPda
+    address?: string
+  }>
   args: Array<{ name: string; type: IdlType }>
 }
 const idl = idlJson as unknown as {
@@ -54,6 +68,25 @@ const camel = (s: string) => s.replace(/_([a-z])/g, (_, c: string) => c.toUpperC
 const ascii = (s: string, n: number) => Array.from({ length: n }, (_, i) => s.charCodeAt(i) || 0)
 const hash = Uint8Array.from({ length: 32 }, (_, i) => i + 1)
 const mint = key(2)
+
+function payloadForBadEnum(name: 'MarketFinalized' | 'GameMarketCreated'): Buffer {
+  const sample =
+    name === 'MarketFinalized'
+      ? { game_market: key(1), market: key(2), outcome: 'Yes', finalized_at: 1n }
+      : {
+          game_market: key(1),
+          market: key(2),
+          market_id: 1n,
+          kind: 0,
+          end_ts: 1n,
+          seed_amount: 1n,
+          initial_price_bps: 5_000,
+        }
+  return Buffer.concat([
+    Buffer.from(HORAGON_EVENT_DISCRIMINATORS[name]),
+    encodeIdl(idl.types, { defined: { name } }, sample),
+  ])
+}
 
 // One sample per instruction: the SDK call and the same arguments in IDL (snake_case) form.
 const SAMPLES: Record<
@@ -189,6 +222,107 @@ describe('horagon IDL contract', () => {
     })
   }
 
+  it('update_config with all four options set matches the IDL oracle', () => {
+    const built = buildUpdateConfigIx({
+      admin: key(1),
+      attestor: key(3),
+      guardians: [key(5), key(6)],
+      disputeWindowSecs: 3_600,
+      creationPaused: false,
+    })
+    const ixDef = idl.instructions.find((i) => i.name === 'update_config')
+    if (!ixDef) throw new Error('update_config missing from the IDL')
+    const values: Record<string, unknown> = {
+      args: {
+        attestor: key(3),
+        guardians: [key(5), key(6)],
+        dispute_window_secs: 3_600,
+        creation_paused: false,
+      },
+    }
+    const expected = Buffer.concat(
+      ixDef.args.map((a) => encodeIdl(idl.types, a.type, values[a.name])),
+    )
+    expect(Buffer.from(built.data.subarray(8)).toString('hex')).toBe(expected.toString('hex'))
+  })
+
+  describe('account identity', () => {
+    // The key each IDL account name must hold for the SAMPLES inputs.
+    const signerOf: Record<string, PublicKey> = {
+      challenge: key(4),
+      halt: key(3),
+      propose_result: key(3),
+    }
+    function expectedKey(ixName: string, acc: IdlIx['accounts'][number]): PublicKey {
+      if (acc.address) return new PublicKey(acc.address)
+      const id = ixName === 'create_game_market' ? 0x1122_3344_5566_7788n : 7n
+      const a = marketAddresses(id)
+      const byName: Record<string, PublicKey | undefined> = {
+        signer: signerOf[ixName],
+        admin: key(1),
+        attestor: key(3),
+        config: deriveConfig(),
+        authority: a.authority,
+        game_market: a.gameMarket,
+        market: a.market,
+        collateral_mint: mint,
+        yes_mint: a.yesMint,
+        no_mint: a.noMint,
+        vault: a.vault,
+        yes_metadata: a.yesMetadata,
+        no_metadata: a.noMetadata,
+        treasury: deriveTreasury(mint),
+        lp_position: a.lpPosition,
+        authority_yes: a.authorityYes,
+        authority_no: a.authorityNo,
+        token_metadata_program: METAPLEX_PROGRAM_ID,
+        program_data: deriveProgramData(),
+        destination: key(9),
+      }
+      const k = byName[acc.name]
+      if (!k) throw new Error(`no expected key for ${ixName}.${acc.name}`)
+      return k
+    }
+    const expectedCache = new Map<string, PublicKey[]>()
+    const expectedKeys = (ixDef: IdlIx) => {
+      let keys = expectedCache.get(ixDef.name)
+      if (!keys) {
+        keys = ixDef.accounts.map((acc) => expectedKey(ixDef.name, acc))
+        expectedCache.set(ixDef.name, keys)
+      }
+      return keys
+    }
+    const mismatches = (ixDef: IdlIx, keys: TransactionInstruction['keys']) => {
+      const expected = expectedKeys(ixDef)
+      return ixDef.accounts.filter((_, i) => !keys[i]?.pubkey.equals(expected[i] as PublicKey))
+    }
+
+    for (const ixDef of idl.instructions) {
+      it(`${ixDef.name}: every account holds the key the IDL names`, () => {
+        const built = SAMPLES[ixDef.name]?.build()
+        if (!built) throw new Error(`no sample for ${ixDef.name}`)
+        expect(built.keys).toHaveLength(ixDef.accounts.length)
+        expect(mismatches(ixDef, built.keys).map((a) => a.name)).toEqual([])
+      })
+
+      it(`${ixDef.name}: swapping any two accounts is caught`, () => {
+        const built = SAMPLES[ixDef.name]?.build()
+        if (!built) throw new Error(`no sample for ${ixDef.name}`)
+        for (let i = 0; i < built.keys.length; i++) {
+          for (let j = i + 1; j < built.keys.length; j++) {
+            const keys = [...built.keys]
+            const a = keys[i]
+            const b = keys[j]
+            if (!a || !b || a.pubkey.equals(b.pubkey)) continue
+            keys[i] = b
+            keys[j] = a
+            expect(mismatches(ixDef, keys).length, `swap ${i}<->${j}`).toBeGreaterThan(0)
+          }
+        }
+      })
+    }
+  })
+
   it('puts every PDA the IDL declares at its account index, derived from the IDL seeds', () => {
     // `game_market.market_id` reads a field of the on-chain GameMarket; the sample's market id.
     const marketIdOf = (name: string) =>
@@ -294,6 +428,9 @@ describe('horagon IDL contract', () => {
         },
       ),
     ])
+    expect(gmBytes.subarray(GAME_MARKET_MARKET_OFFSET, GAME_MARKET_MARKET_OFFSET + 32)).toEqual(
+      Buffer.from(key(8).toBytes()),
+    )
     const gm = decodeGameMarket({ owner: HORAGON_PROGRAM_ID, data: gmBytes })
     expect(gm).toMatchObject({
       marketId: 42n,
@@ -341,6 +478,29 @@ describe('horagon IDL contract', () => {
     expect(Object.keys(HORAGON_EVENT_DISCRIMINATORS).sort()).toEqual(
       idl.events.map((e) => e.name).sort(),
     )
+    const expected: Record<string, Record<string, unknown>> = {
+      GameMarketCreated: {
+        gameMarket: key(1),
+        market: key(2),
+        marketId: 9n,
+        kind: 1,
+        endTs: 100,
+        seedAmount: 300_000_000n,
+        initialPriceBps: 5_000,
+      },
+      MarketHalted: { gameMarket: key(1), market: key(2), by: key(3), shares: 2n ** 70n + 5n },
+      ResultProposed: {
+        gameMarket: key(1),
+        market: key(2),
+        outcome: 'no',
+        evidenceHash: Buffer.from(hash),
+        proposer: key(3),
+        proposedAt: 200,
+      },
+      ResultChallenged: { gameMarket: key(1), market: key(2), by: key(4), challengeCount: 1 },
+      MarketFinalized: { gameMarket: key(1), market: key(2), outcome: 'yes', finalizedAt: 300 },
+      MarketRecycled: { gameMarket: key(1), market: key(2), recovered: 123n },
+    }
     for (const e of idl.events) {
       const name = e.name as keyof typeof HORAGON_EVENT_DISCRIMINATORS
       expect(HORAGON_EVENT_DISCRIMINATORS[name]).toEqual(e.discriminator)
@@ -348,17 +508,22 @@ describe('horagon IDL contract', () => {
         Buffer.from(e.discriminator),
         encodeIdl(idl.types, { defined: { name } }, samples[name]),
       ])
-      const decoded = decodeHoragonEvent(payload)
-      expect(decoded?.name).toBe(name)
-      expect(decoded && 'market' in decoded && decoded.market.equals(key(2))).toBe(true)
+      // Every field and the name; the decoder also rejects trailing and missing bytes.
+      expect(decodeHoragonEvent(payload)).toEqual({ name, ...expected[name] })
+      expect(() => decodeHoragonEvent(Buffer.concat([payload, Buffer.of(0)]))).toThrow(/trailing/)
+      expect(() => decodeHoragonEvent(payload.subarray(0, payload.length - 1))).toThrow(
+        HoragonError,
+      )
     }
-    const halted = decodeHoragonEvent(
-      Buffer.concat([
-        Buffer.from(HORAGON_EVENT_DISCRIMINATORS.MarketHalted),
-        encodeIdl(idl.types, { defined: { name: 'MarketHalted' } }, samples.MarketHalted),
-      ]),
-    )
-    expect(halted).toMatchObject({ name: 'MarketHalted', shares: 2n ** 70n + 5n })
+  })
+
+  it('rejects an event whose enum byte is out of range', () => {
+    const finalized = payloadForBadEnum('MarketFinalized')
+    finalized[8 + 64] = 2 // outcome byte, after two pubkeys
+    expect(() => decodeHoragonEvent(finalized)).toThrow(/unknown outcome/)
+    const created = payloadForBadEnum('GameMarketCreated')
+    created[8 + 64 + 8] = 2 // kind byte, after two pubkeys and market_id
+    expect(() => decodeHoragonEvent(created)).toThrow(/unknown market kind/)
   })
 
   it('lists the program errors in IDL order from 6000', () => {

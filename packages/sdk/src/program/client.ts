@@ -1,4 +1,10 @@
-import type { Connection, PublicKey, TransactionInstruction } from '@solana/web3.js'
+import {
+  type AccountInfo,
+  type Connection,
+  type PublicKey,
+  SystemProgram,
+  type TransactionInstruction,
+} from '@solana/web3.js'
 import { Buffer } from 'buffer'
 import { HoragonError } from '../errors'
 import { PM_AMM_PROGRAM_ID } from '../pm-amm/constants'
@@ -39,6 +45,10 @@ import {
   type MarketAddresses,
   marketAddresses,
 } from './pda'
+
+/** A pre-funded PDA (lamports sent to the predictable address) is not an account yet. */
+const isUnused = (info: AccountInfo<Uint8Array>) =>
+  info.owner.equals(SystemProgram.programId) && info.data.length === 0
 
 type Bound<T> = Omit<T, 'programId' | 'pmAmmProgramId' | 'collateralMint'>
 
@@ -116,7 +126,7 @@ export class HoragonProgram {
 
   async fetchConfig(connection: Connection): Promise<ConfigAccount | null> {
     const info = await connection.getAccountInfo(this.config, 'confirmed')
-    return info ? decodeConfig(info, this.programId) : null
+    return info && !isUnused(info) ? decodeConfig(info, this.programId) : null
   }
 
   async fetchGameMarket(
@@ -127,7 +137,7 @@ export class HoragonProgram {
       deriveGameMarket(marketId, this.programId),
       'confirmed',
     )
-    return info ? decodeGameMarket(info, this.programId) : null
+    return info && !isUnused(info) ? decodeGameMarket(info, this.programId) : null
   }
 
   /** Every GameMarket of this deployment (one getProgramAccounts with a discriminator filter). */

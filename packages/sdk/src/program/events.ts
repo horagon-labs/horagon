@@ -3,7 +3,9 @@
 // the same way, so a line counts only while `horagon` is the innermost running program.
 import type { PublicKey } from '@solana/web3.js'
 import { Buffer } from 'buffer'
+import { HoragonError } from '../errors'
 import type { Outcome } from '../schemas'
+import { readMarketKind, readOutcome } from './accounts'
 import { BorshReader } from './borsh'
 import { HORAGON_PROGRAM_ID } from './constants'
 
@@ -59,8 +61,6 @@ export type HoragonEvent =
     }
   | { name: 'MarketRecycled'; gameMarket: PublicKey; market: PublicKey; recovered: bigint }
 
-const outcome = (r: BorshReader): Outcome => (r.u8() === 0 ? 'yes' : 'no')
-
 const DECODERS: Record<
   keyof typeof HORAGON_EVENT_DISCRIMINATORS,
   (r: BorshReader) => HoragonEvent
@@ -70,7 +70,7 @@ const DECODERS: Record<
     gameMarket: r.pubkey(),
     market: r.pubkey(),
     marketId: r.u64(),
-    kind: r.u8() as 0 | 1,
+    kind: readMarketKind(r),
     endTs: Number(r.i64()),
     seedAmount: r.u64(),
     initialPriceBps: r.u16(),
@@ -86,7 +86,7 @@ const DECODERS: Record<
     name: 'ResultProposed',
     gameMarket: r.pubkey(),
     market: r.pubkey(),
-    outcome: outcome(r),
+    outcome: readOutcome(r),
     evidenceHash: r.fixed(32),
     proposer: r.pubkey(),
     proposedAt: Number(r.i64()),
@@ -102,7 +102,7 @@ const DECODERS: Record<
     name: 'MarketFinalized',
     gameMarket: r.pubkey(),
     market: r.pubkey(),
-    outcome: outcome(r),
+    outcome: readOutcome(r),
     finalizedAt: Number(r.i64()),
   }),
   MarketRecycled: (r) => ({
@@ -124,7 +124,14 @@ export function decodeHoragonEvent(payload: Uint8Array): HoragonEvent | undefine
     if (disc.every((b, i) => payload[i] === b)) {
       const r = new BorshReader(payload)
       r.fixed(8)
-      return DECODERS[name](r)
+      const event = DECODERS[name](r)
+      if (r.position !== payload.length) {
+        throw new HoragonError(
+          'INVALID_INPUT',
+          `${name} event has ${payload.length - r.position} trailing bytes`,
+        )
+      }
+      return event
     }
   }
   return undefined

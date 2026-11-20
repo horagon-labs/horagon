@@ -23,6 +23,20 @@ export type GameMarketStatus = (typeof GAME_MARKET_STATUSES)[number]
 
 const OUTCOMES: readonly Outcome[] = ['yes', 'no']
 
+/** Borsh `Outcome` byte, validated. */
+export function readOutcome(r: BorshReader): Outcome {
+  const o = OUTCOMES[r.u8()]
+  if (!o) throw new HoragonError('INVALID_INPUT', 'unknown outcome')
+  return o
+}
+
+/** Borsh market `kind` byte, validated. */
+export function readMarketKind(r: BorshReader): 0 | 1 {
+  const kind = r.u8()
+  if (kind > 1) throw new HoragonError('INVALID_INPUT', `unknown market kind ${kind}`)
+  return kind as 0 | 1
+}
+
 export interface ConfigAccount {
   admin: PublicKey
   attestor: PublicKey
@@ -100,8 +114,7 @@ export function decodeGameMarket(
   const r = reader(info, 'GameMarket', programId)
   const market = r.pubkey()
   const marketId = r.u64()
-  const kind = r.u8()
-  if (kind > 1) throw new HoragonError('INVALID_INPUT', `unknown market kind ${kind}`)
+  const kind = readMarketKind(r)
   const league = readAsciiField(r.fixed(8))
   const externalGameId = r.string()
   const home = readAsciiField(r.fixed(4))
@@ -112,15 +125,11 @@ export function decodeGameMarket(
   const statusIndex = r.u8()
   const status = GAME_MARKET_STATUSES[statusIndex]
   if (!status) throw new HoragonError('INVALID_INPUT', `unknown market status ${statusIndex}`)
-  const proposedOutcome = r.option((x) => {
-    const o = OUTCOMES[x.u8()]
-    if (!o) throw new HoragonError('INVALID_INPUT', 'unknown outcome')
-    return o
-  })
+  const proposedOutcome = r.option(readOutcome)
   return {
     market,
     marketId,
-    kind: kind as 0 | 1,
+    kind,
     league,
     externalGameId,
     home,
