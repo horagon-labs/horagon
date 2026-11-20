@@ -2,8 +2,9 @@
 // close is fixed when the market is created. This reads the game timelines that `end-ts:fetch`
 // wrote and measures, for each candidate close S + X (S = scheduled tip-off): how many games end
 // before it, how much of Q4 is tradable, and how many close games are still open in their last
-// minute. The checks are the premises of the S + 2h10m decision (spec 6.1); a run on newer games
-// that fails one means the decision needs another look.
+// minute. The checks are the premises of the S + 2h10m decision (spec 6.1) and of the feed-silent
+// watch that starts 30 min before it (spec 6.2); a run on newer games that fails one means the
+// decision needs another look.
 //
 //   pnpm --filter @horagon/spikes end-ts [path/to/espn-games-….json.gz]
 import { readdirSync, readFileSync } from 'node:fs'
@@ -24,6 +25,12 @@ import { runSpike, SpikeRun } from './lib/results'
 const CHOSEN_MIN = 130
 /** The next step up that the decision rejects. */
 const REJECTED_MIN = 140
+/**
+ * From here on, a silent feed alerts the guardian whatever quarter it last showed (spec 6.2;
+ * keeper feedSilentWatchSecs 1_800 before end_ts). It must come before any game reaches Q4: an
+ * outage that spans the start of Q4 would otherwise go unnoticed.
+ */
+const WATCH_MIN = CHOSEN_MIN - 30
 const OFFSETS_MIN = [115, 125, 130, 135, 140, 145, 150]
 
 const r1 = (x: number) => Math.round(x * 10) / 10
@@ -89,6 +96,8 @@ await runSpike(run, async () => {
   const n = games.length
   run.record('games', { used: n, overtime: stats.filter((s) => s.overtime).length })
   run.record('tipMinutesAfterS', spread(stats.map((s) => s.tipMin)))
+  const q4Starts = stats.flatMap((s) => (s.q4StartMin === null ? [] : [s.q4StartMin]))
+  run.record('q4StartMinutesAfterS', spread(q4Starts))
   run.record('endMinutesAfterS', spread(stats.map((s) => s.endMin)))
   run.record(
     'endMinutesAfterSRegulation',
@@ -153,6 +162,12 @@ await runSpike(run, async () => {
     'S + 2h10m: no game within 5 points is still open in its last minute',
     chosen.clutchOpen === 0,
     `${chosen.clutchOpen} games`,
+  )
+  const firstQ4 = quantile(q4Starts, 0)
+  run.check(
+    'S + 1h40m: no game has reached Q4 when the feed-silent watch starts',
+    q4Starts.length === n && firstQ4 > WATCH_MIN,
+    `${q4Starts.length} of ${n} games reach Q4, the first at S + ${r1(firstQ4)} min`,
   )
   run.check(
     'S + 2h20m: over 5% of games end before the close, so a later close is rejected',

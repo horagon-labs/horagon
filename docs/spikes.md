@@ -49,15 +49,15 @@ Note on solana: Anchor 1.2.2's avm shim switches the active Agave release from s
 
 ## Summary
 
-| Spike  | Question                                                                            | Result                                     | Result file                                                                                                                                               | Decision                                                                                                                   |
-| ------ | ----------------------------------------------------------------------------------- | ------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| S1     | Full pm-AMM lifecycle on devnet with the repo SDK?                                  | PASS                                       | `s1-devnet-2026-11-18T09-13-42-490Z.json`                                                                                                                 | No fallback needed (S1 has none). Keep `quoteSwap` and the swap fixture.                                                   |
-| S2     | Can another program's PDA be the market authority through CPI?                      | PASS (Surfpool; devnet unconfirmed)        | `s2-cpi-2026-11-18T18-29-55-177Z.json`                                                                                                                    | The program PDA is the market authority. Tier 1 opens with a devnet smoke (deploy, create, resolve; about 3 devnet SOL).   |
-| S3a    | Sponsored swap from a 0-SOL burner; disallowed transactions refused?                | PASS                                       | `s3a-sponsor-2026-11-18T09-30-55-777Z.json`                                                                                                               | Players are sponsored; no SOL drip.                                                                                        |
-| S3b    | Full lifecycle on a Surfpool fork of devnet, with a local mint and time travel?     | PASS                                       | `s3b-surfpool-2026-11-18T18-11-26-730Z.json`                                                                                                              | Surfpool is the local sandbox; `solana-test-validator` is not needed.                                                      |
-| S4     | NBA feeds reachable from a server; one real game recorded; reference odds usable?   | FAIL (NBA CDN blocked at every site tried) | `s4-probe-local-2026-11-18T09-40-20-758Z.json`<br>`s4-probe-github-actions-2026-11-18T10-13-07-656Z.json`<br>`s4-probe-vps-2026-11-19T05-21-29-979Z.json` | The second score source is ESPN plus guardian confirmation (see Decisions), and component C (reference prices) is dropped. |
-| S5     | pm-AMM faucet callable from a server, 1,000 mUSDC per wallet per hour?              | PASS                                       | `s5-faucet-2026-11-18T06-02-18-766Z.json`                                                                                                                 | No fallback needed: the seed is not lowered to 300 mUSDC.                                                                  |
-| end-ts | When should a winner market close, given that pm-AMM cannot pause or resolve early? | PASS                                       | `end-ts-2026-11-19T18-47-55-359Z.json`                                                                                                                    | `end_ts = S + 2h10m` (was S + 1h55m). A feed silent in Q4 or overtime alerts after 2 min and halts after 10.               |
+| Spike  | Question                                                                            | Result                                     | Result file                                                                                                                                               | Decision                                                                                                                                                   |
+| ------ | ----------------------------------------------------------------------------------- | ------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| S1     | Full pm-AMM lifecycle on devnet with the repo SDK?                                  | PASS                                       | `s1-devnet-2026-11-18T09-13-42-490Z.json`                                                                                                                 | No fallback needed (S1 has none). Keep `quoteSwap` and the swap fixture.                                                                                   |
+| S2     | Can another program's PDA be the market authority through CPI?                      | PASS (Surfpool; devnet unconfirmed)        | `s2-cpi-2026-11-18T18-29-55-177Z.json`                                                                                                                    | The program PDA is the market authority. Tier 1 opens with a devnet smoke (deploy, create, resolve; about 3 devnet SOL).                                   |
+| S3a    | Sponsored swap from a 0-SOL burner; disallowed transactions refused?                | PASS                                       | `s3a-sponsor-2026-11-18T09-30-55-777Z.json`                                                                                                               | Players are sponsored; no SOL drip.                                                                                                                        |
+| S3b    | Full lifecycle on a Surfpool fork of devnet, with a local mint and time travel?     | PASS                                       | `s3b-surfpool-2026-11-18T18-11-26-730Z.json`                                                                                                              | Surfpool is the local sandbox; `solana-test-validator` is not needed.                                                                                      |
+| S4     | NBA feeds reachable from a server; one real game recorded; reference odds usable?   | FAIL (NBA CDN blocked at every site tried) | `s4-probe-local-2026-11-18T09-40-20-758Z.json`<br>`s4-probe-github-actions-2026-11-18T10-13-07-656Z.json`<br>`s4-probe-vps-2026-11-19T05-21-29-979Z.json` | The second score source is ESPN plus guardian confirmation (see Decisions), and component C (reference prices) is dropped.                                 |
+| S5     | pm-AMM faucet callable from a server, 1,000 mUSDC per wallet per hour?              | PASS                                       | `s5-faucet-2026-11-18T06-02-18-766Z.json`                                                                                                                 | No fallback needed: the seed is not lowered to 300 mUSDC.                                                                                                  |
+| end-ts | When should a winner market close, given that pm-AMM cannot pause or resolve early? | PASS                                       | `end-ts-2026-11-19T23-52-58-477Z.json`                                                                                                                    | `end_ts = S + 2h10m` (was S + 1h55m). A feed silent in Q4 or overtime alerts after 2 min and halts after 10; from S + 1h40m any silence over 2 min alerts. |
 
 ## S1: pm-AMM lifecycle on devnet
 
@@ -215,8 +215,9 @@ scheduled tip-off), meant to come before the earliest time a game can end; on th
 night it closed every market in the third or early fourth quarter. This measurement replaces it.
 
 **Pass when**, over the measured games, at most 1% end before S + 2h10m, at least 80% have
-reached Q4 by then, no game within 5 points is still open in its last minute, over 5% would end
-before S + 2h20m, and at least 80% of those that do lead by 6 or more with 2:00 left in Q4.
+reached Q4 by then, no game within 5 points is still open in its last minute, no game has reached Q4 by S + 1h40m
+(when the feed-silent watch starts), over 5% would end before S + 2h20m, and at least 80% of those
+that do lead by 6 or more with 2:00 left in Q4.
 
 **Data.** `spikes/data/espn-games-2026-10-20-2026-11-18.json.gz` (440 KB) holds every completed
 regular-season game of 2026-10-20 to 2026-11-18 from ESPN's public scoreboard and summary JSON:
@@ -227,6 +228,7 @@ before S. That leaves 220 games, 12 with overtime.
 | Measure (minutes after S) | min   | p1    | p5    | median | p95   | max   |
 | ------------------------- | ----- | ----- | ----- | ------ | ----- | ----- |
 | Opening tip               | 2.2   | 9.3   | 10.3  | 11.1   | 15.7  | 24.1  |
+| Start of Q4               | 102.7 | 105.4 | 108.8 | 119    | 135.1 | 145.7 |
 | End of game               | 128.2 | 135.9 | 139.1 | 152.7  | 176.7 | 194.9 |
 | End of game, overtime     | 156.1 | 156.2 | 156.8 | 176.9  | 188.2 | 194.9 |
 
@@ -249,6 +251,11 @@ depend on which games happened to tip late. Medians use linear interpolation.
 - 16 of the 17 games that ended before S + 2h20m led by 6 or more with 2:00 left in Q4. The
   median final margin is 21 for games that ended before S + 2h20m and 8 for those that ended at
   S + 2h30m or later, so a game that ends early is usually decided well before it ends.
+- No game reached Q4 before S + 102.7 (DAL @ BOS again). The keeper halts on a feed silent in Q4
+  or overtime, but it knows the quarter only from the feed: an outage that starts in Q3 and runs
+  into Q4 leaves it reading Q3. So from S + 1h40m, 30 minutes before the close and before any
+  measured game reached Q4, a feed silent for 2 minutes alerts the guardian whatever quarter it
+  last showed. That alert never halts: the game may still be in Q3.
 - Q4 trades on thin liquidity: depth follows √(end_ts − t), so with 11 minutes to the close it is
   √(11 / 190) ≈ 24% of the depth at the open (S − 60 min).
 
@@ -260,7 +267,7 @@ showed Final 25 to 148 s after the End Game play, and had one 105 s stretch with
 - 2026-11-18: reference prices (component C) are dropped from the MVP, because Kalshi bars redisplay and scripted access and Polymarket's terms are unverified.
 - 2026-11-18: the second score source is option (c), ESPN plus guardian confirmation with a public box score URL: the keeper reads ESPN, and every propose needs the guardian to confirm it with such a URL. Option (b), a second box score API, may come later.
 - 2026-11-19: the Linux tools run on a rented Ubuntu host instead of WSL.
-- 2026-11-19: `end_ts = S + 2h10m` (was S + 1h55m), from end-ts. A game that ends before the close is halted on the first Final read; a feed silent in Q4 or overtime alerts the guardian after 2 min and halts the market after 10, because a halt cannot be undone.
+- 2026-11-19: `end_ts = S + 2h10m` (was S + 1h55m), from end-ts. A game that ends before the close is halted on the first Final read; a feed silent in Q4 or overtime alerts the guardian after 2 min and halts the market after 10, because a halt cannot be undone. From S + 1h40m, 30 min before the close, a feed silent for 2 min alerts whatever quarter it last showed (or if it has not been read since the keeper started), so an outage that spans the start of Q4 is not missed; this alert never halts.
 
 ## Input to the Tier 1 plan
 
@@ -301,7 +308,8 @@ Numbers and decisions the Tier 1 plan takes from here:
     must not reuse them for sponsored transactions. S1's unsponsored swaps ran at 1.4M.
 - Market close and halt timings (end-ts).
   - Answer: `endOffsetSecs` 7,800 (S + 2h10m), `feedSilentAlertSecs` 120, `feedSilentSecs` 600,
-    all in the keeper's `DEFAULT_TIMINGS` and changeable through `KEEPER_TIMINGS`. Re-run
+    `feedSilentWatchSecs` 1,800 (the watch starts 30 min before the close), all in the keeper's
+    `DEFAULT_TIMINGS` and changeable through `KEEPER_TIMINGS`. Re-run
     `end-ts` on newer games before moving the close; a failed check means the premise changed.
 
 ## Notes for Tier 1

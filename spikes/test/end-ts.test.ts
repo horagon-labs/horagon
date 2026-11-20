@@ -66,7 +66,7 @@ describe('game state', () => {
     expect(() => endPlay(game({ plays: [] }))).toThrow('no plays')
   })
 
-  it('reports tip, end and margin from S', () => {
+  it('reports tip, Q4 start, end and margin from S', () => {
     expect(gameStats(game())).toEqual({
       id: '401910007',
       date: '20261118',
@@ -74,9 +74,11 @@ describe('game state', () => {
       overtime: false,
       tipMin: 10,
       endMin: 150,
+      q4StartMin: 115,
       finalMargin: 2,
     })
     expect(gameStats(game({ periods: 5 })).overtime).toBe(true)
+    expect(gameStats(game({ plays: plays.slice(0, 3) })).q4StartMin).toBeNull()
   })
 
   it('flags a timeline that starts before the scheduled tip-off', () => {

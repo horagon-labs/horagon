@@ -318,7 +318,9 @@ sequenceDiagram
    - the game is postponed or canceled;
    - the game has not started 24 hours after S;
    - the feed goes silent for over 10 minutes in the fourth quarter or overtime. After 2 minutes
-     it only alerts the guardian, who can halt by hand, because a halt cannot be undone.
+     it only alerts the guardian, who can halt by hand, because a halt cannot be undone. In the
+     last 30 minutes before the close it alerts on 2 silent minutes whatever quarter the feed last
+     showed, so an outage that starts in the third quarter cannot hide the fourth.
 4. **After the final.** ESPN must report Final with the same score for at least 60 seconds.
    The keeper then drafts the result and its evidence JSON:
    - the score and the score of each period;

@@ -30,6 +30,8 @@ export interface GameStats {
   tipMin: number
   /** Minutes from S to the End Game play (or the last play). */
   endMin: number
+  /** Minutes from S to the first play of Q4, or null if the timeline never reaches it. */
+  q4StartMin: number | null
   /** Home minus away at the end. */
   finalMargin: number
 }
@@ -92,10 +94,14 @@ export function stateAt(g: GameTimeline, ms: number): Play | null {
 export const startsBeforeSchedule = (g: GameTimeline): boolean =>
   (g.plays[0]?.[0] ?? Number.POSITIVE_INFINITY) < scheduledMs(g)
 
+/** Wallclock of the first play of Q4 or later, in ESPN's order. */
+const q4StartMs = (g: GameTimeline): number | undefined => g.plays.find((p) => p[1] >= 4)?.[0]
+
 export function gameStats(g: GameTimeline): GameStats {
   const s = scheduledMs(g)
   const end = endPlay(g)
   const first = g.plays[0] as Play
+  const q4 = q4StartMs(g)
   return {
     id: g.id,
     date: g.date,
@@ -103,6 +109,7 @@ export function gameStats(g: GameTimeline): GameStats {
     overtime: g.periods > 4,
     tipMin: (first[0] - s) / MIN,
     endMin: (end[0] - s) / MIN,
+    q4StartMin: q4 === undefined ? null : (q4 - s) / MIN,
     finalMargin: end[3] - end[4],
   }
 }
@@ -129,7 +136,7 @@ export function offsetStats(games: readonly GameTimeline[], offsetMin: number): 
   for (const g of games) {
     const close = scheduledMs(g) + offsetMin * MIN
     const end = endPlay(g)[0]
-    const q4Start = g.plays.find((p) => p[1] >= 4)?.[0]
+    const q4Start = q4StartMs(g)
     q4Wall.push(q4Start === undefined ? 0 : Math.max(0, Math.min(close, end) - q4Start) / MIN)
     if (g.plays.some((p) => p[0] <= close && p[0] < end && isClutch(p))) clutch++
     if (end <= close) {
