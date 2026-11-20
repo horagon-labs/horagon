@@ -62,10 +62,21 @@
         "default": "./dist/pm-amm.cjs"
       }
     },
+    "./program": {
+      "import": {
+        "types": "./dist/program.d.ts",
+        "default": "./dist/program.js"
+      },
+      "require": {
+        "types": "./dist/program.d.cts",
+        "default": "./dist/program.cjs"
+      }
+    },
     "./package.json": "./package.json"
   },
   "files": [
     "dist",
+    "idl",
     "README.md"
   ],
   "scripts": {

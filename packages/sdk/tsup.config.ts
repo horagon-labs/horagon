@@ -7,6 +7,7 @@ export default defineConfig({
     model: 'src/model/index.ts',
     evidence: 'src/evidence/index.ts',
     'pm-amm': 'src/pm-amm/index.ts',
+    program: 'src/program/index.ts',
   },
   format: ['esm', 'cjs'],
   dts: true,
