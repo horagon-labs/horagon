@@ -10,6 +10,7 @@
 // ended (the signature and the block height when it ended unresolved).
 import {
   type Db,
+  type getDraft,
   getEvidence,
   getHeartbeat,
   heartbeat,
@@ -302,29 +303,114 @@ export async function chooseEvidence(
 
 /** A draft row to write, as `upsertDraft` takes it. */
 export type DraftInsert = Parameters<typeof upsertDraft>[1]
+type StoredDraft = NonNullable<Awaited<ReturnType<typeof getDraft>>>
+
+/** What the operator passed for the draft: a notice (postponed) or a box-score reading (final). */
+export type DraftWish =
+  | { gameId: string; status: 'postponed'; notice: string }
+  | {
+      gameId: string
+      status: 'final'
+      home: number
+      away: number
+      /** The guardian's own period scores, or null to use the keeper's draft. */
+      periods: Array<[number, number]> | null
+      /** The box-score URL. */
+      sourceUrl: string
+    }
 
 /**
- * `chooseEvidence`, then the writes it allows: the evidence (when `write`), then `newDraft` (a
- * draft this run built in memory; null when the stored one is used as it is), so that a refused
- * run changes nothing. The DB functions take a `Db`, not a transaction, so these are separate
- * writes: evidence first, because a draft written without its evidence would make a re-run with
- * the same inputs seal other evidence than the stored one, while evidence without its draft only
- * needs a re-run with `--replace-evidence` (nothing was sent yet). The caller records the
- * attempt after both.
+ * Which draft `propose` uses: the stored one (`newDraft` null) or a new one built from the
+ * operator's inputs (`newDraft` set, to be written only once the run is accepted); or an error
+ * before anything is written. A proposed draft is never replaced (`upsertDraft` would silently
+ * leave it), so it is refused. A re-run with the same reading keeps the stored draft and its
+ * time, so the evidence rebuilds to the same hash.
+ */
+export function nextDraft(
+  prior: StoredDraft | null,
+  wish: DraftWish,
+  now: Date,
+): { draft: StoredDraft | DraftInsert; newDraft: DraftInsert | null } {
+  const { gameId } = wish
+  if (prior?.state === 'proposed')
+    throw new Error(`${gameId}: no pending ${wish.status} draft to propose; run status`)
+  const fresh = (d: Omit<DraftInsert, 'gameId' | 'fetchedAt'>) => {
+    const draft: DraftInsert = { gameId, ...d, fetchedAt: now }
+    return { draft, newDraft: draft }
+  }
+  if (wish.status === 'postponed') {
+    // A postponed draft the keeper wrote keeps its ESPN source; otherwise the notice is the draft.
+    if (prior?.status === 'postponed' && prior.state === 'pending')
+      return { draft: prior, newDraft: null }
+    return fresh({
+      status: 'postponed',
+      homeScore: 0,
+      awayScore: 0,
+      periods: [],
+      sourceUrl: wish.notice,
+    })
+  }
+  const { home, away } = wish
+  let chosen: { draft: StoredDraft | DraftInsert; newDraft: DraftInsert | null }
+  if (wish.periods) {
+    // The guardian's own reading replaces ESPN's (after a challenge, or bad linescores).
+    const same =
+      prior?.state === 'pending' &&
+      prior.status === 'final' &&
+      prior.homeScore === home &&
+      prior.awayScore === away &&
+      prior.sourceUrl === wish.sourceUrl &&
+      JSON.stringify(prior.periods) === JSON.stringify(wish.periods)
+    chosen = same
+      ? { draft: prior, newDraft: null }
+      : fresh({
+          status: 'final',
+          homeScore: home,
+          awayScore: away,
+          periods: wish.periods,
+          sourceUrl: wish.sourceUrl,
+        })
+  } else {
+    if (prior?.state !== 'pending' || prior.status !== 'final')
+      throw new Error(`${gameId}: no pending draft (keeper writes one 60 s after a stable Final)`)
+    chosen = { draft: prior, newDraft: null }
+  }
+  if (chosen.draft.homeScore !== home || chosen.draft.awayScore !== away) {
+    throw new Error(
+      `box score ${home}-${away} differs from the draft ${chosen.draft.homeScore}-${chosen.draft.awayScore}: halt, check, then pass --periods`,
+    )
+  }
+  return chosen
+}
+
+/**
+ * `chooseEvidence`, then the writes it allows in ONE transaction: the evidence (when `write`),
+ * `newDraft` (a draft this run built in memory; null when the stored one is used as it is), and
+ * the propose record `record(sealed)` returns (null: none). A refused run writes nothing, and a
+ * failed write leaves none of the three. The transaction commits before the caller sends, so the
+ * record is on disk before the propose goes out. The pending check runs before it, outside the
+ * transaction, so no DB connection waits on the RPC.
  */
 export async function chooseAndStoreEvidence(
   db: Db,
-  p: Parameters<typeof chooseEvidence>[1] & { newDraft: DraftInsert | null },
+  p: Parameters<typeof chooseEvidence>[1] & {
+    newDraft: DraftInsert | null
+    record?: (sealed: SealedEvidence) => ProposeRecord | null
+  },
 ): Promise<EvidenceChoice> {
   const choice = await chooseEvidence(db, p)
-  if (choice.write) {
-    await putEvidence(db, {
-      gameId: p.gameId,
-      kind: 0,
-      json: choice.sealed.json,
-      hash: choice.sealed.hashHex,
-    })
-  }
-  if (p.newDraft) await upsertDraft(db, p.newDraft)
+  const record = p.record?.(choice.sealed) ?? null
+  await db.transaction(async (tx) => {
+    if (choice.write) {
+      await putEvidence(tx, {
+        gameId: p.gameId,
+        kind: 0,
+        json: choice.sealed.json,
+        hash: choice.sealed.hashHex,
+      })
+    }
+    if (p.newDraft) await upsertDraft(tx, p.newDraft)
+    if (record) await writeProposeRecord(tx, p.gameId, record)
+  })
   return choice
 }

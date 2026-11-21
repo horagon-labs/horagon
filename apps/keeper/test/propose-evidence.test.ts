@@ -18,6 +18,7 @@ import {
   confirmedAtOf,
   EvidenceRefusal,
   endAttempt,
+  nextDraft,
   type ProposeRecord,
   pendingAttempt,
   proposeRecordKey,
@@ -535,5 +536,160 @@ describe('chooseAndStoreEvidence', () => {
     expect(choice.write).toBe(true)
     expect((await getDraft(h.db, ID))?.fetchedAt).toEqual(changedDraft.fetchedAt)
     expect((await getEvidence(h.db, ID, 0))?.hash).toBe(choice.sealed.hashHex)
+  })
+})
+
+describe('chooseAndStoreEvidence transaction', () => {
+  const row = { gameId: ID, ...draft }
+  const base = {
+    gameId: ID,
+    seal: sealer(),
+    now: RERUN,
+    replace: false,
+    pending: nothingPending,
+  }
+  const record = (hash: string): ProposeRecord => ({
+    hash,
+    round: 0,
+    attempts: [{ at: 1, state: 'sending' }],
+  })
+
+  it('commits the evidence, the draft and the propose record together', async () => {
+    const choice = await chooseAndStoreEvidence(h.db, {
+      ...base,
+      newDraft: row,
+      record: (s) => record(s.hashHex),
+    })
+    expect((await getEvidence(h.db, ID, 0))?.hash).toBe(choice.sealed.hashHex)
+    expect(await getDraft(h.db, ID)).not.toBeNull()
+    expect(await readProposeRecord(h.db, ID)).toEqual(record(choice.sealed.hashHex))
+  })
+
+  it('a failing draft write rolls the evidence and the record back', async () => {
+    // A draft for a game that does not exist breaks the foreign key after the evidence is in.
+    await expect(
+      chooseAndStoreEvidence(h.db, {
+        ...base,
+        newDraft: { ...row, gameId: 'nba-000000000' },
+        record: (s) => record(s.hashHex),
+      }),
+    ).rejects.toThrow()
+    expect(await getEvidence(h.db, ID, 0)).toBeNull()
+    expect(await getDraft(h.db, ID)).toBeNull()
+    expect(await readProposeRecord(h.db, ID)).toBeNull()
+  })
+
+  it('a failing record write rolls the evidence and the draft back', async () => {
+    await expect(
+      chooseAndStoreEvidence(h.db, {
+        ...base,
+        newDraft: row,
+        // Not a JSON-able record: the heartbeat write throws.
+        record: () => ({ hash: 'aa', round: 0, attempts: [], bad: 1n }) as unknown as ProposeRecord,
+      }),
+    ).rejects.toThrow()
+    expect(await getEvidence(h.db, ID, 0)).toBeNull()
+    expect(await getDraft(h.db, ID)).toBeNull()
+    expect(await readProposeRecord(h.db, ID)).toBeNull()
+  })
+})
+
+describe('nextDraft', () => {
+  const NOW = new Date('2026-11-19T03:00:00.000Z')
+  const stored = (over: Record<string, unknown> = {}) =>
+    ({
+      gameId: ID,
+      ...draft,
+      state: 'pending',
+      alertedAt: null,
+      createdAt: new Date('2026-11-19T02:20:00Z'),
+      ...over,
+    }) as unknown as NonNullable<Awaited<ReturnType<typeof getDraft>>>
+  const finalWish = (over: Record<string, unknown> = {}) =>
+    ({
+      gameId: ID,
+      status: 'final' as const,
+      home: 111,
+      away: 106,
+      periods: null,
+      sourceUrl: BOX,
+      ...over,
+    }) as Parameters<typeof nextDraft>[1]
+  const postponed = {
+    gameId: ID,
+    status: 'postponed' as const,
+    notice: 'https://www.nba.com/news/postponed',
+  }
+
+  it('refuses a proposed draft for --postponed and for --periods', () => {
+    const proposed = stored({ state: 'proposed' })
+    expect(() => nextDraft(proposed, postponed, NOW)).toThrow(
+      `${ID}: no pending postponed draft to propose; run status`,
+    )
+    expect(() => nextDraft(proposed, finalWish({ periods: draft.periods }), NOW)).toThrow(
+      `${ID}: no pending final draft to propose; run status`,
+    )
+    expect(() => nextDraft(proposed, finalWish(), NOW)).toThrow('no pending final draft')
+  })
+
+  it('postponed: keeps a pending postponed draft, otherwise writes the notice as the draft', () => {
+    const keeper = stored({ status: 'postponed', homeScore: 0, awayScore: 0, periods: [] })
+    expect(nextDraft(keeper, postponed, NOW)).toEqual({ draft: keeper, newDraft: null })
+    for (const prior of [null, stored()]) {
+      const next = nextDraft(prior, postponed, NOW)
+      expect(next.newDraft).toEqual({
+        gameId: ID,
+        status: 'postponed',
+        homeScore: 0,
+        awayScore: 0,
+        periods: [],
+        sourceUrl: postponed.notice,
+        fetchedAt: NOW,
+      })
+      expect(next.draft).toBe(next.newDraft)
+    }
+  })
+
+  it('--periods: the same reading reuses the stored draft and its time, a new one is a new draft', () => {
+    const prior = stored({ sourceUrl: BOX })
+    const same = nextDraft(prior, finalWish({ periods: draft.periods }), NOW)
+    expect(same).toEqual({ draft: prior, newDraft: null })
+    const other = [draft.periods[1], draft.periods[0], ...draft.periods.slice(2)] as Array<
+      [number, number]
+    >
+    const newer = nextDraft(prior, finalWish({ periods: other }), NOW)
+    expect(newer.newDraft).toMatchObject({
+      gameId: ID,
+      status: 'final',
+      periods: other,
+      fetchedAt: NOW,
+    })
+    // Another URL, other scores, no draft, or a postponed one: all a new draft.
+    expect(
+      nextDraft(prior, finalWish({ periods: draft.periods, sourceUrl: `${BOX}?x` }), NOW).newDraft,
+    ).not.toBeNull()
+    expect(nextDraft(null, finalWish({ periods: draft.periods }), NOW).newDraft).not.toBeNull()
+    expect(
+      nextDraft(stored({ status: 'postponed' }), finalWish({ periods: draft.periods }), NOW)
+        .newDraft,
+    ).not.toBeNull()
+  })
+
+  it('without --periods: uses the pending final draft, or says there is none', () => {
+    const prior = stored()
+    expect(nextDraft(prior, finalWish(), NOW)).toEqual({ draft: prior, newDraft: null })
+    for (const bad of [null, stored({ status: 'postponed' })]) {
+      expect(() => nextDraft(bad, finalWish(), NOW)).toThrow(`${ID}: no pending draft (keeper`)
+    }
+  })
+
+  it('refuses a box score that differs from the draft in use', () => {
+    expect(() => nextDraft(stored(), finalWish({ home: 110 }), NOW)).toThrow(
+      'box score 110-106 differs from the draft 111-106: halt, check, then pass --periods',
+    )
+    // A new draft is built from the same scores, so --periods fixes it by being consistent.
+    expect(
+      nextDraft(stored(), finalWish({ home: 110, periods: draft.periods }), NOW).newDraft,
+    ).not.toBeNull()
   })
 })

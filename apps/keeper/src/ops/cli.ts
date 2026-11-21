@@ -62,8 +62,9 @@ import {
 import {
   type AttemptLookups,
   chooseAndStoreEvidence,
-  type DraftInsert,
+  type DraftWish,
   endAttempt,
+  nextDraft,
   type ProposeAttempt,
   pendingAttempt,
   proposeStatusLine,
@@ -241,93 +242,55 @@ async function propose(c: Ctx, gameId: string, a: ProposeArgs): Promise<void> {
       `${gameId}: proposing opens at end_ts ${new Date(gm.endTs * 1000).toISOString()}`,
     )
   }
-  // The draft this run proposes, built in memory. `newDraft` is written only once
+  // The draft this run proposes (nextDraft), built in memory. `newDraft` is written only once
   // `chooseAndStoreEvidence` accepts the run: a refused run leaves the stored draft, and the
   // evidence rebuilt from it, as they were.
   const prior = await getDraft(c.db, gameId)
-  let draft: NonNullable<typeof prior> | DraftInsert | null = prior
-  let newDraft: DraftInsert | null = null
   let confirmUrl: string
   let confirmSource: string
+  let wish: DraftWish
   if (a.status === 'postponed') {
     confirmUrl = a.notice
     confirmSource = 'notice'
-    // A postponed draft the keeper wrote keeps its ESPN source; otherwise the notice is the draft.
-    if (!(prior?.status === 'postponed' && prior.state === 'pending')) {
-      newDraft = {
-        gameId,
-        status: 'postponed',
-        homeScore: 0,
-        awayScore: 0,
-        periods: [],
-        sourceUrl: confirmUrl,
-        fetchedAt: new Date(),
-      }
-    }
+    wish = { gameId, status: 'postponed', notice: a.notice }
   } else {
-    const { box, home, away } = a
-    if (box.warning) console.warn(`warning: ${box.warning}`)
-    if (a.periods) {
-      // The guardian's own reading replaces ESPN's (after a challenge, or bad linescores). A
-      // re-run with the same reading keeps that draft and its time, so the evidence rebuilds to
-      // the same hash.
-      const same =
-        prior?.state === 'pending' &&
-        prior.status === 'final' &&
-        prior.homeScore === home &&
-        prior.awayScore === away &&
-        prior.sourceUrl === box.url &&
-        JSON.stringify(prior.periods) === JSON.stringify(a.periods)
-      // upsertDraft never overwrites a proposed draft: it stays, and is refused below.
-      if (!same && prior?.state !== 'proposed') {
-        newDraft = {
-          gameId,
-          status: 'final',
-          homeScore: home,
-          awayScore: away,
-          periods: a.periods,
-          sourceUrl: box.url,
-          fetchedAt: new Date(),
-        }
-      }
+    if (a.box.warning) console.warn(`warning: ${a.box.warning}`)
+    confirmUrl = a.box.url
+    confirmSource = a.box.source
+    wish = {
+      gameId,
+      status: 'final',
+      home: a.home,
+      away: a.away,
+      periods: a.periods,
+      sourceUrl: a.box.url,
     }
-    draft = newDraft ?? prior
-    if (!draft || (draft === prior && prior?.state !== 'pending') || draft.status !== 'final')
-      throw new Error(`${gameId}: no pending draft (keeper writes one 60 s after a stable Final)`)
-    if (draft.homeScore !== home || draft.awayScore !== away) {
-      throw new Error(
-        `box score ${home}-${away} differs from the draft ${draft.homeScore}-${draft.awayScore}: halt, check, then pass --periods`,
-      )
-    }
-    confirmUrl = box.url
-    confirmSource = box.source
   }
-  draft = newDraft ?? prior
-  // upsertDraft never overwrites a proposed draft: never propose one by accident.
-  if (!draft || (draft === prior && prior?.state !== 'pending') || draft.status !== status)
-    throw new Error(`${gameId}: no pending ${status} draft to propose; run status`)
-  const sealDraft = draft
+  const { draft, newDraft } = nextDraft(prior, wish, new Date())
   const round = gm.challengeCount
   const record = await readProposeRecord(c.db, gameId)
   const startedAt = Math.floor(Date.now() / 1000)
-  // A re-run sends the evidence already stored, or refuses (propose-evidence.ts).
+  let started: ReturnType<typeof startAttempt> | undefined
+  // A re-run sends the evidence already stored, or refuses (propose-evidence.ts). Evidence,
+  // draft and the attempt's record commit together, before the send: a later --replace-evidence
+  // must know the attempt may land, and the hash on chain must be fetchable.
   const { sealed, write } = await chooseAndStoreEvidence(c.db, {
     gameId,
     newDraft,
     seal: (confirmedAt) =>
-      sealEvidence(
-        buildEvidence({ game, draft: sealDraft, kind: 0, confirmUrl, confirmSource, confirmedAt }),
-      ),
+      sealEvidence(buildEvidence({ game, draft, kind: 0, confirmUrl, confirmSource, confirmedAt })),
     now: new Date(),
     replace: a.replace,
     pending: () => pendingAttempt(record, round, attemptLookups(c.connection), startedAt),
+    record: (s) => {
+      started = startAttempt(record, s.hashHex, round, startedAt)
+      return started.record
+    },
   })
-  // The evidence was published before the propose: the hash on chain must be fetchable.
+  if (!started) throw new Error('internal: the propose record was not built')
+  const attempt = started
   if (!write)
     console.log(`sending the evidence an earlier propose stored (sha256 ${sealed.hashHex})`)
-  // Recorded before it is sent: a later --replace-evidence must know it may land.
-  const attempt = startAttempt(record, sealed.hashHex, round, startedAt)
-  await writeProposeRecord(c.db, gameId, attempt.record)
   const ended = async (end: Omit<ProposeAttempt, 'at' | 'ended'>) => {
     const last = endAttempt(attempt.record, attempt.index, {
       ...end,
