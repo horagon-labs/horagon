@@ -19,12 +19,17 @@ originals stay on your machine: a remote build host (`docs/dev-setup.md`, "Worki
 Linux host") gets a copy of the deployer only for the command that signs with it, removed when
 that command ends. The attestor is the one exception: it lives on the VPS.
 
-| File            | Role                                                                                                                                   | Lives on                                      | Needs                                     |
-| --------------- | -------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------- | ----------------------------------------- |
-| `deployer.json` | Admin: program upgrade authority, `initialize_config`, `update_config`, `withdraw_treasury`; `horagon-ops` admin commands sign with it | your machine                                  | ~3 SOL for the first deploy, then little  |
-| `attestor.json` | Keeper signer: `create_game_market`, `halt`, `propose_result`; also the keeper wallet that claims the faucet and fills the treasury    | the VPS (`~/horagon/.keys/`) and nowhere else | ≥ 0.2 SOL (below it, `sol-keeper` alerts) |
-| `guardian.json` | Guardian 1: `challenge`, `propose_result`, `halt`; `horagon-ops` guardian commands sign with it                                        | your machine                                  | ~0.05 SOL                                 |
-| `sponsor.json`  | Pays fees and token-account rent of player transactions                                                                                | Vercel env `SPONSOR_SECRET_KEY`               | 1–2 SOL, topped up by hand                |
+| File            | Role                                                                                                                                   | Lives on                                           | Needs                                     |
+| --------------- | -------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- | ----------------------------------------- |
+| `deployer.json` | Admin: program upgrade authority, `initialize_config`, `update_config`, `withdraw_treasury`; `horagon-ops` admin commands sign with it | your machine                                       | ~3 SOL for the first deploy, then little  |
+| `attestor.json` | Keeper signer: `create_game_market`, `halt`, `propose_result`; also the keeper wallet that claims the faucet and fills the treasury    | the VPS (`~/horagon/.keys/`) and nowhere else      | ≥ 0.2 SOL (below it, `sol-keeper` alerts) |
+| `guardian.json` | Guardian 1: `challenge`, `propose_result`, `halt`; `horagon-ops` guardian commands sign with it                                        | your machine                                       | ~0.05 SOL                                 |
+| `sponsor.json`  | Pays fees and token-account rent of player transactions                                                                                | Vercel env `SPONSOR_SECRET_KEY` (local: see below) | 1–2 SOL, topped up by hand                |
+
+Local runs only: instead of `SPONSOR_SECRET_KEY`, set `SPONSOR_KEYPAIR` to the **absolute**
+path of the keypair file (for example `$PWD/.keys/sponsor.json` from the repo root). The web
+server runs in `apps/web`, so a relative path is refused. When `SPONSOR_SECRET_KEY` is set it
+wins and the file is not read. Vercel uses `SPONSOR_SECRET_KEY` only.
 
 The Authority PDA pays the rent of every market (0.03538 SOL each; the keeper budgets 0.036):
 fund it with `horagon-ops fund-authority <sol>` (signs with `deployer.json`, at most 10 SOL a

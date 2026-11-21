@@ -6,7 +6,7 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       include: ['src/**/*.ts'],
-      exclude: ['src/migrate-cli.ts'],
+      exclude: ['src/migrate-cli.ts', 'src/reset-e2e-cli.ts'],
       thresholds: { lines: 70 },
     },
   },

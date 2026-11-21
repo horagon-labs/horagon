@@ -1,7 +1,10 @@
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import type { Db } from '@horagon/db'
 import { Keypair } from '@solana/web3.js'
 import bs58 from 'bs58'
-import { describe, expect, it } from 'vitest'
+import { afterAll, describe, expect, it } from 'vitest'
 import { assertNotMainnet, depsFromEnv, parseSecretKey } from '../src/config'
 
 describe('parseSecretKey', () => {
@@ -63,6 +66,61 @@ describe('depsFromEnv', () => {
     })
     expect(thrown({ ...base, HORAGON_CLUSTER: 'testnet' })).toMatchObject({
       code: 'MAINNET_DISABLED',
+    })
+  })
+
+  describe('SPONSOR_KEYPAIR', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'horagon-sponsor-'))
+    afterAll(() => rmSync(dir, { recursive: true, force: true }))
+    const file = (name: string, text: string) => {
+      const p = join(dir, name)
+      writeFileSync(p, text)
+      return p
+    }
+
+    it('reads the keypair from an absolute path', () => {
+      const kp = Keypair.generate()
+      const path = file('ok.json', JSON.stringify([...kp.secretKey]))
+      const deps = depsFromEnv({ ...base, SPONSOR_KEYPAIR: path }, db)
+      expect(deps.sponsor?.keypair.publicKey).toEqual(kp.publicKey)
+    })
+
+    it('lets SPONSOR_SECRET_KEY win without reading the file', () => {
+      const kp = Keypair.generate()
+      const deps = depsFromEnv(
+        {
+          ...base,
+          SPONSOR_SECRET_KEY: bs58.encode(kp.secretKey),
+          SPONSOR_KEYPAIR: join(dir, 'does-not-exist.json'),
+        },
+        db,
+      )
+      expect(deps.sponsor?.keypair.publicKey).toEqual(kp.publicKey)
+    })
+
+    it('names the variable for a missing file', () => {
+      const path = join(dir, 'missing.json')
+      expect(thrown({ ...base, SPONSOR_KEYPAIR: path }).message).toBe(
+        `SPONSOR_KEYPAIR: cannot read the keypair file at ${path}`,
+      )
+    })
+
+    it('rejects a file of the wrong length or not JSON, without quoting it', () => {
+      const short = file('short.json', JSON.stringify([...Keypair.generate().secretKey].slice(1)))
+      const notJson = file('bad.json', 'top-secret-looking-text')
+      for (const path of [short, notJson]) {
+        const err = thrown({ ...base, SPONSOR_KEYPAIR: path })
+        expect(err.message).toBe(
+          `SPONSOR_KEYPAIR: ${path} is not a Solana keypair file (a JSON array of 64 bytes)`,
+        )
+        expect(err.message).not.toContain('top-secret')
+      }
+    })
+
+    it('rejects a relative path', () => {
+      expect(thrown({ ...base, SPONSOR_KEYPAIR: '.keys/sponsor.json' }).message).toBe(
+        'SPONSOR_KEYPAIR must be an absolute path',
+      )
     })
   })
 

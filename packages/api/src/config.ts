@@ -1,9 +1,12 @@
 // Environment -> ApiDeps. Read once per process; every variable is listed in .env.example.
+import { readFileSync } from 'node:fs'
+import { isAbsolute } from 'node:path'
 import { connectPostgres, type Db } from '@horagon/db'
 import { DEVNET_MUSDC_MINT, HoragonError, HoragonProgram } from '@horagon/sdk'
 import { Connection, Keypair, PublicKey } from '@solana/web3.js'
 import bs58 from 'bs58'
 import pino from 'pino'
+import { z } from 'zod'
 import type { ApiDeps } from './deps'
 import { pmAmmFaucet } from './faucet'
 
@@ -17,6 +20,28 @@ export function parseSecretKey(value: string): Keypair {
     return Keypair.fromSecretKey(bytes)
   } catch {
     throw new Error('Not a valid secret key: expected base58 or a JSON array of 64 bytes')
+  }
+}
+
+/**
+ * A Solana CLI keypair file: a JSON array of 64 bytes (same contract as the keeper's
+ * `loadKeypair`). Errors name the variable and the path, never the content (JSON.parse quotes
+ * the input it fails on). The path must be absolute: the web server runs with its working
+ * directory in `apps/web`, so a relative path would be read from the wrong place.
+ */
+export function loadKeypairFile(name: string, path: string): Keypair {
+  if (!isAbsolute(path)) throw new Error(`${name} must be an absolute path`)
+  let text: string
+  try {
+    text = readFileSync(path, 'utf8')
+  } catch {
+    throw new Error(`${name}: cannot read the keypair file at ${path}`)
+  }
+  try {
+    const bytes = z.array(z.number().int().min(0).max(255)).length(64).parse(JSON.parse(text))
+    return Keypair.fromSecretKey(Uint8Array.from(bytes))
+  } catch {
+    throw new Error(`${name}: ${path} is not a Solana keypair file (a JSON array of 64 bytes)`)
   }
 }
 
@@ -76,17 +101,24 @@ export function depsFromEnv(env: Record<string, string | undefined>, db?: Db): A
     throw new HoragonError('MAINNET_DISABLED', `cluster must be devnet or localnet, got ${cluster}`)
   }
   const collateralMint = new PublicKey(env.HORAGON_COLLATERAL_MINT ?? DEVNET_MUSDC_MINT.toBase58())
+  // SPONSOR_SECRET_KEY (how Vercel sets it) wins; SPONSOR_KEYPAIR (a file path) is for local
+  // runs and is not read at all when the secret is set.
   const sponsorKey = env.SPONSOR_SECRET_KEY
+  const sponsorKeypair = sponsorKey
+    ? parseSecretKey(sponsorKey)
+    : env.SPONSOR_KEYPAIR
+      ? loadKeypairFile('SPONSOR_KEYPAIR', env.SPONSOR_KEYPAIR)
+      : undefined
   return {
     db: db ?? connectPostgres(need('DATABASE_URL')).db,
     connection: new Connection(rpcUrl, 'confirmed'),
     cluster,
     program: new HoragonProgram({ collateralMint }),
     collateralMint,
-    ...(sponsorKey
+    ...(sponsorKeypair
       ? {
           sponsor: {
-            keypair: parseSecretKey(sponsorKey),
+            keypair: sponsorKeypair,
             dailyCapLamports: solAmount(env, 'SPONSOR_DAILY_CAP_SOL', 2),
             txPerHour: wholeNumber(env, 'SPONSOR_TX_PER_HOUR', 30, 1),
             // 0 is allowed: the sponsor then opens no new token accounts (RATE_LIMITED).
