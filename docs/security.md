@@ -101,20 +101,32 @@ again.
 - `GHSA-g7r4-m6w7-qqqr` (esbuild 0.27.7, via tsup; osv-scanner only): a devDependency of
   `packages/sdk` and its vendored pm-AMM SDK, used by the build only. The keeper runs on tsx with
   esbuild 0.28.2, which has no advisory.
+- `GHSA-w5hq-g745-h8pq` (uuid 8.3.2, via `jayson` in `@solana/web3.js`; osv-scanner only):
+  moderate. `v3()`, `v5()` and `v6()` skip the bounds check on an output buffer the caller
+  passes (fixed in 11.1.1). jayson 4.3.0 is its only dependent and calls only `v4()`, with no
+  arguments; no Horagon source imports uuid.
+- `GHSA-528h-pc64-c93x` (stream-json 1.9.1, via `jayson`; osv-scanner only): moderate. The
+  `pick`, `ignore`, `filter` and `replace` path filters take O(depth²) time (fixed in 3.5.0).
+- `GHSA-hqr4-qq8f-hg3x` (stream-json 1.9.1; osv-scanner only): moderate. The JSONC parser and
+  the verifier re-scan a comment on every chunk (fixed in 3.6.0).
+- `GHSA-mjw6-4jj6-33hc` (stream-json 1.9.1; osv-scanner only): moderate. The Assembler allows
+  prototype pollution through a `__proto__` key (fixed in 3.6.0).
+
+  For all three: jayson 4.3.0 is stream-json's only dependent and requires it only in
+  `lib/utils.js`. Every build of `@solana/web3.js` (Node, browser, React Native) loads
+  `jayson/lib/client/browser`, which requires only `uuid` and `lib/generateRequest.js`, and
+  that requires only `uuid`; no Horagon source imports stream-json.
+- `RUSTSEC-2025-0141` (bincode 1.3.3; osv-scanner only): informational, unmaintained, no
+  vulnerability. Its maintainers stopped development and call 1.3.3 complete. It comes in
+  through `anchor-lang` 1.2.2 and the Solana crates (`solana-instruction`, `solana-sysvar`,
+  `solana-zk-sdk`); the program never uses it directly.
+
+The uuid and stream-json advisories are not in `ignoreGhsas` on purpose: they are moderate, and
+`pnpm audit` fails only on high or critical. They are accepted rather than fixed because each
+fix is a major version of a transitive dependency of `@solana/web3.js` 1.x, which an override
+could break.
 
 Review this list whenever a dependency is upgraded.
-
-## Open advisories (not accepted)
-
-osv-scanner also reports these, and the `security` job fails on them until each is fixed or
-accepted with a reason:
-
-- `GHSA-w5hq-g745-h8pq` (uuid 8.3.2, via `jayson` in `@solana/web3.js`; production in
-  `apps/web`, `packages/api` and `apps/keeper`). web3.js loads `jayson/lib/client/browser`,
-  which calls `uuid.v4()` for request ids.
-- `GHSA-528h-pc64-c93x`, `GHSA-hqr4-qq8f-hg3x`, `GHSA-mjw6-4jj6-33hc` (stream-json 1.9.1, via
-  `jayson`; production in the same three). `jayson/lib/client/browser` does not load it.
-- `RUSTSEC-2025-0141` (bincode 1.3.3, via `anchor-lang` and the Solana crates of the program).
 
 ## Not yet covered (later tiers)
 
