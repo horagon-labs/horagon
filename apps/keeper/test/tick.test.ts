@@ -5,6 +5,7 @@ import {
   getGame,
   listOps,
   listSnapshots,
+  putEvidence,
   setDraftState,
   setFeatured,
   updateMarket,
@@ -714,6 +715,47 @@ describe('settlement', () => {
     expect(await keeper.tick()).toEqual([])
     expect((await listOps(h.db)).map((o) => o.action)).toEqual(['recycle', 'finalize', 'create'])
     expect(logs).toEqual([])
+  })
+})
+
+describe('the evidence on chain', () => {
+  const GAME = 'nba-401910007'
+  const P = END + 600
+  const mismatches = () => alerts.filter(([k]) => k.startsWith('evidence-mismatch:'))
+
+  /** A proposal with evidence 0xab… lands; the stored evidence row has `stored` (or none). */
+  async function landed(stored: string | null): Promise<void> {
+    expect(types(await keeper.tick())).toEqual(['create'])
+    if (stored) await putEvidence(h.db, { gameId: GAME, kind: 0, json: '{}', hash: stored })
+    settled = { outcome: 0, evidence: new Uint8Array(32).fill(0xab), proposedAt: P }
+    accounts.set(gm, account(gameMarketBytes(marketId, STATUS.proposed, settled)))
+    now = P + 5
+    expect(types(await keeper.tick())).toEqual(['sync'])
+  }
+
+  it('alerts when the stored evidence is not the one on chain, with both hashes', async () => {
+    await landed('cd'.repeat(32))
+    expect(mismatches().map(([k]) => k)).toEqual([`evidence-mismatch:${GAME}`])
+    const text = mismatches()[0]?.[1] ?? ''
+    expect(text).toContain(`sha256 ${'ab'.repeat(32)} on chain`)
+    expect(text).toContain(`serves sha256 ${'cd'.repeat(32)}`)
+    // Read on a sync only: the next ticks neither read nor alert again.
+    now += 5
+    expect(await keeper.tick()).toEqual([])
+    expect(mismatches()).toHaveLength(1)
+  })
+
+  it('alerts when nothing is stored for the hash on chain', async () => {
+    await landed(null)
+    expect(mismatches()).toHaveLength(1)
+    expect(mismatches()[0]?.[1]).toContain('serves no evidence')
+  })
+
+  it('stays quiet when the hashes match, through the finalize as well', async () => {
+    await landed('ab'.repeat(32))
+    now = P + 900
+    expect(types(await keeper.tick())).toEqual(['finalize'])
+    expect(mismatches()).toEqual([])
   })
 })
 

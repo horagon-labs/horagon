@@ -43,6 +43,7 @@ describe('personAlertWindow', () => {
       'archive',
       'tick-failing',
       'index-failing',
+      'evidence-mismatch:nba-1',
     ]) {
       expect(personAlertWindow(key), key).toBe(PERSON_ALERT_SECS)
     }

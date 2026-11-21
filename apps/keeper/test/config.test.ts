@@ -20,6 +20,7 @@ import {
   REPO_DIR,
   resolveKeyPath,
   rpcEndpoints,
+  telegramSettings,
   timeoutFetch,
   verifyCluster,
 } from '../src/config'
@@ -160,21 +161,26 @@ describe('assertCluster', () => {
     expect(isClusterRefusal(err)).toBe(false)
   })
 
-  it('verifyCluster waits out RPC failures on every connection but never a refusal', async () => {
+  it('verifyCluster waits out a primary that does not answer, but never a refusal', async () => {
     const sleeps: number[] = []
     const sleep = async (ms: number) => void sleeps.push(ms)
     let n = 0
     const flaky = {
       async getGenesisHash() {
         n++
-        if (n <= 3) throw new Error('fetch failed')
+        if (n <= 5) throw new Error('fetch failed')
         return DEVNET_GENESIS_HASH
       },
     }
     const ok = rpc(DEVNET_GENESIS_HASH)
-    await verifyCluster([ok.conn, flaky], 'devnet', { log: silent, sleep, maxDelayMs: 12_000 })
+    const verified = await verifyCluster([flaky, ok.conn], 'devnet', {
+      log: silent,
+      sleep,
+      maxDelayMs: 30_000,
+    })
+    expect(verified).toEqual([flaky, ok.conn])
     expect(ok.calls.n).toBe(1)
-    expect(sleeps).toEqual([5_000, 10_000, 12_000])
+    expect(sleeps).toEqual([5_000, 10_000, 20_000, 30_000, 30_000])
 
     sleeps.length = 0
     const refused = verifyCluster([ok.conn, rpc(MAINNET_GENESIS_HASH).conn], 'devnet', {
@@ -183,6 +189,52 @@ describe('assertCluster', () => {
     })
     await expect(refused).rejects.toThrow(HoragonError)
     expect(sleeps).toEqual([])
+  })
+
+  it('verifyCluster starts without a backup that fails 3 tries, and says so', async () => {
+    const sleeps: number[] = []
+    const sleep = async (ms: number) => void sleeps.push(ms)
+    const lines: Array<Record<string, unknown>> = []
+    const log = pino({ level: 'warn' }, { write: (l: string) => void lines.push(JSON.parse(l)) })
+    const down: Array<[number, string]> = []
+    const dead = rpc(new Error('connect ECONNREFUSED https://backup.example/?api-key=SECRET'))
+    const ok = rpc(DEVNET_GENESIS_HASH)
+    const verified = await verifyCluster([ok.conn, dead.conn], 'devnet', {
+      log,
+      sleep,
+      onBackupDown: async (i, error) => void down.push([i, error]),
+    })
+    // Never used unverified: only the primary comes back.
+    expect(verified).toEqual([ok.conn])
+    expect(dead.calls.n).toBe(3)
+    expect(sleeps).toEqual([5_000, 10_000])
+    expect(down).toHaveLength(1)
+    expect(down[0]?.[0]).toBe(1)
+    expect(down[0]?.[1]).toContain('ECONNREFUSED')
+    expect(lines.at(-1)).toMatchObject({ level: 40, rpc: 1, tries: 3 })
+    expect(JSON.stringify([lines, down])).not.toContain('SECRET')
+
+    // A backup that answers within its tries is kept; one that is refused still throws.
+    let m = 0
+    const slow = {
+      async getGenesisHash() {
+        m++
+        if (m <= 2) throw new Error('fetch failed')
+        return DEVNET_GENESIS_HASH
+      },
+    }
+    expect(await verifyCluster([ok.conn, slow], 'devnet', { log: silent, sleep })).toEqual([
+      ok.conn,
+      slow,
+    ])
+    const wrong = rpc('4uhcVJyU9pJkvQyS88uRDiswHXSCkY3zQawwpjk2NsNY')
+    await expect(
+      verifyCluster([ok.conn, wrong.conn], 'devnet', {
+        log: silent,
+        sleep,
+        onBackupDown: async () => {},
+      }),
+    ).rejects.toThrow(ClusterMismatch)
   })
 })
 
@@ -387,6 +439,31 @@ describe('loadConfig', () => {
     expect(c.sponsor?.toBase58()).toBe(sponsor)
     expect(() => loadConfig(env({ TELEGRAM_BOT_TOKEN: 'T' }))).toThrow('TELEGRAM_CHAT_ID')
     expect(() => loadConfig(env({ SPONSOR_PUBKEY: 'not-a-key' }))).toThrow('SPONSOR_PUBKEY')
+  })
+
+  it('telegramSettings takes both or neither, never echoing a value', () => {
+    expect(telegramSettings({})).toBeNull()
+    expect(telegramSettings({ TELEGRAM_BOT_TOKEN: '', TELEGRAM_CHAT_ID: '' })).toBeNull()
+    expect(telegramSettings({ TELEGRAM_BOT_TOKEN: 'T0K', TELEGRAM_CHAT_ID: '42' })).toEqual({
+      token: 'T0K',
+      chatId: '42',
+    })
+    for (const half of [
+      { TELEGRAM_BOT_TOKEN: 'T0K' },
+      { TELEGRAM_CHAT_ID: '4242' },
+      { TELEGRAM_BOT_TOKEN: 'T0K', TELEGRAM_CHAT_ID: '' },
+    ]) {
+      const err = (() => {
+        try {
+          telegramSettings(half)
+        } catch (e) {
+          return e as Error
+        }
+        return null
+      })()
+      expect(err?.message).toBe('TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID must be set together')
+      expect(err?.message).not.toMatch(/T0K|4242/)
+    }
   })
 })
 

@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # Ships the committed HEAD to the VPS and restarts the keeper. Needs no git remote: the tree
-# goes over ssh as a tarball. Run from the repo root in Git Bash: bash ops/deploy-keeper.sh
+# goes over ssh as a tarball. Run it in Git Bash from anywhere in the repo (it moves to the
+# root first): bash ops/deploy-keeper.sh
 # Keys and .env.keeper stay on the VPS; this script never copies them.
 set -euo pipefail
+cd "$(git rev-parse --show-toplevel)"
 
 HOST="${HORAGON_VPS:-horagon-vps}"
 REV="$(git rev-parse --short HEAD)"

@@ -9,6 +9,7 @@ import {
   noticeUrl,
   opsErrorReport,
   publicKeyArg,
+  signatureIn,
   stripArgSeparator,
 } from '../src/ops/args'
 
@@ -106,6 +107,13 @@ describe('disputeWindowArg and publicKeyArg', () => {
     expect(publicKeyArg('--guardian', key.toBase58()).equals(key)).toBe(true)
     expect(() => publicKeyArg('--guardian', 'nope')).toThrow('--guardian is not a public key')
     expect(() => publicKeyArg('--guardian', undefined)).toThrow('--guardian is not a public key')
+  })
+})
+
+describe('signatureIn', () => {
+  it('finds the signature in an unresolved message, or nothing', () => {
+    expect(signatureIn(`propose nba-1: unresolved after 90 s, ${SIG} may still land`)).toBe(SIG)
+    expect(signatureIn('propose nba-1: gave up after 5 attempts: fetch failed')).toBeUndefined()
   })
 })
 

@@ -1,20 +1,11 @@
 #!/usr/bin/env -S npx tsx
-// `horagon-ops`: the commands a person runs (spec 13, 16). Guardian commands sign with
-// `.keys/guardian.json`, admin commands with the upgrade authority `.keys/deployer.json`;
-// `--keypair <path>` picks another file. Relative key paths resolve from the repo root.
-//   horagon-ops status [--date 2026-11-24]
-//   horagon-ops propose <gameId> --box-score <url> --score <home>-<away> [--periods 30-25,...]
-//   horagon-ops propose <gameId> --postponed --notice <url>
-//   horagon-ops challenge <gameId>
-//   horagon-ops halt <gameId>
-//   horagon-ops featured <gameDate> <gameId>...
-//   horagon-ops init-config --guardian <pubkey> [--guardian2 <pubkey>] [--window 900]
-//   horagon-ops pause | resume
-//   horagon-ops fund-authority <sol>
-//   horagon-ops team <pubkey>...
-//   horagon-ops watchdog
-// Every command that connects to an RPC checks its cluster first (never mainnet). A send that
-// ends unresolved is reported as unknown (exit 3) and never retried here: run `status` first.
+// `horagon-ops`: the commands a person runs (spec 13, 16); `horagon-ops help` prints USAGE.
+// Guardian commands sign with `.keys/guardian.json`, admin commands with the upgrade authority
+// `.keys/deployer.json`; `--keypair <path>` picks another file. Relative key paths resolve from
+// the repo root. Every command that connects to an RPC checks its cluster first (never
+// mainnet). A send that ends unresolved is reported as unknown (exit 3) and never retried
+// here: run `status` first. A `propose` re-run sends the evidence the earlier one stored, or
+// refuses (propose-evidence.ts).
 import { parseArgs } from 'node:util'
 import {
   connectPostgres,
@@ -52,26 +43,54 @@ import {
   makeConnection,
   resolveKeyPath,
   rpcEndpoints,
+  telegramSettings,
 } from '../config'
-import { buildEvidence, sealEvidence } from '../evidence'
-import { TxSender } from '../executor'
+import { buildEvidence, type SealedEvidence, sealEvidence } from '../evidence'
+import { ProgramFailure, type SendResult, TxSender } from '../executor'
 import { periodsConsistent } from '../feeds/types'
 import {
   boxScoreUrl,
   disputeWindowArg,
   gameDateArg,
-  heartbeatStale,
   noticeUrl,
   opsErrorReport,
   parsePeriods,
   parseScore,
   publicKeyArg,
+  signatureIn,
   solToLamports,
   stripArgSeparator,
 } from './args'
+import {
+  type AttemptLookups,
+  chooseEvidence,
+  endAttempt,
+  type ProposeAttempt,
+  pendingAttempt,
+  readProposeRecord,
+  startAttempt,
+  writeProposeRecord,
+} from './propose-evidence'
+import { watchdogRun } from './watchdog'
 
-const COMMANDS =
-  'status, propose, challenge, halt, featured, init-config, pause, resume, fund-authority, team, watchdog'
+const USAGE = `usage: horagon-ops <command>
+  status [--date 2026-11-24]
+  propose <gameId> --box-score <url> --score <home>-<away> [--periods 30-25,...] [--replace-evidence]
+  propose <gameId> --postponed --notice <url> [--replace-evidence]
+  challenge <gameId>
+  halt <gameId>
+  featured <gameDate> <gameId>...
+  init-config --guardian <pubkey> [--guardian2 <pubkey>] [--window 900]
+  pause | resume
+  fund-authority <sol>
+  team <pubkey>...
+  watchdog
+  help
+options:
+  --keypair <path>    sign with another key file (a relative path starts at the repo root)
+  --replace-evidence  let propose overwrite the evidence an earlier propose stored from other
+                      inputs. Only for after the earlier propose's signature has expired: it is
+                      refused while anything sent earlier may still land.`
 
 const OPTIONS = {
   date: { type: 'string' },
@@ -84,6 +103,7 @@ const OPTIONS = {
   guardian2: { type: 'string' },
   window: { type: 'string' },
   keypair: { type: 'string' },
+  'replace-evidence': { type: 'boolean' },
 } as const
 
 const parse = (argv: string[]) =>
@@ -106,13 +126,12 @@ function cluster(): Cluster {
   return c
 }
 
+/** The keeper's both-or-neither rule: a half-set Telegram pair exits 1, never silently. */
 function alerter(): Alerter {
-  const token = env.TELEGRAM_BOT_TOKEN
-  const chatId = env.TELEGRAM_CHAT_ID
-  return token && chatId
+  const telegram = telegramSettings(env)
+  return telegram
     ? telegramAlerter({
-        token,
-        chatId,
+        ...telegram,
         log,
         prefix: `[${cluster()}]`,
         dedupeFor: personAlertWindow,
@@ -130,11 +149,11 @@ async function setup(defaultKey: string, keypair: string | undefined) {
     env.RPC_WS_URLS,
   )
   if (!rpc) throw new Error('HORAGON_RPC_URL is not set')
+  const alerts = alerter()
   const signer = loadKeypair(resolveKeyPath(keypair ?? defaultKey))
   const connection = makeConnection(rpc.url, rpc.wsUrl)
   // Before any other RPC or DB work: never mainnet, and the cluster configured.
   await assertCluster(connection, cluster())
-  const alerts = alerter()
   const program = new HoragonProgram({
     collateralMint: publicKeyArg(
       'HORAGON_COLLATERAL_MINT',
@@ -178,7 +197,7 @@ function publicBaseUrl(): string {
 
 const PROPOSABLE: ReadonlySet<string> = new Set(['open', 'halted', 'challenged'])
 
-type ProposeArgs = { uri: string } & (
+type ProposeArgs = { uri: string; replace: boolean } & (
   | { status: 'postponed'; notice: string }
   | {
       status: 'final'
@@ -195,9 +214,10 @@ function proposeArgs(gameId: string, v: Values): ProposeArgs {
   const uri = `${publicBaseUrl()}/api/v1/evidence/${gameId}/winner`
   if (uri.length > MAX_EVIDENCE_URI_LEN)
     throw new Error(`the evidence URI is longer than ${MAX_EVIDENCE_URI_LEN} characters: ${uri}`)
+  const replace = v['replace-evidence'] === true
   if (v.postponed) {
     if (v['box-score'] || v.score || v.periods) throw new Error('--postponed takes --notice only')
-    return { uri, status: 'postponed', notice: noticeUrl(v.notice) }
+    return { uri, replace, status: 'postponed', notice: noticeUrl(v.notice) }
   }
   if (v.notice) throw new Error('--notice goes with --postponed')
   const box = boxScoreUrl(v['box-score'])
@@ -205,7 +225,7 @@ function proposeArgs(gameId: string, v: Values): ProposeArgs {
   const periods = v.periods ? parsePeriods(v.periods) : null
   if (periods && !periodsConsistent({ periods, homeScore: home, awayScore: away }))
     throw new Error(`--periods do not add up to ${home}-${away}`)
-  return { uri, status: 'final', box, home, away, periods }
+  return { uri, replace, status: 'final', box, home, away, periods }
 }
 
 async function propose(c: Ctx, gameId: string, a: ProposeArgs): Promise<void> {
@@ -243,16 +263,28 @@ async function propose(c: Ctx, gameId: string, a: ProposeArgs): Promise<void> {
     const { box, home, away } = a
     if (box.warning) console.warn(`warning: ${box.warning}`)
     if (a.periods) {
-      // The guardian's own reading replaces ESPN's (after a challenge, or bad linescores).
-      await upsertDraft(c.db, {
-        gameId,
-        status: 'final',
-        homeScore: home,
-        awayScore: away,
-        periods: a.periods,
-        sourceUrl: box.url,
-        fetchedAt: new Date(),
-      })
+      // The guardian's own reading replaces ESPN's (after a challenge, or bad linescores). A
+      // re-run with the same reading keeps that draft and its time, so the evidence rebuilds to
+      // the same hash.
+      const prior = await getDraft(c.db, gameId)
+      const same =
+        prior?.state === 'pending' &&
+        prior.status === 'final' &&
+        prior.homeScore === home &&
+        prior.awayScore === away &&
+        prior.sourceUrl === box.url &&
+        JSON.stringify(prior.periods) === JSON.stringify(a.periods)
+      if (!same) {
+        await upsertDraft(c.db, {
+          gameId,
+          status: 'final',
+          homeScore: home,
+          awayScore: away,
+          periods: a.periods,
+          sourceUrl: box.url,
+          fetchedAt: new Date(),
+        })
+      }
     }
     const d = await getDraft(c.db, gameId)
     if (d?.state !== 'pending' || d.status !== 'final')
@@ -269,12 +301,90 @@ async function propose(c: Ctx, gameId: string, a: ProposeArgs): Promise<void> {
   // upsertDraft never overwrites a proposed draft: never propose one by accident.
   if (draft?.state !== 'pending' || draft.status !== status)
     throw new Error(`${gameId}: no pending ${status} draft to propose; run status`)
-  const sealed = await sealEvidence(
-    buildEvidence({ game, draft, kind: 0, confirmUrl, confirmSource, confirmedAt: new Date() }),
-  )
+  const round = gm.challengeCount
+  const record = await readProposeRecord(c.db, gameId)
+  const startedAt = Math.floor(Date.now() / 1000)
+  // A re-run sends the evidence already stored, or refuses (propose-evidence.ts).
+  const { sealed, write } = await chooseEvidence(c.db, {
+    gameId,
+    seal: (confirmedAt) =>
+      sealEvidence(buildEvidence({ game, draft, kind: 0, confirmUrl, confirmSource, confirmedAt })),
+    now: new Date(),
+    replace: a.replace,
+    pending: () => pendingAttempt(record, round, attemptLookups(c.connection), startedAt),
+  })
   // Published before the propose: the hash on chain must be fetchable once it lands.
-  await putEvidence(c.db, { gameId, kind: 0, json: sealed.json, hash: sealed.hashHex })
-  const res = await c.sender.send({
+  if (write) await putEvidence(c.db, { gameId, kind: 0, json: sealed.json, hash: sealed.hashHex })
+  else console.log(`sending the evidence an earlier propose stored (sha256 ${sealed.hashHex})`)
+  // Recorded before it is sent: a later --replace-evidence must know it may land.
+  const attempt = startAttempt(record, sealed.hashHex, round, startedAt)
+  await writeProposeRecord(c.db, gameId, attempt.record)
+  const ended = async (end: Omit<ProposeAttempt, 'at' | 'ended'>) => {
+    const last = endAttempt(attempt.record, attempt.index, {
+      ...end,
+      ended: Math.floor(Date.now() / 1000),
+    })
+    await writeProposeRecord(c.db, gameId, last).catch((err) =>
+      console.warn(`warning: the propose record was not updated: ${errorSummary(err).message}`),
+    )
+  }
+  let res: SendResult
+  try {
+    res = await sendPropose(c, gameId, marketId, sealed, uri)
+  } catch (err) {
+    if (err instanceof ProgramFailure) {
+      // Rejected: the sender proves nothing it sent is still in flight before it throws this.
+      await ended({ state: 'failed' })
+    } else {
+      // Unresolved, or gave up: whatever was sent took its blockhash before this height read,
+      // so it cannot land once the chain is ATTEMPT_EXPIRY_BLOCKS past it.
+      const sig = signatureIn(errorSummary(err).message)
+      const height = await c.connection.getBlockHeight('confirmed').catch(() => undefined)
+      await ended({
+        state: 'unresolved',
+        ...(sig ? { sig } : {}),
+        ...(height !== undefined ? { height } : {}),
+      })
+    }
+    throw err
+  }
+  await ended({ state: 'landed', ...(res.signature ? { sig: res.signature } : {}) })
+  console.log(
+    `proposed ${sealed.evidence.outcome.toUpperCase()} for ${game.away}@${game.home} (${res.signature ?? 'already on chain'})`,
+  )
+  console.log(`evidence ${uri}  sha256 ${sealed.hashHex}`)
+  await setDraftState(c.db, gameId, { state: 'proposed' })
+  await updateMarket(c.db, market.pubkey, {
+    status: 'proposed',
+    evidenceHash: sealed.hashHex,
+    ...(res.signature ? { proposeSig: res.signature } : {}),
+  })
+  await logOps(c.db, {
+    actor: 'guardian',
+    action: 'propose',
+    gameId,
+    market: market.pubkey,
+    sig: res.signature,
+    detail: { outcome: sealed.evidence.outcome, hash: sealed.hashHex },
+  })
+}
+
+/** What the chain says about an earlier propose attempt. */
+const attemptLookups = (connection: Connection): AttemptLookups => ({
+  status: async (sig) =>
+    (await connection.getSignatureStatuses([sig], { searchTransactionHistory: true })).value[0] ??
+    null,
+  blockHeight: () => connection.getBlockHeight('confirmed'),
+})
+
+function sendPropose(
+  c: Ctx,
+  gameId: string,
+  marketId: bigint,
+  sealed: SealedEvidence,
+  uri: string,
+): Promise<SendResult> {
+  return c.sender.send({
     label: `propose ${gameId}`,
     instructions: [
       ...authorityOutcomeAtaIxs(c.signer.publicKey, {
@@ -297,24 +407,6 @@ async function propose(c: Ctx, gameId: string, a: ProposeArgs): Promise<void> {
       const after = await c.program.fetchGameMarket(c.connection, marketId)
       return after?.status === 'proposed' && toHex(after.evidenceHash) === sealed.hashHex
     },
-  })
-  console.log(
-    `proposed ${sealed.evidence.outcome.toUpperCase()} for ${game.away}@${game.home} (${res.signature ?? 'already on chain'})`,
-  )
-  console.log(`evidence ${uri}  sha256 ${sealed.hashHex}`)
-  await setDraftState(c.db, gameId, { state: 'proposed' })
-  await updateMarket(c.db, market.pubkey, {
-    status: 'proposed',
-    evidenceHash: sealed.hashHex,
-    ...(res.signature ? { proposeSig: res.signature } : {}),
-  })
-  await logOps(c.db, {
-    actor: 'guardian',
-    action: 'propose',
-    gameId,
-    market: market.pubkey,
-    sig: res.signature,
-    detail: { outcome: sealed.evidence.outcome, hash: sealed.hashHex },
   })
 }
 
@@ -524,36 +616,6 @@ async function status(db: Db, date: string | undefined): Promise<void> {
   }
 }
 
-/** Exit 2 and an alert when the keeper heartbeat is stale during a game window (spec 12). */
-async function watchdog(db: Db, alerts: Alerter): Promise<void> {
-  const now = Math.floor(Date.now() / 1000)
-  let age: number | null
-  let tipoffs: number[]
-  try {
-    const hb = await getHeartbeat(db, 'keeper')
-    age = hb ? now - Math.floor(hb.ts.getTime() / 1000) : null
-    const games = await listGames(db, {
-      from: new Date((now - 5 * 3600) * 1000),
-      to: new Date((now + 2 * 3600) * 1000),
-    })
-    tipoffs = games.map((g) => Math.floor(g.scheduledTipoff.getTime() / 1000))
-  } catch (err) {
-    // An unreadable heartbeat is not a fresh one.
-    await alerts.send(
-      'watchdog',
-      `Watchdog cannot read the keeper heartbeat: ${errorSummary(err).message}`,
-    )
-    throw err
-  }
-  if (heartbeatStale(age, tipoffs, now)) {
-    await alerts.send(
-      'heartbeat',
-      `Keeper heartbeat is ${age ?? 'missing'} s old during a game night`,
-    )
-    process.exitCode = 2
-  }
-}
-
 /** Runs `body` with the DB, closing it whatever happens. */
 async function withDb(body: (db: Db) => Promise<void>): Promise<void> {
   const h = db()
@@ -595,8 +657,16 @@ async function run(argv: string[]): Promise<void> {
         console.log(`team wallets: ${wallets.join(', ')}`)
       })
     }
-    case 'watchdog':
-      return withDb((db) => watchdog(db, alerter()))
+    case 'watchdog': {
+      // Exit 2 while the keeper heartbeat is stale during a game window (watchdog.ts).
+      const alerts = alerter()
+      return withDb(async (db) => {
+        process.exitCode = await watchdogRun(db, alerts, Math.floor(Date.now() / 1000), log)
+      })
+    }
+    case 'help':
+      console.log(USAGE)
+      return
     case 'propose':
     case 'challenge':
     case 'halt': {
@@ -632,7 +702,7 @@ async function run(argv: string[]): Promise<void> {
       return
     }
     default:
-      throw new Error(`commands: ${COMMANDS}`)
+      throw new Error(command ? `unknown command "${command}"\n${USAGE}` : USAGE)
   }
 }
 

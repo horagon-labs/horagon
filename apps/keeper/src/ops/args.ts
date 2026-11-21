@@ -75,6 +75,11 @@ export function publicKeyArg(name: string, raw: string | undefined): PublicKey {
 
 const SIGNATURE = /\b[1-9A-HJ-NP-Za-km-z]{64,88}\b/
 
+/** The first transaction signature (base58, 64 to 88 characters) in a message. */
+export function signatureIn(text: string): string | undefined {
+  return SIGNATURE.exec(text)?.[0]
+}
+
 /**
  * What `horagon-ops` prints for an error, and its exit code. An UnresolvedAttempt is "unknown",
  * never retried here (exit 3); anything else is an error (exit 1). A ProgramFailure is never
@@ -83,7 +88,7 @@ const SIGNATURE = /\b[1-9A-HJ-NP-Za-km-z]{64,88}\b/
 export function opsErrorReport(err: unknown): { lines: string[]; exitCode: number } {
   const message = errorSummary(err).message
   if (err instanceof UnresolvedAttempt) {
-    const sig = SIGNATURE.exec(message)?.[0]
+    const sig = signatureIn(message)
     return {
       exitCode: 3,
       lines: [

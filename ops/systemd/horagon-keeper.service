@@ -18,9 +18,10 @@ Environment=NODE_ENV=production
 ExecStart=%h/horagon/apps/keeper/node_modules/.bin/tsx src/main.ts
 Restart=always
 RestartSec=5
-# main.ts finishes the current step on SIGTERM, then exits.
+# On SIGTERM main.ts ends the round after the step in progress, then exits. 120 s covers the
+# longest step: one 90 s executor wait plus an RPC timeout. A second SIGTERM exits at once.
 KillSignal=SIGTERM
-TimeoutStopSec=30
+TimeoutStopSec=120
 MemoryMax=768M
 
 [Install]

@@ -1,6 +1,6 @@
 import pino from 'pino'
 import { describe, expect, it } from 'vitest'
-import { dueEvery, FailureStreak, runStep } from '../src/loop'
+import { dueEvery, FailureStreak, roundSteps, runRound, runStep } from '../src/loop'
 
 describe('FailureStreak', () => {
   it('alerts from the 12th failure in a row, with the error summary', () => {
@@ -65,5 +65,67 @@ describe('runStep', () => {
     expect(lines).toHaveLength(1)
     expect(lines[0]).toMatchObject({ level: 50, step: 'index', msg: 'step failed' })
     expect(JSON.stringify(lines)).not.toContain('SECRET')
+  })
+})
+
+describe('roundSteps', () => {
+  it('runs the tick and the indexer first, then the hourly group behind one gate', () => {
+    expect(roundSteps({ hourly: false, archive: true, ataWatch: false })).toEqual(['tick', 'index'])
+    expect(roundSteps({ hourly: true, archive: true, ataWatch: true })).toEqual([
+      'tick',
+      'index',
+      'schedule',
+      'treasury',
+      'archive',
+      'ata-watch',
+    ])
+    expect(roundSteps({ hourly: true, archive: false, ataWatch: false })).toEqual([
+      'tick',
+      'index',
+      'schedule',
+      'treasury',
+    ])
+    expect(roundSteps({ hourly: false, archive: false, ataWatch: true })).toEqual([
+      'tick',
+      'index',
+      'ata-watch',
+    ])
+  })
+})
+
+describe('runRound', () => {
+  it('runs every step in order when not stopping', async () => {
+    const ran: string[] = []
+    const steps = roundSteps({ hourly: true, archive: true, ataWatch: false })
+    const done = await runRound(
+      steps,
+      async (s) => void ran.push(s),
+      () => false,
+    )
+    expect(ran).toEqual(['tick', 'index', 'schedule', 'treasury', 'archive'])
+    expect(done).toEqual({ ran, stopped: false })
+  })
+
+  it('ends the round after the step in progress once stopping', async () => {
+    let stopping = false
+    const ran: string[] = []
+    const r = await runRound(
+      roundSteps({ hourly: true, archive: true, ataWatch: true }),
+      async (s) => {
+        ran.push(s)
+        // SIGTERM arrives while the indexer runs: it finishes, nothing after it starts.
+        if (s === 'index') stopping = true
+      },
+      () => stopping,
+    )
+    expect(ran).toEqual(['tick', 'index'])
+    expect(r).toEqual({ ran: ['tick', 'index'], stopped: true })
+
+    const none = await runRound(
+      ['tick', 'index'],
+      async () => {},
+      () => true,
+    )
+    expect(none).toEqual({ ran: [], stopped: true })
   })
 })

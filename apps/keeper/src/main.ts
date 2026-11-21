@@ -1,21 +1,23 @@
-// The keeper process (systemd user service `horagon-keeper` on horagon-vps). Every 5 s: one
-// lifecycle tick and one indexer pass; every 10 min the sponsored-ATA watch (with
-// SPONSOR_PUBKEY); hourly, in one round, the schedule, then the treasury, then the ESPN archive
-// retention. Each step fails on its own, logs, and is retried on its next turn; the heartbeat
-// goes out every round regardless. The RPC's cluster is verified before anything else runs.
+// The keeper process (systemd user service `horagon-keeper` on horagon-vps). Every 5 s, one
+// round (`roundSteps`): a lifecycle tick and an indexer pass; then hourly, behind one gate, the
+// schedule, the treasury and the ESPN archive retention; then every 10 min the sponsored-ATA
+// watch (with SPONSOR_PUBKEY). Each step fails on its own, logs, and is retried on its next
+// turn; the heartbeat goes out every round regardless. SIGTERM ends the round after the step in
+// progress. Every RPC's cluster is verified before anything else runs; a backup RPC that does
+// not answer is left out.
 import { connectPostgres, heartbeat } from '@horagon/db'
 import { errorSummary, HoragonProgram } from '@horagon/sdk'
 import { type Alerter, logAlerter, personAlertWindow, telegramAlerter } from './alerts'
 import { pruneArchive } from './archive-retention'
 import { watchSponsoredAtas } from './ata-watch'
-import { createLogger, loadConfig, makeConnection, verifyCluster } from './config'
+import { BACKUP_RPC_TRIES, createLogger, loadConfig, makeConnection, verifyCluster } from './config'
 import { loadRatings } from './elo'
 import { TxSender } from './executor'
 import { espnFeed, RawArchive, USER_AGENT } from './feeds/espn'
 import { loadReplayDir, replayFeed } from './feeds/replay'
 import type { Feed } from './feeds/types'
 import { indexOnce } from './indexer'
-import { dueEvery, FailureStreak, runStep } from './loop'
+import { dueEvery, FailureStreak, type RoundStep, roundSteps, runRound, runStep } from './loop'
 import { scheduleTick } from './schedule'
 import { Keeper } from './tick'
 import { treasuryTick } from './treasury'
@@ -37,11 +39,6 @@ async function faucetClaim(url: string, wallet: string): Promise<void> {
 async function main(): Promise<void> {
   const cfg = loadConfig()
   const log = createLogger(cfg.logLevel)
-  const connections = cfg.rpcs.map((r) => makeConnection(r.url, r.wsUrl))
-  // Before any other RPC or DB work: never mainnet, and the cluster configured.
-  await verifyCluster(connections, cfg.cluster, { log })
-
-  const { db, close } = connectPostgres(cfg.databaseUrl)
   const alerts: Alerter = cfg.telegram
     ? telegramAlerter({
         ...cfg.telegram,
@@ -50,6 +47,22 @@ async function main(): Promise<void> {
         dedupeFor: personAlertWindow,
       })
     : logAlerter(log)
+  // Before any other RPC or DB work: never mainnet, and the cluster configured. Only the
+  // verified connections are used.
+  const connections = await verifyCluster(
+    cfg.rpcs.map((r) => makeConnection(r.url, r.wsUrl)),
+    cfg.cluster,
+    {
+      log,
+      onBackupDown: (rpc, error) =>
+        alerts.send(
+          'rpc-backup-down',
+          `Backup RPC ${rpc} failed the cluster check ${BACKUP_RPC_TRIES} times (${error}); the keeper runs without it until it restarts.`,
+        ),
+    },
+  )
+
+  const { db, close } = connectPostgres(cfg.databaseUrl)
   const sender = new TxSender({ connections, payer: cfg.attestor, log, alerts })
   const program = new HoragonProgram({ collateralMint: cfg.collateralMint })
   const ratings = await loadRatings(cfg.eloFile)
@@ -95,7 +108,7 @@ async function main(): Promise<void> {
         log.warn({ signal }, 'stopping now')
         process.exit(130)
       }
-      log.info({ signal }, 'stopping after this round')
+      log.info({ signal }, 'stopping after the step in progress')
       stopping = true
       wake?.()
     })
@@ -115,25 +128,51 @@ async function main(): Promise<void> {
   while (!stopping) {
     const started = Date.now()
     const t = now()
-    if (hourlyDue(t)) {
-      // One gate, in this order: the schedule sets the featured flags of the next 36 h before
-      // the treasury counts their seeds. The treasury runs even when the schedule failed.
-      await step('schedule', () => scheduleTick({ db, feed, ratings, now }))
-      await step('treasury', () =>
-        treasuryTick({
-          db,
-          sender,
-          program,
-          attestor: cfg.attestor,
-          alerts,
-          log,
-          seeds: cfg.seeds,
-          now,
-          faucet: (wallet) => faucetClaim(cfg.faucetUrl, wallet),
-          priorityMicroLamports: cfg.priority.normal,
-        }),
-      )
-      if (archiveDir) {
+    const sponsor = cfg.sponsor
+    let actions: number | null = null
+    const run: Record<RoundStep, () => Promise<void>> = {
+      tick: async () => {
+        const tick = await step('tick', () => keeper.tick())
+        actions = tick.ok ? tick.value.length : null
+        const alert = tickStreak.record(tick)
+        if (alert) await alerts.send(alert.key, alert.text)
+      },
+      index: async () => {
+        const index = await step('index', () =>
+          indexOnce({
+            db,
+            connection: sender.connection,
+            collateralMint: cfg.collateralMint,
+            authority: program.authority,
+            alerts,
+            log,
+            now,
+            ...(sponsor ? { sponsor } : {}),
+          }),
+        )
+        const alert = indexStreak.record(index)
+        if (alert) await alerts.send(alert.key, alert.text)
+      },
+      schedule: async () =>
+        void (await step('schedule', () => scheduleTick({ db, feed, ratings, now }))),
+      // Runs even when the schedule failed.
+      treasury: async () =>
+        void (await step('treasury', () =>
+          treasuryTick({
+            db,
+            sender,
+            program,
+            attestor: cfg.attestor,
+            alerts,
+            log,
+            seeds: cfg.seeds,
+            now,
+            faucet: (wallet) => faucetClaim(cfg.faucetUrl, wallet),
+            priorityMicroLamports: cfg.priority.normal,
+          }),
+        )),
+      archive: async () => {
+        if (!archiveDir) return
         const pruned = await step('archive', () => pruneArchive(archiveDir, t))
         if (pruned.ok && (pruned.value.gzipped.length > 0 || pruned.value.deleted.length > 0)) {
           log.info(pruned.value, 'ESPN archive retention')
@@ -144,36 +183,30 @@ async function main(): Promise<void> {
             `ESPN archive retention failed: ${errorSummary(pruned.error).message}`,
           )
         }
-      }
+      },
+      'ata-watch': async () => {
+        if (!sponsor) return
+        await step('ata-watch', () =>
+          watchSponsoredAtas({ db, connection: sender.connection, sponsor, alerts, log, now }),
+        )
+      },
     }
-    const tick = await step('tick', () => keeper.tick())
-    const tickAlert = tickStreak.record(tick)
-    if (tickAlert) await alerts.send(tickAlert.key, tickAlert.text)
-    const index = await step('index', () =>
-      indexOnce({
-        db,
-        connection: sender.connection,
-        collateralMint: cfg.collateralMint,
-        authority: program.authority,
-        alerts,
-        log,
-        now,
-        ...(cfg.sponsor ? { sponsor: cfg.sponsor } : {}),
-      }),
+    // The gates are read at the start of the round; a stop skips what has not started.
+    const steps = roundSteps({
+      hourly: hourlyDue(t),
+      archive: archiveDir !== null,
+      ataWatch: sponsor !== null && ataWatchDue(t),
+    })
+    await runRound(
+      steps,
+      (s) => run[s](),
+      () => stopping,
     )
-    const indexAlert = indexStreak.record(index)
-    if (indexAlert) await alerts.send(indexAlert.key, indexAlert.text)
-    const sponsor = cfg.sponsor
-    if (sponsor && ataWatchDue(t)) {
-      await step('ata-watch', () =>
-        watchSponsoredAtas({ db, connection: sender.connection, sponsor, alerts, log, now }),
-      )
-    }
     round++
     await step('heartbeat', () =>
       heartbeat(db, 'keeper', {
         round,
-        actions: tick.ok ? tick.value.length : null,
+        actions,
         feed: feed.name,
         failing: { tick: tickStreak.count, index: indexStreak.count },
       }),

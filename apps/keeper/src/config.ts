@@ -173,34 +173,69 @@ export async function assertCluster(
   }
 }
 
+/** Cluster checks a backup RPC gets at start-up before the keeper starts without it. */
+export const BACKUP_RPC_TRIES = 3
+
 /**
- * `assertCluster` on every connection, in order, before the keeper does anything else. Fails
- * closed: a refusal throws at once; an RPC that does not answer is asked again with backoff
- * (nothing else runs meanwhile) rather than exiting into a systemd restart loop.
+ * `assertCluster` on every connection, in order, before the keeper does anything else; returns
+ * the connections that passed, the primary first. Fails closed: a refusal on any of them throws
+ * at once. The primary is asked again with backoff until it answers (nothing else runs
+ * meanwhile) rather than exiting into a systemd restart loop. A backup that has not answered
+ * after `backupTries` is left out, with a warning and `onBackupDown`: a connection is never
+ * used unverified.
  */
-export async function verifyCluster(
-  connections: ReadonlyArray<Pick<Connection, 'getGenesisHash'>>,
+export async function verifyCluster<C extends Pick<Connection, 'getGenesisHash'>>(
+  connections: readonly C[],
   cluster: Cluster,
-  opts: { log: Logger; sleep?: (ms: number) => Promise<void>; maxDelayMs?: number },
-): Promise<void> {
+  opts: {
+    log: Logger
+    sleep?: (ms: number) => Promise<void>
+    maxDelayMs?: number
+    backupTries?: number
+    onBackupDown?: (rpc: number, error: string) => Promise<void>
+  },
+): Promise<C[]> {
   const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)))
   const maxDelay = opts.maxDelayMs ?? 60_000
+  const verified: C[] = []
   for (const [rpc, connection] of connections.entries()) {
+    const tries = rpc === 0 ? Number.POSITIVE_INFINITY : (opts.backupTries ?? BACKUP_RPC_TRIES)
     for (let attempt = 0; ; attempt++) {
       try {
         await assertCluster(connection, cluster)
+        verified.push(connection)
         break
       } catch (err) {
         if (isClusterRefusal(err)) throw err
+        const error = errorSummary(err).message
+        if (attempt + 1 >= tries) {
+          opts.log.warn({ rpc, error, tries }, 'backup RPC not verified; starting without it')
+          await opts.onBackupDown?.(rpc, error)
+          break
+        }
         const delayMs = Math.min(maxDelay, 5_000 * 2 ** attempt)
-        opts.log.warn(
-          { rpc, error: errorSummary(err).message, delayMs },
-          'RPC cluster not verified yet; asking again',
-        )
+        opts.log.warn({ rpc, error, delayMs }, 'RPC cluster not verified yet; asking again')
         await sleep(delayMs)
       }
     }
   }
+  return verified
+}
+
+/**
+ * The Telegram alert settings, both or neither: a half-set pair is refused, not read as "no
+ * alerts". An empty value counts as unset; the error never carries a value.
+ */
+export function telegramSettings(env: {
+  TELEGRAM_BOT_TOKEN?: string | undefined
+  TELEGRAM_CHAT_ID?: string | undefined
+}): { token: string; chatId: string } | null {
+  const token = env.TELEGRAM_BOT_TOKEN || undefined
+  const chatId = env.TELEGRAM_CHAT_ID || undefined
+  if (Boolean(token) !== Boolean(chatId)) {
+    throw new Error('TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID must be set together')
+  }
+  return token && chatId ? { token, chatId } : null
 }
 
 /** The RPC URLs with their websocket URLs (`RPC_WS_URLS`, by position), all checked. */
@@ -294,9 +329,7 @@ export function loadConfig(
   if (e.KEEPER_FEED === 'replay' && (!e.REPLAY_TAG || !e.REPLAY_TIPOFF)) {
     throw new Error('KEEPER_FEED=replay needs REPLAY_TAG and REPLAY_TIPOFF')
   }
-  if (Boolean(e.TELEGRAM_BOT_TOKEN) !== Boolean(e.TELEGRAM_CHAT_ID)) {
-    throw new Error('TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID must be set together')
-  }
+  const telegram = telegramSettings(e)
   const usdc = (n: number | undefined, fallback: bigint) =>
     n === undefined ? fallback : BigInt(n) * 1_000_000n
   const path = (p: string) => resolve(repoDir, p)
@@ -306,10 +339,7 @@ export function loadConfig(
     databaseUrl: e.DATABASE_URL,
     attestor: loadKeypair(resolveKeyPath(e.ATTESTOR_KEYPAIR, repoDir)),
     collateralMint: publicKey('HORAGON_COLLATERAL_MINT', e.HORAGON_COLLATERAL_MINT),
-    telegram:
-      e.TELEGRAM_BOT_TOKEN && e.TELEGRAM_CHAT_ID
-        ? { token: e.TELEGRAM_BOT_TOKEN, chatId: e.TELEGRAM_CHAT_ID }
-        : null,
+    telegram,
     feed:
       e.KEEPER_FEED === 'replay'
         ? {

@@ -6,6 +6,7 @@ import {
   type GameRow,
   type GameWithMarkets,
   getDraft,
+  getEvidence,
   insertSnapshot,
   listGames,
   logOps,
@@ -624,6 +625,20 @@ export class Keeper {
     await this.sync(s)
   }
 
+  /**
+   * The API serves the stored evidence (kind 0): it must be the one whose hash is on chain, or
+   * nobody can verify the result. Read only when a sync sees a hash on chain, never per tick.
+   */
+  private async checkEvidence(s: GameState, chainHash: string): Promise<void> {
+    const stored = await getEvidence(this.d.db, s.game.id, 0)
+    if (stored?.hash === chainHash) return
+    await this.d.alerts.send(
+      `evidence-mismatch:${s.game.id}`,
+      `Evidence mismatch: ${s.game.away}@${s.game.home} has sha256 ${chainHash} on chain, but the ` +
+        `API serves ${stored ? `sha256 ${stored.hash}` : 'no evidence'}. Check it before the dispute window closes.`,
+    )
+  }
+
   /** Copy the GameMarket's status, outcome and times into the DB row. */
   private async sync(s: GameState): Promise<void> {
     if (!s.market) return
@@ -641,12 +656,15 @@ export class Keeper {
     const statusMoved = s.market.status !== gm.status
     if (challenged && (statusMoved || newChallenge) && s.draft && s.draft.state !== 'rejected')
       await setDraftState(this.d.db, s.game.id, { state: 'rejected' })
+    const evidenceHash = gm.evidenceHash.some((b) => b !== 0) ? toHex(gm.evidenceHash) : null
+    // Checked before the row is synced: if the read fails, the next tick syncs (and checks) again.
+    if (evidenceHash) await this.checkEvidence(s, evidenceHash)
     const settled = gm.status === 'finalized' || gm.status === 'recycled'
     await updateMarket(this.d.db, s.market.pubkey, {
       status: gm.status,
       outcome: settled ? gm.proposedOutcome : null,
       challengeCount: gm.challengeCount,
-      evidenceHash: gm.evidenceHash.some((b) => b !== 0) ? toHex(gm.evidenceHash) : null,
+      evidenceHash,
       proposedAt: gm.proposedAt > 0 ? new Date(gm.proposedAt * 1000) : null,
       finalizedAt: gm.finalizedAt > 0 ? new Date(gm.finalizedAt * 1000) : null,
       ...(gm.status === 'recycled' && s.market.status !== 'recycled'
