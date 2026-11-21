@@ -1,0 +1,53 @@
+name: program
+
+# The on-chain program: build it, fail when the committed IDL drifts from the build, and audit
+# the Rust dependencies. Deploying stays manual (spec 20.4: CI holds no upgrade key).
+on:
+  push:
+    branches: [main]
+    paths: [programs/**, Cargo.toml, Cargo.lock, Anchor.toml, idls/**, packages/sdk/idl/**]
+  pull_request:
+    paths: [programs/**, Cargo.toml, Cargo.lock, Anchor.toml, idls/**, packages/sdk/idl/**]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      ANCHOR_VERSION: 1.2.2
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: |
+            ~/.cargo/bin
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.local/share/solana
+            ~/.avm
+            target
+          key: program-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}-anchor-${{ env.ANCHOR_VERSION }}
+      - name: Install Agave and Anchor
+        run: |
+          if ! command -v solana >/dev/null; then
+            sh -c "$(curl -sSfL https://release.anza.xyz/stable/install)"
+          fi
+          echo "$HOME/.local/share/solana/install/active_release/bin" >> "$GITHUB_PATH"
+          if ! command -v avm >/dev/null; then
+            cargo install --git https://github.com/solana-foundation/anchor avm --force
+          fi
+          avm install "$ANCHOR_VERSION" || true
+          avm use "$ANCHOR_VERSION"
+      - run: anchor build
+      - name: IDL matches the committed copy
+        run: |
+          cp target/idl/horagon.json packages/sdk/idl/horagon.json
+          git diff --exit-code packages/sdk/idl/horagon.json
+      - name: cargo audit
+        run: |
+          command -v cargo-audit >/dev/null || cargo install cargo-audit --locked
+          cargo audit

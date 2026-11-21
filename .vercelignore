@@ -1,0 +1,6 @@
+.keys/
+.env*
+.superpowers/
+target/
+spikes/recordings/
+apps/keeper/data/

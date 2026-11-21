@@ -1,0 +1,85 @@
+# Security
+
+Play-money on devnet. No real value. No prizes. Horagon refuses mainnet everywhere: an RPC URL
+containing "mainnet" or a mainnet genesis hash stops it. The keeper checks both before any other
+RPC or database work at start-up, and `horagon-ops` before every command that signs. The API
+refuses a mainnet URL when it reads its environment, and the sponsor signs nothing until the
+RPC's genesis hash has shown it is not mainnet (`packages/api/src/sponsor/submit.ts`).
+
+## Assets
+
+- The treasury (the Authority PDA's mUSDC ATA) and the Authority's SOL.
+- The sponsor's SOL.
+- The attestor's SOL and mUSDC: it is also the keeper wallet that fills the treasury.
+- Correct resolutions: a market pays the side that won the real game.
+- The keys in `.keys/`, on the VPS and in Vercel.
+
+## Keys and what each can do
+
+| Key                          | Can                                                                                                                                  | Cannot                                                  |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------- |
+| Admin (`deployer.json`)      | upgrade the program, `initialize_config`, `update_config` (attestor, guardians, dispute window, creation pause), `withdraw_treasury` | —                                                       |
+| Attestor (keeper, VPS)       | create markets, `halt`, `propose_result`                                                                                             | challenge, finalize early, withdraw, change config      |
+| Guardian 1 (`guardian.json`) | `challenge`, `propose_result`, `halt`                                                                                                | create markets, finalize early, withdraw, change config |
+| Sponsor (Vercel)             | pay fees and ATA rent of allow-listed transactions                                                                                   | sign anything else (see `packages/api/src/sponsor`)     |
+
+`finalize` and `recycle` need no key: anyone may send them, and the program checks the market's
+status and the dispute window.
+
+A leaked attestor can propose a wrong result, halt open markets and create markets that spend
+the Authority's SOL and the treasury's mUSDC. A guardian challenges a wrong result inside the
+dispute window (900 s as set up in `docs/deploy.md`). The admin stops new markets with
+`horagon-ops pause`, then replaces the attestor with an `update_config` transaction. `horagon-ops`
+has no command for that yet, so it is built by hand with `updateConfig` from the SDK's program
+client.
+
+## Threats and measures
+
+| Threat                | Measure                                                                                                                                                                                         |
+| --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Sponsor farming       | Allow list per instruction; 30 tx/h per wallet and per IP hash; daily SOL cap; every user signature checked locally before any RPC call                                                         |
+| Sponsor rent farming  | ATA rent counted as spend at creation; 26 new ATAs a day per wallet, 78 per IP hash; none for a wallet that closed one away                                                                     |
+| Malicious API input   | zod on every input, unknown fields refused, 64 KB body limit (4 KB for `POST /api/v1/tx/submit`), problem+json errors without RPC URLs or stacks                                                |
+| Wrong result          | Two-step resolution (propose, a challenge window, finalize); the keeper never proposes: a guardian confirms every result against a public box score                                             |
+| Feed failure          | No proposal without a guardian; a feed silent 2 min in Q4/OT, or in the last 30 min before the close, alerts the guardian; 10 min in Q4/OT halts the market                                     |
+| Key leak through logs | Keeper and `horagon-ops` logs redact `token` and `secretKey` fields (pino); errors are logged as `errorSummary` everywhere (no stack, URLs cut to the host, 300 characters); keys never in URLs |
+| Supply chain          | Lockfile, pinned versions, actions pinned by commit SHA, `pnpm audit`, osv-scanner, gitleaks and `cargo audit` in CI                                                                            |
+
+## Sponsor rent is spend
+
+The user owns every token account the sponsor creates for them and may close it to any address,
+so the rent the sponsor paid comes back only from cooperative users. Horagon never counts it as
+float: the daily SOL cap charges it at creation (`getMinimumBalanceForRentExemption(165)` per
+create, read once from the RPC), and the sponsor budget assumes none of it returns. The keeper
+records each sponsor-paid ATA, checks every 10 minutes whether it still exists, and alerts
+`ata-close:<wallet>` when one closed to an address other than the sponsor (or to one it cannot
+trace); the API then opens no more accounts for that wallet. A first trade on a market costs
+the sponsor the fee plus two ATAs (YES and NO), about 0.003 SOL on devnet (Tier 0, S3a).
+
+## GitHub Actions
+
+Every `uses:` names a commit SHA, with the tag in a comment. To move to a newer release, read
+the SHA with `git ls-remote --tags https://github.com/<owner>/<repo>` (for an annotated tag,
+the `^{}` line is the commit) and change both. `dtolnay/rust-toolchain` has no release tags:
+it is pinned to the commit its `stable` branch pointed at, read with
+`git ls-remote https://github.com/dtolnay/rust-toolchain refs/heads/stable`. Every workflow
+runs with `contents: read` only.
+
+## Accepted advisories
+
+`pnpm audit --prod --audit-level high` ignores (root `package.json`, `pnpm.auditConfig`):
+
+- `GHSA-3gc7-fjrx-p6mg` (bigint-buffer, via `@solana/spl-token`): no fixed release exists for
+  the web3.js 1.x line; it decodes u64 fields of accounts returned by the RPC, never user
+  input.
+- `GHSA-82x6-q7mm-w9cf`, `GHSA-v5mp-jgw5-2x6j`, `GHSA-4qx8-w7c3-pj3p`, `GHSA-9j65-hcg3-gc64`,
+  `GHSA-9qmh-m7c6-f92p`, `GHSA-h895-cgqg-jf52` (toml, via `@anchor-lang/core` in the pm-AMM
+  vendor package): it parses `Anchor.toml` in tooling only.
+
+Review this list whenever a dependency is upgraded.
+
+## Not yet covered (later tiers)
+
+Sign-In With Solana for `/ops`, API keys, general read rate limits, CSP, the independent
+watcher (guardian 2), `solana-verify` hashes, a `horagon-ops` command for `update_config`
+(attestor and guardians), and redaction in the API's logger.

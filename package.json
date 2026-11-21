@@ -13,11 +13,26 @@
     "test": "turbo run test",
     "lint": "biome check .",
     "format": "biome check --write .",
-    "check": "pnpm lint && pnpm typecheck && pnpm test && pnpm build"
+    "check": "pnpm lint && pnpm typecheck && pnpm test && pnpm build",
+    "changeset": "changeset"
   },
   "devDependencies": {
     "@biomejs/biome": "2.6.8",
+    "@changesets/cli": "3.0.3",
     "turbo": "^2.11.12",
     "typescript": "~5.9.3"
+  },
+  "pnpm": {
+    "auditConfig": {
+      "ignoreGhsas": [
+        "GHSA-3gc7-fjrx-p6mg",
+        "GHSA-82x6-q7mm-w9cf",
+        "GHSA-v5mp-jgw5-2x6j",
+        "GHSA-4qx8-w7c3-pj3p",
+        "GHSA-9j65-hcg3-gc64",
+        "GHSA-9qmh-m7c6-f92p",
+        "GHSA-h895-cgqg-jf52"
+      ]
+    }
   }
 }
