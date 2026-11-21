@@ -1,15 +1,15 @@
 'use client'
 // Header wallet: balance and address; the sheet has test funds, positions, Export and Import.
-import { useRef, useState } from 'react'
+// The sheet opens by itself when the 18+ gate has just created a wallet: it starts empty, so
+// the faucet comes first.
+import { useEffect, useRef, useState } from 'react'
 import { api } from '../lib/api'
 import { shortKey, usdc } from '../lib/format'
+import { readyHint, replacePrompt } from '../lib/wallet-copy'
 import { AgeCheckbox } from './age-dialog'
 import { ErrorText } from './error-text'
 import { Positions } from './positions'
 import { useWallet } from './wallet'
-
-const REPLACE_PROMPT =
-  'Replace this wallet? Its key stays saved on this device, but Horagon will not show it again. Export it first (Show secret key) if it holds anything you want to keep.'
 
 export function WalletButton() {
   const {
@@ -17,6 +17,7 @@ export function WalletButton() {
     address,
     ephemeral,
     ageNeeded,
+    walletsCreated,
     portfolio,
     refreshPortfolio,
     exportKey,
@@ -32,6 +33,14 @@ export function WalletButton() {
   const [funding, setFunding] = useState(false)
   const [note, setNote] = useState<string>()
   const [error, setError] = useState<unknown>()
+  const seenCreated = useRef(walletsCreated)
+
+  useEffect(() => {
+    if (walletsCreated === seenCreated.current) return
+    seenCreated.current = walletsCreated
+    const d = dialog.current
+    if (d && !d.open) d.showModal()
+  }, [walletsCreated])
 
   if (!loaded) return <span className="text-sm text-zinc-500">Wallet…</span>
   if (!address) {
@@ -62,7 +71,7 @@ export function WalletButton() {
   }
 
   function onImport() {
-    if (!window.confirm(REPLACE_PROMPT)) return
+    if (!window.confirm(replacePrompt(ephemeral))) return
     setImportError(undefined)
     try {
       if (!importKey(importText, importAge)) return
@@ -78,6 +87,8 @@ export function WalletButton() {
   }
 
   const balance = portfolio?.usdcBalance
+  // The faucet hint for a wallet created in this tab, until it holds mUSDC.
+  const hint = readyHint(walletsCreated > 0, portfolio?.wallet === address ? balance : undefined)
   return (
     <>
       <button
@@ -107,10 +118,11 @@ export function WalletButton() {
               to keep it.
             </p>
           )}
+          {hint && <p className="text-sm font-medium">{hint}</p>}
           <button
             type="button"
             disabled={funding}
-            onClick={() => withAge((kp) => void fund(kp.publicKey.toBase58()))}
+            onClick={() => withAge((kp) => void fund(kp.publicKey.toBase58()), 'faucet')}
             className="w-full rounded-lg bg-zinc-900 py-2 font-semibold text-white disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900"
           >
             {funding ? 'Requesting…' : 'Get test mUSDC'}

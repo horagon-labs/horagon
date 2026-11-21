@@ -2,7 +2,9 @@
 // Buy HOME / Buy AWAY (AWAY buys NO), presets 10/50/100 or a custom amount, and Sell. Shows
 // the quote's average price, price impact, the 2% fee and the shares received (spec 10).
 // A send goes through `withAge` (18+ gate, R1) and is never repeated by itself (R2): after an
-// error that names a transaction, only a new click sends again.
+// error that names a transaction, only a new click sends again. Without a wallet the button
+// sets one up (a new wallet starts at the faucet); until this signer's portfolio has loaded
+// once, Buy and Sell wait, so a Buy is never checked against an unknown balance.
 import {
   effectiveTime,
   type GameDetail,
@@ -15,7 +17,7 @@ import { useEffect, useRef, useState } from 'react'
 import { api } from '../lib/api'
 import { cents, explorerTx, usdc } from '../lib/format'
 import { DEFAULT_SLIPPAGE_BPS, executeTrade, type TradeStage } from '../lib/trade'
-import { checkTrade } from '../lib/trade-form'
+import { checkTrade, tradeReady } from '../lib/trade-form'
 import { usePoll } from '../lib/use-poll'
 import { ErrorText } from './error-text'
 import { useWallet } from './wallet'
@@ -39,7 +41,7 @@ function useDebounced<T>(value: T, ms: number): T {
 }
 
 export function TradePanel({ game, market }: { game: GameDetail; market: MarketSummary }) {
-  const { portfolio, refreshPortfolio, withAge } = useWallet()
+  const { address, portfolio, refreshPortfolio, withAge, openGate } = useWallet()
   const [side, setSide] = useState<Side>('home')
   const [action, setAction] = useState<TradeAction>('buy')
   const [amount, setAmount] = useState('10')
@@ -49,6 +51,7 @@ export function TradePanel({ game, market }: { game: GameDetail; market: MarketS
   const busy = useRef(false)
 
   const team = side === 'home' ? game.home : game.away
+  const ready = tradeReady(address, portfolio)
   const held = portfolio?.positions.find((p) => p.market === market.pubkey && p.side === side)
   const check = checkTrade({
     action,
@@ -200,11 +203,19 @@ export function TradePanel({ game, market }: { game: GameDetail; market: MarketS
       {!check.ok && check.reason && <p className="text-sm text-amber-600">{check.reason}</p>}
       <button
         type="button"
-        disabled={!check.ok || stage !== null}
-        onClick={() => withAge((kp) => void submit(kp))}
+        disabled={ready === 'loading' || (ready === 'ready' && (!check.ok || stage !== null))}
+        onClick={() =>
+          ready === 'no-wallet' ? openGate() : withAge((kp) => void submit(kp), 'trade')
+        }
         className={`w-full rounded-lg py-3 font-bold text-white disabled:opacity-50 ${side === 'home' ? 'bg-home' : 'bg-away'}`}
       >
-        {stage ? STAGE_TEXT[stage] : `${action === 'buy' ? 'Buy' : 'Sell'} ${team}`}
+        {ready === 'no-wallet'
+          ? 'Set up wallet to trade'
+          : ready === 'loading'
+            ? 'Loading your balance…'
+            : stage
+              ? STAGE_TEXT[stage]
+              : `${action === 'buy' ? 'Buy' : 'Sell'} ${team}`}
       </button>
       {done && (
         <p className="text-sm text-emerald-600">

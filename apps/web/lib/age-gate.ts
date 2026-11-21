@@ -16,3 +16,23 @@ export function walletGate(store: KeyStore): WalletGate {
   if (peekBurner(store) === null) return ageAffirmed(store) ? 'ready' : 'ask-new'
   return needsAge(store) ? 'ask-existing' : 'ready'
 }
+
+/** What waits behind the gate: a trade, a Claim all run, or a faucet request. */
+export type GateAction = 'trade' | 'claim' | 'faucet'
+
+/**
+ * After the box is ticked: does the action that opened the gate go ahead? When the gate just
+ * created the burner (`created`), the wallet is empty, so only a faucet request can succeed;
+ * a trade or a claim is dropped and the UI points to the faucet instead.
+ */
+export function afterGate(action: GateAction, created: boolean): 'continue' | 'drop' {
+  return created && action !== 'faucet' ? 'drop' : 'continue'
+}
+
+/**
+ * Another tab changed the wallet keys while this tab's gate was open. It closes when that tab
+ * stored a readable burner and ticked the box, unless an action here is still waiting for it.
+ */
+export function gateClosesOnSync(store: KeyStore, pending: boolean): boolean {
+  return !pending && peekBurner(store) !== null && ageAffirmed(store)
+}

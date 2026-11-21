@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { checkTrade, type TradeFormInput } from '../lib/trade-form'
+import { checkTrade, type TradeFormInput, tradeReady } from '../lib/trade-form'
 
 const base: TradeFormInput = {
   action: 'buy',
@@ -65,5 +65,24 @@ describe('checkTrade', () => {
       quote: true,
       reason: 'You hold 38.721969 shares.',
     })
+  })
+})
+
+describe('tradeReady (fix M3)', () => {
+  const ME = 'Me1111111111111111111111111111111111111111'
+  const OTHER = 'Ot1111111111111111111111111111111111111111'
+
+  it('has no wallet to trade with before the gate created one', () => {
+    expect(tradeReady(null, undefined)).toBe('no-wallet')
+    expect(tradeReady(null, { wallet: ME })).toBe('no-wallet')
+  })
+
+  it('waits for this signer’s portfolio to load once', () => {
+    expect(tradeReady(ME, undefined)).toBe('loading')
+    expect(tradeReady(ME, { wallet: OTHER })).toBe('loading')
+  })
+
+  it('is ready once this signer’s portfolio has loaded', () => {
+    expect(tradeReady(ME, { wallet: ME })).toBe('ready')
   })
 })

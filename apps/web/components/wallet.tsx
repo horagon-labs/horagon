@@ -1,6 +1,8 @@
 'use client'
 // The burner wallet for the whole app, plus the wallet's portfolio (positions and mUSDC),
-// polled once here so the header, the trade panel and the claim button agree.
+// polled once here so the header, the trade panel and the claim button agree. The Claim all
+// run lives here too: its button shows in the wallet sheet and on the game page, and only
+// one run may be in flight.
 //
 // The 18+ self-declaration (spec section 12, R1) is asked here: no burner is created on a first
 // visit until the box is ticked, and a burner that was never asked sends nothing (trade, claim,
@@ -17,7 +19,7 @@ import {
   useRef,
   useState,
 } from 'react'
-import { walletGate } from '../lib/age-gate'
+import { afterGate, type GateAction, gateClosesOnSync, walletGate } from '../lib/age-gate'
 import { api } from '../lib/api'
 import {
   AGE_KEY,
@@ -32,6 +34,8 @@ import {
   openKeyStore,
   peekBurner,
 } from '../lib/burner'
+import { singleFlight } from '../lib/single-flight'
+import { claimAll } from '../lib/trade'
 import { usePoll } from '../lib/use-poll'
 import { AgeDialog } from './age-dialog'
 
@@ -46,6 +50,11 @@ interface WalletState {
   ephemeral: boolean
   /** The 18+ box was never ticked on this device: every send asks first. */
   ageNeeded: boolean
+  /**
+   * How many burners this tab's gate has created. The wallet sheet opens when it grows, so a
+   * new (empty) wallet goes to the faucet first.
+   */
+  walletsCreated: number
   portfolio: PositionsResponse | undefined
   refreshPortfolio: () => void
   exportKey: () => string
@@ -55,10 +64,21 @@ interface WalletState {
    * as an Error with a message for the user.
    */
   importKey: (text: string, affirmed: boolean) => boolean
-  /** Runs `send` with the burner once the 18+ box is ticked: at once when it already was. */
-  withAge: (send: Send) => void
+  /**
+   * Runs `send` with the burner once the 18+ box is ticked: at once when it already was. When
+   * the gate has to create the burner first, only a `faucet` action goes ahead (`afterGate`).
+   */
+  withAge: (send: Send, action?: GateAction) => void
   /** Shows the 18+ gate; ticking it creates the burner. */
   openGate: () => void
+  /** Starts Claim all (through the gate); does nothing while a run is in flight. */
+  startClaims: () => void
+  /** A Claim all run is in flight: every Claim all button is disabled. */
+  claiming: boolean
+  /** Claims of the last run that landed, in order, kept when a later one failed. */
+  claimed: string[]
+  /** What stopped the last Claim all run, if anything. */
+  claimError: unknown
 }
 
 const WalletContext = createContext<WalletState | null>(null)
@@ -70,17 +90,35 @@ interface Opened {
   ephemeral: boolean
 }
 
+interface Pending {
+  send: Send
+  action: GateAction
+}
+
+interface ClaimRun {
+  claiming: boolean
+  claimed: string[]
+  error: unknown
+}
+
 export function WalletProvider({ children }: { children: ReactNode }) {
   const [opened, setOpened] = useState<Opened | null>(null)
   const [keypair, setKeypair] = useState<Keypair | null>(null)
   const [ageOk, setAgeOk] = useState(false)
   const [gateOpen, setGateOpen] = useState(false)
   const [gateError, setGateError] = useState<string>()
+  const [walletsCreated, setWalletsCreated] = useState(0)
+  const [claimRun, setClaimRun] = useState<ClaimRun>({
+    claiming: false,
+    claimed: [],
+    error: undefined,
+  })
   // What the gate continues once the box is ticked (one at a time; a new ask replaces it).
-  const pending = useRef<Send | null>(null)
+  const pending = useRef<Pending | null>(null)
+  const claimFlight = useMemo(() => singleFlight(), [])
 
-  const ask = useCallback((send: Send | null, error?: string) => {
-    pending.current = send
+  const ask = useCallback((next: Pending | null, error?: string) => {
+    pending.current = next
     setGateError(error)
     setGateOpen(true)
   }, [])
@@ -100,7 +138,8 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       }
     }
     // Another tab imported, created or removed the key, or ticked the box: follow it, so two
-    // tabs never sign with different wallets. Reads only; a removed burner shows the gate.
+    // tabs never sign with different wallets. Reads only; a removed burner shows the gate, and
+    // a gate left open here closes once that tab confirmed (unless an action waits here).
     const onStorage = (e: StorageEvent) => {
       if (o.ephemeral || e.storageArea !== window.localStorage) return
       if (e.key !== null && e.key !== BURNER_KEY && e.key !== AGE_KEY) return
@@ -108,6 +147,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       setKeypair(kp)
       setAgeOk(ageAffirmed(o.store))
       if (kp === null) ask(null)
+      else if (gateClosesOnSync(o.store, pending.current !== null)) setGateOpen(false)
     }
     window.addEventListener('storage', onStorage)
     return () => window.removeEventListener('storage', onStorage)
@@ -116,7 +156,9 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   const onConfirm = useCallback(() => {
     if (!opened) return
     let kp: Keypair
+    let created: boolean
     try {
+      created = peekBurner(opened.store) === null
       affirmAge(opened.store)
       kp = ensureBurner(opened.store)
     } catch {
@@ -127,9 +169,11 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     setAgeOk(true)
     setKeypair(kp)
     setGateOpen(false)
-    const send = pending.current
+    if (created) setWalletsCreated((n) => n + 1)
+    const next = pending.current
     pending.current = null
-    send?.(kp)
+    // A new wallet holds nothing yet: a trade or a claim cannot succeed, the faucet can.
+    if (next && afterGate(next.action, created) === 'continue') next.send(kp)
   }, [opened])
 
   const onCancel = useCallback(() => {
@@ -138,10 +182,10 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const withAge = useCallback(
-    (send: Send) => {
+    (send: Send, action: GateAction = 'trade') => {
       // The stored flag is the truth (another tab may have changed it since the last render).
       if (opened && keypair && ageAffirmed(opened.store)) send(keypair)
-      else ask(send)
+      else ask({ send, action })
     },
     [opened, keypair, ask],
   )
@@ -171,6 +215,30 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   const portfolio = usePoll(address && `portfolio:${address}`, () =>
     api.portfolio(address as string),
   )
+  const refreshPortfolio = portfolio.refresh
+
+  const runClaims = useCallback(
+    (signer: Keypair) =>
+      void claimFlight.run(async () => {
+        setClaimRun({ claiming: true, claimed: [], error: undefined })
+        try {
+          // Each claim shows as it lands, so a later failure still lists the ones before it.
+          await claimAll(api, signer, (sig) =>
+            setClaimRun((run) => ({ ...run, claimed: [...run.claimed, sig] })),
+          )
+          setClaimRun((run) => ({ ...run, claiming: false }))
+        } catch (err) {
+          setClaimRun((run) => ({ ...run, claiming: false, error: err }))
+        } finally {
+          refreshPortfolio()
+        }
+      }),
+    [claimFlight, refreshPortfolio],
+  )
+
+  const startClaims = useCallback(() => {
+    if (!claimFlight.running()) withAge(runClaims, 'claim')
+  }, [claimFlight, withAge, runClaims])
 
   const value = useMemo<WalletState>(
     () => ({
@@ -178,14 +246,32 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       address,
       ephemeral: opened?.ephemeral ?? false,
       ageNeeded: !ageOk,
+      walletsCreated,
       portfolio: portfolio.data,
-      refreshPortfolio: portfolio.refresh,
+      refreshPortfolio,
       exportKey: () => (keypair ? exportBurner(keypair) : ''),
       importKey,
       withAge,
       openGate: () => ask(null),
+      startClaims,
+      claiming: claimRun.claiming,
+      claimed: claimRun.claimed,
+      claimError: claimRun.error,
     }),
-    [opened, keypair, address, ageOk, portfolio.data, portfolio.refresh, importKey, withAge, ask],
+    [
+      opened,
+      keypair,
+      address,
+      ageOk,
+      walletsCreated,
+      portfolio.data,
+      refreshPortfolio,
+      importKey,
+      withAge,
+      ask,
+      startClaims,
+      claimRun,
+    ],
   )
   return (
     <WalletContext.Provider value={value}>

@@ -1,6 +1,6 @@
 import { Keypair } from '@solana/web3.js'
 import { describe, expect, it } from 'vitest'
-import { walletGate } from '../lib/age-gate'
+import { afterGate, gateClosesOnSync, walletGate } from '../lib/age-gate'
 import { AGE_KEY, affirmAge, BURNER_KEY, exportBurner, type KeyStore } from '../lib/burner'
 
 function memoryStore(): KeyStore & { map: Map<string, string> } {
@@ -61,5 +61,49 @@ describe('walletGate (R1)', () => {
       removeItem: () => {},
     }
     expect(walletGate(refusing)).toBe('ask-new')
+  })
+})
+
+describe('afterGate (fix M3)', () => {
+  it('continues every action when the burner already existed', () => {
+    for (const action of ['trade', 'claim', 'faucet'] as const) {
+      expect(afterGate(action, false)).toBe('continue')
+    }
+  })
+
+  it('on a wallet the gate just created, continues only a faucet request', () => {
+    expect(afterGate('faucet', true)).toBe('continue')
+    expect(afterGate('trade', true)).toBe('drop')
+    expect(afterGate('claim', true)).toBe('drop')
+  })
+})
+
+describe('gateClosesOnSync (fix M4)', () => {
+  const readyStore = () => {
+    const store = memoryStore()
+    affirmAge(store)
+    store.setItem(BURNER_KEY, exportBurner(Keypair.generate()))
+    return store
+  }
+
+  it('closes when another tab stored a burner and ticked the box, with nothing pending', () => {
+    expect(gateClosesOnSync(readyStore(), false)).toBe(true)
+  })
+
+  it('stays open while an action waits for this tab to tick the box', () => {
+    expect(gateClosesOnSync(readyStore(), true)).toBe(false)
+  })
+
+  it('stays open without a burner or without the flag', () => {
+    const noBurner = memoryStore()
+    affirmAge(noBurner)
+    expect(gateClosesOnSync(noBurner, false)).toBe(false)
+    const noFlag = memoryStore()
+    noFlag.setItem(BURNER_KEY, exportBurner(Keypair.generate()))
+    expect(gateClosesOnSync(noFlag, false)).toBe(false)
+    const unreadable = memoryStore()
+    affirmAge(unreadable)
+    unreadable.setItem(BURNER_KEY, 'garbage')
+    expect(gateClosesOnSync(unreadable, false)).toBe(false)
   })
 })

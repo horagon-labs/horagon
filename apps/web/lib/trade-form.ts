@@ -58,3 +58,16 @@ export function checkTrade(i: TradeFormInput): TradeCheck {
   }
   return { ok: true, quote: true }
 }
+
+/**
+ * Whether the trade button can act yet. `no-wallet`: the gate has not created a burner.
+ * `loading`: this signer's portfolio has not loaded once, so the balance is unknown and a Buy
+ * would only be checked by the API. `ready` otherwise.
+ */
+export function tradeReady(
+  address: string | null,
+  portfolio: { wallet: string } | undefined,
+): 'no-wallet' | 'loading' | 'ready' {
+  if (address === null) return 'no-wallet'
+  return portfolio?.wallet === address ? 'ready' : 'loading'
+}
