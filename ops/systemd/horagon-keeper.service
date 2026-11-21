@@ -18,8 +18,11 @@ Environment=NODE_ENV=production
 ExecStart=%h/horagon/apps/keeper/node_modules/.bin/tsx src/main.ts
 Restart=always
 RestartSec=5
-# On SIGTERM main.ts ends the round after the step in progress, then exits. 120 s covers the
-# longest step: one 90 s executor wait plus an RPC timeout. A second SIGTERM exits at once.
+# On SIGTERM main.ts ends the round after the step in progress, then exits. 120 s covers one
+# executor wait (90 s) plus an RPC timeout; a tick or treasury step can hold several sends, so a
+# longer step is killed. That is safe to resume: every send carries an `isDone` check against
+# chain state, so the next start re-plans from the chain and does not repeat work that landed.
+# A second SIGTERM exits at once.
 KillSignal=SIGTERM
 TimeoutStopSec=120
 MemoryMax=768M

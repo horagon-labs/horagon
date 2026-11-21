@@ -1,8 +1,10 @@
 import {
   type DbHandle,
+  getDraft,
   getEvidence,
   heartbeat,
   putEvidence,
+  upsertDraft,
   upsertScheduledGames,
 } from '@horagon/db'
 import { createTestDb } from '@horagon/db/testing'
@@ -11,6 +13,7 @@ import { buildEvidence, sealEvidence } from '../src/evidence'
 import { opsErrorReport } from '../src/ops/args'
 import {
   type AttemptLookups,
+  chooseAndStoreEvidence,
   chooseEvidence,
   confirmedAtOf,
   EvidenceRefusal,
@@ -18,6 +21,7 @@ import {
   type ProposeRecord,
   pendingAttempt,
   proposeRecordKey,
+  proposeStatusLine,
   readProposeRecord,
   startAttempt,
   writeProposeRecord,
@@ -266,13 +270,30 @@ describe('pendingAttempt', () => {
   })
   const unresolved = { at: NOW - 200, state: 'unresolved' as const, sig: '5sig', ended: NOW - 100 }
 
-  it('finds nothing without a record, after a failed send, or in an earlier round', async () => {
+  it('finds nothing without a record or after a failed send', async () => {
     const c = chain({})
     expect(await pendingAttempt(null, 1, c, NOW)).toBeNull()
     expect(await pendingAttempt(record({ at: NOW - 5, state: 'failed' }), 1, c, NOW)).toBeNull()
-    // Round 1 ended with its proposal challenged: nothing of it can land in round 2.
-    expect(await pendingAttempt(record({ ...unresolved, height: 990 }), 2, c, NOW)).toBeNull()
     expect(c.reads).toEqual([])
+  })
+
+  it('in an earlier round, still waits on an attempt that may land, but not on one that did', async () => {
+    // The program takes a propose from Challenged with no round: a round-1 attempt whose
+    // blockhash is still valid can land after the challenge.
+    const seen = chain({ '5sig': null }, 1_000)
+    expect(await pendingAttempt(record({ ...unresolved, height: 990 }), 2, seen, NOW)).toBe(
+      '5sig may still land until block height 1190 (now 1000)',
+    )
+    expect(await pendingAttempt(record({ ...unresolved, height: 790 }), 2, seen, NOW)).toBeNull()
+    const sending = record({ at: NOW - 5, state: 'sending' })
+    expect(await pendingAttempt(sending, 2, seen, NOW)).toContain('never recorded its end')
+    // Landed in round 1 and challenged since: expected, not a reason to wait.
+    const landed = record({ at: NOW - 5, state: 'landed', sig: '5ok' })
+    expect(await pendingAttempt(landed, 2, seen, NOW)).toBeNull()
+    const confirmed = chain({ '5sig': { err: null, confirmationStatus: 'confirmed' } })
+    expect(
+      await pendingAttempt(record({ ...unresolved, height: 990 }), 2, confirmed, NOW),
+    ).toBeNull()
   })
 
   it('refuses an unreadable record, a chain read behind it, and a landed attempt', async () => {
@@ -351,5 +372,168 @@ describe('pendingAttempt', () => {
       { at: NOW - 40, state: 'unresolved', sig: '5new', ended: NOW - 10, height: 990 },
     )
     expect(await pendingAttempt(both, 1, c, NOW)).toContain('5old may still land')
+  })
+})
+
+describe('proposeStatusLine', () => {
+  const NOW = 10_000
+  const chain = (
+    status: { err: unknown; confirmationStatus?: string } | null = null,
+    height = 1_000,
+  ): AttemptLookups => ({
+    status: async () => status,
+    blockHeight: async () => height,
+  })
+  const record = (...attempts: ProposeRecord['attempts']): ProposeRecord => ({
+    hash: 'aa',
+    round: 1,
+    attempts,
+  })
+  const SIG = '5Zq8KJ2vXn3mP7wYtR4cLbH9dFgAeUoS6iNxVjMkQhTy'
+  const SHORT = '5Zq8KJ2v...QhTy'
+  const sentAt900 = record({
+    at: NOW - 200,
+    state: 'unresolved',
+    sig: SIG,
+    ended: NOW - 100,
+    height: 900,
+  })
+
+  it('prints nothing without a record', async () => {
+    expect(await proposeStatusLine(null, 1, chain(), NOW)).toBeNull()
+  })
+
+  it('sending: the send never ended, so it may still land; after 15 min it is expired', async () => {
+    const line = await proposeStatusLine(
+      record({ at: NOW - 60, state: 'sending' }),
+      1,
+      chain(),
+      NOW,
+    )
+    expect(line).toBe(
+      '  propose attempt: sending  sig none  round 1  pending check: may still land',
+    )
+    const old = await proposeStatusLine(
+      record({ at: NOW - 901, state: 'sending' }),
+      1,
+      chain(),
+      NOW,
+    )
+    expect(old).toBe('  propose attempt: sending  sig none  round 1  pending check: expired')
+  })
+
+  it('sent: may still land until its height has passed, then expired', async () => {
+    expect(await proposeStatusLine(sentAt900, 1, chain(null, 1_000), NOW)).toBe(
+      `  propose attempt: sent  sig ${SHORT}  round 1  pending check: may still land`,
+    )
+    expect(await proposeStatusLine(sentAt900, 1, chain(null, 1_101), NOW)).toBe(
+      `  propose attempt: sent  sig ${SHORT}  round 1  pending check: expired`,
+    )
+  })
+
+  it('sent and found on chain: landed', async () => {
+    const line = await proposeStatusLine(
+      sentAt900,
+      1,
+      chain({ err: null, confirmationStatus: 'finalized' }),
+      NOW,
+    )
+    expect(line).toBe(`  propose attempt: sent  sig ${SHORT}  round 1  pending check: landed`)
+  })
+
+  it('ended: landed, or failed (nothing can land)', async () => {
+    const landed = record({ at: NOW - 5, state: 'landed', sig: SIG })
+    expect(await proposeStatusLine(landed, 1, chain(), NOW)).toBe(
+      `  propose attempt: ended  sig ${SHORT}  round 1  pending check: landed`,
+    )
+    const failed = record({ at: NOW - 5, state: 'failed' })
+    expect(await proposeStatusLine(failed, 1, chain(), NOW)).toBe(
+      '  propose attempt: ended  sig none  round 1  pending check: expired',
+    )
+  })
+
+  it('never prints a full signature, and agrees with pendingAttempt', async () => {
+    for (const height of [1_000, 1_101]) {
+      const c = chain(null, height)
+      const line = await proposeStatusLine(sentAt900, 1, c, NOW)
+      expect(line).not.toContain(SIG)
+      const expired = (await pendingAttempt(sentAt900, 1, c, NOW)) === null
+      expect(line?.endsWith(expired ? 'expired' : 'may still land')).toBe(true)
+    }
+  })
+
+  it('an unreadable record may still land', async () => {
+    expect(await proposeStatusLine('unreadable', 1, chain(), NOW)).toBe(
+      '  propose record: unreadable  pending check: may still land',
+    )
+  })
+})
+
+describe('chooseAndStoreEvidence', () => {
+  const row = { gameId: ID, ...draft }
+  const changedDraft = {
+    ...draft,
+    periods: [draft.periods[1], draft.periods[0], ...draft.periods.slice(2)] as Array<
+      [number, number]
+    >,
+    fetchedAt: new Date('2026-11-19T02:40:00.000Z'),
+  }
+  const changedRow = { gameId: ID, ...changedDraft }
+  const args = (newDraft: typeof row | null, d: typeof draft) => ({
+    gameId: ID,
+    newDraft,
+    seal: sealer(d),
+    now: RERUN,
+    replace: false,
+    pending: nothingPending,
+  })
+
+  it('writes the evidence, then the draft, when accepted', async () => {
+    const choice = await chooseAndStoreEvidence(h.db, args(row, draft))
+    expect(choice.write).toBe(true)
+    expect(await getEvidence(h.db, ID, 0)).toEqual({
+      json: choice.sealed.json,
+      hash: choice.sealed.hashHex,
+    })
+    expect((await getDraft(h.db, ID))?.fetchedAt).toEqual(draft.fetchedAt)
+  })
+
+  it('a refused run with changed inputs leaves the draft row as it was, fetchedAt included', async () => {
+    await upsertDraft(h.db, row)
+    const first = await storeFirst()
+    const before = await getDraft(h.db, ID)
+    await expect(
+      chooseAndStoreEvidence(h.db, args(changedRow, changedDraft)),
+    ).rejects.toBeInstanceOf(EvidenceRefusal)
+    expect(await getDraft(h.db, ID)).toEqual(before)
+    expect(await getEvidence(h.db, ID, 0)).toEqual({ json: first.json, hash: first.hashHex })
+  })
+
+  it('after a refused run, a re-run with the original inputs reuses the stored evidence: same hash, no write', async () => {
+    await upsertDraft(h.db, row)
+    const first = await storeFirst()
+    await expect(
+      chooseAndStoreEvidence(h.db, args(changedRow, changedDraft)),
+    ).rejects.toBeInstanceOf(EvidenceRefusal)
+    const stored = await getDraft(h.db, ID)
+    if (!stored) throw new Error('draft lost')
+    // The original inputs: the stored draft, used as it is (no new draft to write).
+    const again = await chooseAndStoreEvidence(h.db, args(null, stored))
+    expect(again.write).toBe(false)
+    expect(again.sealed.hashHex).toBe(first.hashHex)
+    expect(again.sealed.json).toBe(first.json)
+    expect(await getDraft(h.db, ID)).toEqual(stored)
+  })
+
+  it('--replace-evidence writes the evidence and the new draft once nothing is pending', async () => {
+    await upsertDraft(h.db, row)
+    await storeFirst()
+    const choice = await chooseAndStoreEvidence(h.db, {
+      ...args(changedRow, changedDraft),
+      replace: true,
+    })
+    expect(choice.write).toBe(true)
+    expect((await getDraft(h.db, ID))?.fetchedAt).toEqual(changedDraft.fetchedAt)
+    expect((await getEvidence(h.db, ID, 0))?.hash).toBe(choice.sealed.hashHex)
   })
 })

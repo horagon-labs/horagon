@@ -8,7 +8,14 @@
 // Every attempt is recorded before it is sent, in the `keeper_heartbeats` row
 // `propose:<gameId>`: the evidence hash it carries, the challenge round, and how the send
 // ended (the signature and the block height when it ended unresolved).
-import { type Db, getEvidence, getHeartbeat, heartbeat } from '@horagon/db'
+import {
+  type Db,
+  getEvidence,
+  getHeartbeat,
+  heartbeat,
+  putEvidence,
+  upsertDraft,
+} from '@horagon/db'
 import { errorSummary } from '@horagon/sdk'
 import { z } from 'zod'
 import type { SealedEvidence } from '../evidence'
@@ -67,7 +74,10 @@ export async function writeProposeRecord(
 
 /**
  * The record with one more attempt, `sending`, and that attempt's index. The attempts of other
- * evidence or of an earlier round are dropped: none of them can land any more by then.
+ * evidence or of an earlier round are dropped. `--replace-evidence` has checked them first
+ * (`pendingVerdict`); a reused send carries the same hash as the challenged proposal, so one of
+ * its earlier attempts that lands late changes nothing, and for any other mismatch the keeper's
+ * `evidence-mismatch:` alert fires.
  */
 export function startAttempt(
   record: ProposeRecord | 'unreadable' | null,
@@ -105,21 +115,31 @@ export interface AttemptLookups {
 
 const iso = (secs: number) => new Date(secs * 1000).toISOString().replace(/\.000Z$/, 'Z')
 
+/** An attempt that did land, or may still: with the words `status` and the refusals use. */
+export interface Pending {
+  kind: 'landed' | 'may-land'
+  why: string
+}
+const landed = (why: string): Pending => ({ kind: 'landed', why })
+const mayLand = (why: string): Pending => ({ kind: 'may-land', why })
+
 async function attemptPending(
   a: ProposeAttempt,
   chain: AttemptLookups,
   now: number,
-): Promise<string | null> {
+): Promise<Pending | null> {
   const name = a.sig ?? `the attempt sent at ${iso(a.at)}`
   switch (a.state) {
     case 'failed':
       return null
     case 'landed':
-      return `${name} landed: run status`
+      return landed(`${name} landed: run status`)
     case 'sending': {
       const until = a.at + SENDING_WAIT_SECS
       return now < until
-        ? `a propose started at ${iso(a.at)} never recorded its end (still running, or stopped); it may land until ${iso(until)}`
+        ? mayLand(
+            `a propose started at ${iso(a.at)} never recorded its end (still running, or stopped); it may land until ${iso(until)}`,
+          )
         : null
     }
     case 'unresolved': {
@@ -128,53 +148,95 @@ async function attemptPending(
         try {
           status = await chain.status(a.sig)
         } catch (err) {
-          return `cannot read the status of ${a.sig}: ${errorSummary(err).message}`
+          return mayLand(`cannot read the status of ${a.sig}: ${errorSummary(err).message}`)
         }
         if (status && status.confirmationStatus !== 'processed') {
-          return status.err ? null : `${a.sig} landed: run status`
+          return status.err ? null : landed(`${a.sig} landed: run status`)
         }
-        if (status) return `${a.sig} is processed and may still land`
+        if (status) return mayLand(`${a.sig} is processed and may still land`)
       }
       if (a.height !== undefined) {
         let height: number
         try {
           height = await chain.blockHeight()
         } catch (err) {
-          return `cannot read the block height: ${errorSummary(err).message}`
+          return mayLand(`cannot read the block height: ${errorSummary(err).message}`)
         }
         const last = a.height + ATTEMPT_EXPIRY_BLOCKS
         return height > last
           ? null
-          : `${name} may still land until block height ${last} (now ${height})`
+          : mayLand(`${name} may still land until block height ${last} (now ${height})`)
       }
       const until = (a.ended ?? a.at) + UNRESOLVED_WAIT_SECS
-      return now < until ? `${name} may still land until ${iso(until)}` : null
+      return now < until ? mayLand(`${name} may still land until ${iso(until)}`) : null
     }
   }
 }
 
 /**
- * Why an attempt recorded for this game may still land (or did), or null when none can. Only
- * the attempts of the chain's current challenge round count: an earlier round ended with its
- * proposal challenged.
+ * What the record says about a game now: the first attempt that landed or may still land, or
+ * null when none can. Unreadable and ahead-of-the-chain records count as "may land" (fail
+ * closed). In an earlier challenge round a landed attempt is expected (that proposal was
+ * challenged), but an attempt that may still land is not: the program takes a propose from
+ * `Challenged` without a round, so one whose blockhash is still valid can land just after the
+ * challenge. Its time bound is the same as in the current round, which is longer than a
+ * blockhash lives.
  */
+export async function pendingVerdict(
+  record: ProposeRecord | 'unreadable' | null,
+  round: number,
+  chain: AttemptLookups,
+  nowSecs: number,
+): Promise<Pending | null> {
+  if (record === null) return null
+  if (record === 'unreadable') return mayLand('the propose record of this game does not parse')
+  if (record.round > round) {
+    return mayLand(
+      `the chain read is behind the last propose (challenge round ${record.round}, chain ${round}): run status`,
+    )
+  }
+  for (const a of record.attempts) {
+    const p = await attemptPending(a, chain, nowSecs)
+    if (p && !(record.round < round && p.kind === 'landed')) return p
+  }
+  return null
+}
+
+/** Why an attempt recorded for this game may still land (or did), or null when none can. */
 export async function pendingAttempt(
   record: ProposeRecord | 'unreadable' | null,
   round: number,
   chain: AttemptLookups,
   nowSecs: number,
 ): Promise<string | null> {
+  return (await pendingVerdict(record, round, chain, nowSecs))?.why ?? null
+}
+
+/** `signature` in the short form `status` prints. */
+export const shortSig = (sig: string) =>
+  sig.length > 16 ? `${sig.slice(0, 8)}...${sig.slice(-4)}` : sig
+
+/**
+ * The `status` line of a game's propose record, or null without one: the newest attempt's state
+ * (sending, sent, or ended), signature and round, and the pending check as `pendingAttempt`
+ * decides it now: may still land, expired, or landed. `--replace-evidence` goes ahead once the
+ * line ends in `pending check: expired`.
+ */
+export async function proposeStatusLine(
+  record: ProposeRecord | 'unreadable' | null,
+  round: number,
+  chain: AttemptLookups,
+  nowSecs: number,
+): Promise<string | null> {
   if (record === null) return null
-  if (record === 'unreadable') return 'the propose record of this game does not parse'
-  if (record.round > round) {
-    return `the chain read is behind the last propose (challenge round ${record.round}, chain ${round}): run status`
-  }
-  if (record.round < round) return null
-  for (const a of record.attempts) {
-    const why = await attemptPending(a, chain, nowSecs)
-    if (why) return why
-  }
-  return null
+  const verdict = await pendingVerdict(record, round, chain, nowSecs)
+  const check = `pending check: ${verdict ? (verdict.kind === 'landed' ? 'landed' : 'may still land') : 'expired'}`
+  if (record === 'unreadable') return `  propose record: unreadable  ${check}`
+  const newest = record.attempts[record.attempts.length - 1]
+  if (!newest) return `  propose record: no attempt  round ${record.round}  ${check}`
+  const state =
+    newest.state === 'sending' ? 'sending' : newest.state === 'unresolved' ? 'sent' : 'ended'
+  return `  propose attempt: ${state}  sig ${newest.sig ? shortSig(newest.sig) : 'none'}  round ${record.round}  ${check}`
 }
 
 /** A propose refused before anything was written or sent (exit 1). */
@@ -229,10 +291,40 @@ export async function chooseEvidence(
       `${p.gameId}: the stored evidence (sha256 ${stored.hash}) was sealed from other inputs ` +
         `(score, box score, notice or draft) than this run's (sha256 ${fresh.hashHex}). An earlier ` +
         'propose with it may still land: wait until `status` shows the market proposed (then ' +
-        'there is nothing to do) or that attempt expired, then re-run with --replace-evidence.',
+        'there is nothing to do) or its propose line ends in "pending check: expired", then re-run ' +
+        'with --replace-evidence.',
     )
   }
   const why = await p.pending()
   if (why) throw new EvidenceRefusal(`${p.gameId}: --replace-evidence refused: ${why}`)
   return { sealed: fresh, write: true }
+}
+
+/** A draft row to write, as `upsertDraft` takes it. */
+export type DraftInsert = Parameters<typeof upsertDraft>[1]
+
+/**
+ * `chooseEvidence`, then the writes it allows: the evidence (when `write`), then `newDraft` (a
+ * draft this run built in memory; null when the stored one is used as it is), so that a refused
+ * run changes nothing. The DB functions take a `Db`, not a transaction, so these are separate
+ * writes: evidence first, because a draft written without its evidence would make a re-run with
+ * the same inputs seal other evidence than the stored one, while evidence without its draft only
+ * needs a re-run with `--replace-evidence` (nothing was sent yet). The caller records the
+ * attempt after both.
+ */
+export async function chooseAndStoreEvidence(
+  db: Db,
+  p: Parameters<typeof chooseEvidence>[1] & { newDraft: DraftInsert | null },
+): Promise<EvidenceChoice> {
+  const choice = await chooseEvidence(db, p)
+  if (choice.write) {
+    await putEvidence(db, {
+      gameId: p.gameId,
+      kind: 0,
+      json: choice.sealed.json,
+      hash: choice.sealed.hashHex,
+    })
+  }
+  if (p.newDraft) await upsertDraft(db, p.newDraft)
+  return choice
 }

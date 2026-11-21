@@ -15,12 +15,10 @@ import {
   getHeartbeat,
   listGames,
   logOps,
-  putEvidence,
   setDraftState,
   setFeatured,
   setWalletKind,
   updateMarket,
-  upsertDraft,
 } from '@horagon/db'
 import {
   authorityOutcomeAtaIxs,
@@ -63,10 +61,12 @@ import {
 } from './args'
 import {
   type AttemptLookups,
-  chooseEvidence,
+  chooseAndStoreEvidence,
+  type DraftInsert,
   endAttempt,
   type ProposeAttempt,
   pendingAttempt,
+  proposeStatusLine,
   readProposeRecord,
   startAttempt,
   writeProposeRecord,
@@ -241,15 +241,20 @@ async function propose(c: Ctx, gameId: string, a: ProposeArgs): Promise<void> {
       `${gameId}: proposing opens at end_ts ${new Date(gm.endTs * 1000).toISOString()}`,
     )
   }
+  // The draft this run proposes, built in memory. `newDraft` is written only once
+  // `chooseAndStoreEvidence` accepts the run: a refused run leaves the stored draft, and the
+  // evidence rebuilt from it, as they were.
+  const prior = await getDraft(c.db, gameId)
+  let draft: NonNullable<typeof prior> | DraftInsert | null = prior
+  let newDraft: DraftInsert | null = null
   let confirmUrl: string
   let confirmSource: string
   if (a.status === 'postponed') {
     confirmUrl = a.notice
     confirmSource = 'notice'
-    const existing = await getDraft(c.db, gameId)
     // A postponed draft the keeper wrote keeps its ESPN source; otherwise the notice is the draft.
-    if (!(existing?.status === 'postponed' && existing.state === 'pending')) {
-      await upsertDraft(c.db, {
+    if (!(prior?.status === 'postponed' && prior.state === 'pending')) {
+      newDraft = {
         gameId,
         status: 'postponed',
         homeScore: 0,
@@ -257,7 +262,7 @@ async function propose(c: Ctx, gameId: string, a: ProposeArgs): Promise<void> {
         periods: [],
         sourceUrl: confirmUrl,
         fetchedAt: new Date(),
-      })
+      }
     }
   } else {
     const { box, home, away } = a
@@ -266,7 +271,6 @@ async function propose(c: Ctx, gameId: string, a: ProposeArgs): Promise<void> {
       // The guardian's own reading replaces ESPN's (after a challenge, or bad linescores). A
       // re-run with the same reading keeps that draft and its time, so the evidence rebuilds to
       // the same hash.
-      const prior = await getDraft(c.db, gameId)
       const same =
         prior?.state === 'pending' &&
         prior.status === 'final' &&
@@ -274,8 +278,9 @@ async function propose(c: Ctx, gameId: string, a: ProposeArgs): Promise<void> {
         prior.awayScore === away &&
         prior.sourceUrl === box.url &&
         JSON.stringify(prior.periods) === JSON.stringify(a.periods)
-      if (!same) {
-        await upsertDraft(c.db, {
+      // upsertDraft never overwrites a proposed draft: it stays, and is refused below.
+      if (!same && prior?.state !== 'proposed') {
+        newDraft = {
           gameId,
           status: 'final',
           homeScore: home,
@@ -283,39 +288,43 @@ async function propose(c: Ctx, gameId: string, a: ProposeArgs): Promise<void> {
           periods: a.periods,
           sourceUrl: box.url,
           fetchedAt: new Date(),
-        })
+        }
       }
     }
-    const d = await getDraft(c.db, gameId)
-    if (d?.state !== 'pending' || d.status !== 'final')
+    draft = newDraft ?? prior
+    if (!draft || (draft === prior && prior?.state !== 'pending') || draft.status !== 'final')
       throw new Error(`${gameId}: no pending draft (keeper writes one 60 s after a stable Final)`)
-    if (d.homeScore !== home || d.awayScore !== away) {
+    if (draft.homeScore !== home || draft.awayScore !== away) {
       throw new Error(
-        `box score ${home}-${away} differs from the draft ${d.homeScore}-${d.awayScore}: halt, check, then pass --periods`,
+        `box score ${home}-${away} differs from the draft ${draft.homeScore}-${draft.awayScore}: halt, check, then pass --periods`,
       )
     }
     confirmUrl = box.url
     confirmSource = box.source
   }
-  const draft = await getDraft(c.db, gameId)
+  draft = newDraft ?? prior
   // upsertDraft never overwrites a proposed draft: never propose one by accident.
-  if (draft?.state !== 'pending' || draft.status !== status)
+  if (!draft || (draft === prior && prior?.state !== 'pending') || draft.status !== status)
     throw new Error(`${gameId}: no pending ${status} draft to propose; run status`)
+  const sealDraft = draft
   const round = gm.challengeCount
   const record = await readProposeRecord(c.db, gameId)
   const startedAt = Math.floor(Date.now() / 1000)
   // A re-run sends the evidence already stored, or refuses (propose-evidence.ts).
-  const { sealed, write } = await chooseEvidence(c.db, {
+  const { sealed, write } = await chooseAndStoreEvidence(c.db, {
     gameId,
+    newDraft,
     seal: (confirmedAt) =>
-      sealEvidence(buildEvidence({ game, draft, kind: 0, confirmUrl, confirmSource, confirmedAt })),
+      sealEvidence(
+        buildEvidence({ game, draft: sealDraft, kind: 0, confirmUrl, confirmSource, confirmedAt }),
+      ),
     now: new Date(),
     replace: a.replace,
     pending: () => pendingAttempt(record, round, attemptLookups(c.connection), startedAt),
   })
-  // Published before the propose: the hash on chain must be fetchable once it lands.
-  if (write) await putEvidence(c.db, { gameId, kind: 0, json: sealed.json, hash: sealed.hashHex })
-  else console.log(`sending the evidence an earlier propose stored (sha256 ${sealed.hashHex})`)
+  // The evidence was published before the propose: the hash on chain must be fetchable.
+  if (!write)
+    console.log(`sending the evidence an earlier propose stored (sha256 ${sealed.hashHex})`)
   // Recorded before it is sent: a later --replace-evidence must know it may land.
   const attempt = startAttempt(record, sealed.hashHex, round, startedAt)
   await writeProposeRecord(c.db, gameId, attempt.record)
@@ -595,6 +604,7 @@ async function status(db: Db, date: string | undefined): Promise<void> {
       ? `keeper heartbeat ${Math.round((Date.now() - hb.ts.getTime()) / 1000)} s ago ${JSON.stringify(hb.info)}`
       : 'keeper heartbeat: none',
   )
+  const chain = statusChain()
   for (const g of await listGames(db, { from, to })) {
     const m = g.markets.find((x) => x.kind === 0)
     const d = await getDraft(db, g.id)
@@ -613,6 +623,61 @@ async function status(db: Db, date: string | undefined): Promise<void> {
         .filter(Boolean)
         .join('  '),
     )
+    const record = await readProposeRecord(db, g.id)
+    if (record === null) continue
+    // The same check `propose --replace-evidence` makes. The chain is read for the signature,
+    // the block height and the challenge round; when it cannot be, the check says so (and a
+    // record that needs the chain reads "may still land").
+    const round = m ? await chain.round(m.marketId, m.challengeCount) : 0
+    const line = await proposeStatusLine(
+      record,
+      round,
+      chain.lookups,
+      Math.floor(Date.now() / 1000),
+    )
+    if (line) console.log(line)
+  }
+}
+
+/**
+ * What `status` reads from the chain for a propose record, connected only when one is needed.
+ * Without HORAGON_RPC_URL the lookups fail, which the pending check treats as "may still land".
+ */
+function statusChain(): {
+  lookups: AttemptLookups
+  round(marketId: string, dbRound: number): Promise<number>
+} {
+  let connection: Promise<Connection> | undefined
+  const connect = (): Promise<Connection> => {
+    connection ??= (async () => {
+      const [rpc] = rpcEndpoints([need('HORAGON_RPC_URL')], env.RPC_WS_URLS)
+      if (!rpc) throw new Error('HORAGON_RPC_URL is not set')
+      const conn = makeConnection(rpc.url, rpc.wsUrl)
+      await assertCluster(conn, cluster())
+      return conn
+    })()
+    return connection
+  }
+  return {
+    lookups: {
+      status: async (sig) => attemptLookups(await connect()).status(sig),
+      blockHeight: async () => attemptLookups(await connect()).blockHeight(),
+    },
+    // The challenge round on chain; the indexed one when the chain cannot be read.
+    round: async (marketId, dbRound) => {
+      try {
+        const program = new HoragonProgram({
+          collateralMint: publicKeyArg(
+            'HORAGON_COLLATERAL_MINT',
+            env.HORAGON_COLLATERAL_MINT ?? DEVNET_MUSDC_MINT.toBase58(),
+          ),
+        })
+        const gm = await program.fetchGameMarket(await connect(), BigInt(marketId))
+        return gm ? gm.challengeCount : dbRound
+      } catch {
+        return dbRound
+      }
+    },
   }
 }
 
