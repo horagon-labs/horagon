@@ -6,7 +6,8 @@ Times are UTC. `<ET date>` is the NBA game date (Eastern time, `YYYY-MM-DD`), an
 scheduled tip-off. Every command and alert below comes from the code at this commit: the
 keeper (`apps/keeper/src`), `horagon-ops` (`apps/keeper/src/ops`) and the units in
 `ops/systemd`. `apps/keeper/test/runbook.test.ts` fails when an alert key the code can send is
-missing from the alert table below, or when the table names one it never sends.
+missing from the alert table below, or when this runbook names one it never sends (in the table
+or in backticks anywhere else).
 
 ## Before you start
 
@@ -17,7 +18,7 @@ missing from the alert table below, or when the table names one it never sends.
 # .env.example (git-ignored, never committed).
 set -a; . ./.env; set +a
 alias horagon-ops='pnpm --filter @horagon/keeper ops'
-horagon-ops help          # prints the usage; `--help` is not an option and exits 1
+horagon-ops help          # prints the usage (so do --help and -h)
 ```
 
 - `pnpm --filter @horagon/keeper ops <command> [flags]` passes the flags through as typed. The
@@ -68,9 +69,9 @@ the alert table; the key itself is in the keeper's `alert` log line (the last co
 
 ## The day before (by 05:00 UTC)
 
-1. `horagon-ops status --date <ET date>`: every game of that date and the next, by tip-off,
-   with `featured` on the featured ones and `no market` until S − 60 min. The first line is the
-   keeper heartbeat.
+1. `horagon-ops status --date <ET date>`: the games whose tip-off falls in the 48 h from 00:00 UTC
+   of that date (without `--date`: from 12 h ago), by tip-off, with `featured` on the featured
+   ones and `no market` until S − 60 min. The first line is the keeper heartbeat.
 2. Featured games (at most 4 a date, 1,000 mUSDC seed instead of 300): the hourly schedule pass
    picks them once per date. To change them: `horagon-ops featured <ET date> <gameId>...` (1 to
    4 ids; it replaces that date's choice, and the schedule pass keeps it). The seed is taken
@@ -79,7 +80,7 @@ the alert table; the key itself is in the keeper's `alert` log line (the last co
    and moves the attestor's mUSDC into the treasury, up to the seeds of the next 36 h + 20 %.
    A 12-game night needs 7,680 mUSDC, so a fresh treasury needs about 8 hourly passes. If
    `treasury-low` came in, add mUSDC to the attestor wallet (claim the faucet for another wallet
-   you control and transfer it); the next hourly pass moves it.
+   you control and transfer it); the next hourly pass moves it (a restart moves it at once: H).
 4. SOL:
    - The Authority PDA pays 0.036 SOL of rent per market; `sol-authority` fires under
      2 × max(next night's games still without a market, 4) × 0.036 SOL. Top it up with
@@ -123,8 +124,9 @@ recycles. `status` then shows `market:finalized`, then `market:recycled`.
 
 1. On `draft:<gameId>:<count>`, open the game's box score on nba.com or basketball-reference.com
    (espn.com is accepted with a warning: it is the feed itself) and check the final score
-   against the alert. The alert and `status` show the score away-home, like `AWAY@HOME`;
-   `--score` takes home-away, so copy the command line the alert prints.
+   against the alert. `draft:` and `status` show the score away-home, like `AWAY@HOME`, while
+   `periods:` and `tie:` print it home-away after `AWAY@HOME`. `--score` takes home-away, so
+   copy the command line the `draft:` alert prints.
 2. Run it:
    `horagon-ops propose <gameId> --box-score <url> --score <home>-<away>`.
    - It refuses before the close: `proposing opens at end_ts <time>`. Run it again after that
@@ -161,7 +163,12 @@ Steps:
 1. After exit status 3, look the printed signature up (Solana Explorer, devnet) and run
    `horagon-ops status --date <ET date>`. Do not change the inputs yet.
 2. Find the game's line and the line under it:
-   `propose attempt: <sending|sent|ended>  sig <signature>  round <n>  pending check: <verdict>`.
+   `propose attempt: <sending|sent|ended>  sig <first 8>...<last 4>  round <n>  pending check: <verdict>`.
+   The signature is shortened: take the full one from the propose output. Two other forms:
+   `propose record: no attempt  round <n>  pending check: <verdict>` (a record without a send),
+   and `propose record: unreadable  pending check: may still land` (the record does not parse;
+   it fails closed, so `--replace-evidence` stays refused, while a re-run with the same inputs
+   is still safe).
 3. `market:proposed` on the game's line: a propose landed. Nothing to do, unless it is the wrong
    result (challenge, then C).
 4. `pending check: may still land`: an attempt can still land. Wait and run `status` again;
@@ -240,12 +247,16 @@ ssh "$HORAGON_VPS" systemctl --user restart horagon-keeper
 - A stop (SIGTERM) ends the round after the step in progress. The unit waits up to 120 s
   (`TimeoutStopSec`): one transaction wait (90 s) plus an RPC timeout. A step that holds
   several sends can take longer and is then killed. A second SIGTERM exits at once.
-- The next start checks every RPC's cluster, then re-plans every action from chain state. Each
-  send first asks the chain whether its effect is already there (`isDone`), so work that landed
-  is not repeated. A transaction in flight when the keeper was killed may still land after that
-  check: a duplicate create, halt, finalize or recycle is refused on chain, and a treasury
-  top-up can land twice (accepted: play money, inside the project's own accounts). The keeper
-  keeps no attempt records of its own sends; only `horagon-ops propose` does.
+- Avoid the last 30 min before any game's close: a stop holds back halts until the new process
+  runs, and the new process alerts `feed-silent:` until its first feed read (below).
+- The next start checks every RPC's cluster, then re-plans every action from chain state: work
+  that landed is seen on chain and not repeated. (`isDone` is asked only between the retries of
+  one send, not across a restart.) A transaction in flight when the keeper stopped may land
+  after the new process read the chain, which then sends the same action again: the chain
+  refuses one of the two (create, halt, finalize, recycle), and when it refuses the new one it
+  arrives as `fail:<action>:<gameId>`. That is expected once `status` shows the effect. A
+  treasury top-up can land twice (accepted: play money, inside the project's own accounts). The
+  keeper keeps no attempt records of its own sends; only `horagon-ops propose` does.
 - The first round after a start also runs the hourly steps (schedule, treasury, archive
   retention), and the alerter has forgotten what it sent, so open alerts come again.
 - In the last 30 min before a close, a game the keeper has not read since the start (ESPN not
@@ -254,6 +265,32 @@ ssh "$HORAGON_VPS" systemctl --user restart horagon-keeper
 - `fund-authority` is the one command with no `isDone` check. After it ends with exit status 3,
   look the printed signature up before running it again, or it sends the SOL twice. (`status`
   does not show the Authority's balance.)
+
+### H. Fill the treasury now
+
+`treasury-empty:<gameId>` means the keeper cannot seed that game's market inside its create
+window (S − 60 min to S + 30 min, while the game has not started). The hourly treasury step may
+come too late, so:
+
+1. Put mUSDC in the attestor wallet: claim the faucet for a wallet you control and transfer it
+   there (the keeper already claims for the attestor every hour, and the faucet pays a wallet
+   once an hour).
+2. Before S, restart the keeper (G), unless another game is in its last 30 min before a close.
+   The first round after a start runs the treasury step, which moves the attestor's mUSDC into
+   the treasury up to the seeds of the next 36 h's games without a market, + 20 %; the round
+   after it creates the market. That step counts only games whose tip-off is still ahead, so
+   after S use step 3.
+3. Or transfer the seed straight to the treasury, the Authority's mUSDC account, from any wallet
+   that holds mUSDC (the account exists once the keeper's first top-up has run). Its address,
+   for the default mint:
+
+   ```bash
+   pnpm --filter @horagon/keeper exec tsx -e "import { DEVNET_MUSDC_MINT, HoragonProgram } from '@horagon/sdk'; console.log(new HoragonProgram({ collateralMint: DEVNET_MUSDC_MINT }).treasury.toBase58())"
+   ```
+
+The keeper tries the create again every round, so the market opens within seconds of the
+treasury holding the seed: 1,000 mUSDC for a featured game, 300 for the others (a featured game
+takes 300 when the treasury holds 300 to 1,000, with a `treasury-low` alert).
 
 ## Alerts
 
@@ -282,11 +319,11 @@ transaction: `create <gameId>`, `halt <gameId> (<rule>)`, `finalize <gameId>`, `
 | `halt:<gameId>`                | `Halted AWAY@HOME: <rule>`                                                                                     | 10 min            | `final-before-end`: wait for `draft:`. `feed-silent`: check the box score; if the game is still on, nothing to do (the market stays halted until its result). `postponed`, `not-started`: D                                        |
 | `no-p0:<gameId>`               | `AWAY@HOME: no p0, market not created`                                                                         | 10 min            | The game's row has no pre-game probability, which the hourly schedule step writes for every game it reads. Look for a failing `schedule` step in the log. A market can still open while the game has not started, until S + 30 min |
 | `treasury-low`                 | `Treasury <n> mUSDC, next 36 h needs <n>`, or `Treasury <n> mUSDC: <gameId> seeded at 300 instead of 1,000`    | 10 min            | Add mUSDC to the attestor wallet ("The day before", step 3). Featured games get the 300 seed meanwhile                                                                                                                             |
-| `treasury-empty:<gameId>`      | `Treasury <n> mUSDC: cannot seed <gameId>`                                                                     | 10 min            | No market for that game until the treasury holds its seed; the keeper retries every round while the game has not started, until S + 30 min. Add mUSDC now                                                                          |
+| `treasury-empty:<gameId>`      | `Treasury <n> mUSDC: cannot seed <gameId>`                                                                     | 10 min            | No market for that game until the treasury holds its seed; the keeper retries every round while the game has not started, until S + 30 min. The hourly top-up may come too late: fill the treasury now (H)                         |
 | `treasury-unread`              | `Treasury balance could not be read <n> times in a row`                                                        | 3 h               | No market is created until the RPC answers. Check `HORAGON_RPC_URL` and the RPC provider                                                                                                                                           |
 | `sol-authority`                | `Authority holds <n> SOL, under 2 nights of markets`                                                           | 10 min            | `horagon-ops fund-authority <sol>` (G: check before repeating it)                                                                                                                                                                  |
 | `sol-keeper`                   | `Keeper wallet holds <n> SOL; fees need 0.2`                                                                   | 10 min            | Send devnet SOL to the attestor wallet                                                                                                                                                                                             |
-| `ata-close:<wallet>`           | `Wallet <wallet> closed sponsor-paid ATA <ata>, rent to <address>`                                             | 10 min            | The API opens no more token accounts for that wallet. Many in a night: lower `SPONSOR_ATAS_PER_IP_DAY` on Vercel                                                                                                                   |
+| `ata-close:<wallet>`           | `Wallet <wallet> closed sponsor-paid ATA <ata>, rent to <address>`                                             | 10 min            | The API opens no more token accounts for that wallet. Many in a night: lower `SPONSOR_ATAS_PER_IP_DAY` on Vercel, then redeploy                                                                                                    |
 | `external-lp:<market>`         | `External liquidity added to <gameId>; the pool is no longer Horagon's alone`                                  | 10 min            | Nothing to do: the game page shows it, and a halt withdraws only Horagon's share                                                                                                                                                   |
 | `fail:<action>:<gameId>`       | `<action> <gameId> rejected: ... error <name>`                                                                 | 10 min            | The program refused a keeper action (`create`, `halt`, `finalize`, `recycle`). Read the error name and check `status`; the keeper plans it again every round                                                                       |
 | `tx:<label>`                   | `Transaction "<label>" failed 4 times (...); 1 attempt left`                                                   | 10 min            | Check the RPC (`HORAGON_RPC_URL`). The keeper plans the action again on the next round                                                                                                                                             |

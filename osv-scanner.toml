@@ -1,0 +1,52 @@
+# osv-scanner (the CI `security` job) reads this file for the advisories Horagon accepts. Each
+# entry has its reason, also listed in docs/security.md ("Accepted advisories"), and expires so it
+# is looked at again: when `ignoreUntil` passes, the job fails on it until it is renewed or fixed.
+# The list came from one OSV querybatch over every package of pnpm-lock.yaml and Cargo.lock.
+
+# bigint-buffer 1.1.5, through @solana/spl-token (web3.js 1.x line).
+[[IgnoredVulns]]
+id = "GHSA-3gc7-fjrx-p6mg"
+ignoreUntil = 2027-02-19
+reason = "bigint-buffer 1.1.5 via @solana/spl-token: no fixed release exists for the web3.js 1.x line; it decodes u64 fields of accounts returned by the RPC, never user input"
+
+# toml 3.0.0, through @anchor-lang/core in the vendored pm-AMM SDK and the spikes.
+[[IgnoredVulns]]
+id = "GHSA-82x6-q7mm-w9cf"
+ignoreUntil = 2027-02-19
+reason = "toml 3.0.0 via @anchor-lang/core: it parses Anchor.toml in tooling only, never input from users or the network"
+
+[[IgnoredVulns]]
+id = "GHSA-v5mp-jgw5-2x6j"
+ignoreUntil = 2027-02-19
+reason = "toml 3.0.0 via @anchor-lang/core: it parses Anchor.toml in tooling only, never input from users or the network"
+
+[[IgnoredVulns]]
+id = "GHSA-4qx8-w7c3-pj3p"
+ignoreUntil = 2027-02-19
+reason = "toml 3.0.0 via @anchor-lang/core: it parses Anchor.toml in tooling only, never input from users or the network"
+
+[[IgnoredVulns]]
+id = "GHSA-9j65-hcg3-gc64"
+ignoreUntil = 2027-02-19
+reason = "toml 3.0.0 via @anchor-lang/core: it parses Anchor.toml in tooling only, never input from users or the network"
+
+[[IgnoredVulns]]
+id = "GHSA-9qmh-m7c6-f92p"
+ignoreUntil = 2027-02-19
+reason = "toml 3.0.0 via @anchor-lang/core: it parses Anchor.toml in tooling only, never input from users or the network"
+
+[[IgnoredVulns]]
+id = "GHSA-h895-cgqg-jf52"
+ignoreUntil = 2027-02-19
+reason = "toml 3.0.0 via @anchor-lang/core: it parses Anchor.toml in tooling only, never input from users or the network"
+
+# esbuild, development only. The keeper runs on tsx with esbuild 0.28.2, which has no advisory.
+[[IgnoredVulns]]
+id = "GHSA-67mh-4wv8-2f99"
+ignoreUntil = 2027-02-19
+reason = "esbuild 0.18.20 via drizzle-kit (@esbuild-kit), a devDependency of packages/db used to generate migrations; it never runs esbuild's serve mode and ships in nothing deployed"
+
+[[IgnoredVulns]]
+id = "GHSA-g7r4-m6w7-qqqr"
+ignoreUntil = 2027-02-19
+reason = "esbuild 0.27.7 via tsup, a devDependency of packages/sdk and its vendored pm-AMM SDK used by the build only; nothing deployed loads it"

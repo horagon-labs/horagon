@@ -12,6 +12,17 @@ export function stripArgSeparator(argv: readonly string[]): string[] {
   return argv[0] === '--' ? argv.slice(1) : [...argv]
 }
 
+/**
+ * The arguments `horagon-ops` parses: `stripArgSeparator`, then `--help` or `-h` anywhere before a
+ * `--` terminator asks for the usage, as the `help` command does (exit 0).
+ */
+export function opsArgv(argv: readonly string[]): string[] {
+  const args = stripArgSeparator(argv)
+  const end = args.indexOf('--')
+  const options = end < 0 ? args : args.slice(0, end)
+  return options.some((x) => x === '--help' || x === '-h') ? ['help'] : args
+}
+
 /** A real league date, YYYY-MM-DD; `name` is the flag or argument named in the error. */
 export function gameDateArg(raw: string | undefined, name: string): string {
   const ok =

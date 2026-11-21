@@ -7,6 +7,7 @@ import {
   disputeWindowArg,
   gameDateArg,
   noticeUrl,
+  opsArgv,
   opsErrorReport,
   publicKeyArg,
   signatureIn,
@@ -35,6 +36,23 @@ describe('stripArgSeparator', () => {
     ])
     expect(stripArgSeparator(['--', '--'])).toEqual(['--'])
     expect(stripArgSeparator([])).toEqual([])
+  })
+})
+
+describe('opsArgv', () => {
+  it('reads --help and -h as the help command, before any -- terminator', () => {
+    expect(opsArgv(['--help'])).toEqual(['help'])
+    expect(opsArgv(['-h'])).toEqual(['help'])
+    expect(opsArgv(['--', '--help'])).toEqual(['help'])
+    expect(opsArgv(['propose', 'nba-1', '-h'])).toEqual(['help'])
+    expect(opsArgv(['help'])).toEqual(['help'])
+    expect(opsArgv(['--', 'status', '--date', '2026-11-24'])).toEqual([
+      'status',
+      '--date',
+      '2026-11-24',
+    ])
+    expect(opsArgv(['propose', 'nba-1', '--', '-h'])).toEqual(['propose', 'nba-1', '--', '-h'])
+    expect(opsArgv([])).toEqual([])
   })
 })
 

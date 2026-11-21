@@ -15,6 +15,11 @@
     "@horagon/spikes#test": {
       "dependsOn": ["^build"],
       "outputs": []
+    },
+    "@horagon/keeper#test": {
+      "dependsOn": ["^build"],
+      "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/docs/runbook.md"],
+      "outputs": ["coverage/**"]
     }
   }
 }

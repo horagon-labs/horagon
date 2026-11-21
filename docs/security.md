@@ -65,18 +65,56 @@ it is pinned to the commit its `stable` branch pointed at, read with
 `git ls-remote https://github.com/dtolnay/rust-toolchain refs/heads/stable`. Every workflow
 runs with `contents: read` only.
 
+The program workflow also pins the tools it installs, in its `env` block
+(`.github/workflows/program.yml`):
+
+- Agave `AGAVE_VERSION` (4.1.2), from its versioned installer
+  `https://release.anza.xyz/v<version>/install`. It is the release Anchor 1.2.2's avm switches to
+  (`docs/spikes.md`). To bump it, check the tag with
+  `git ls-remote https://github.com/anza-xyz/agave refs/tags/v<version>`.
+- avm, from the Anchor repository at tag `v<ANCHOR_VERSION>` (1.2.2) with `--locked`, then
+  `avm install` of that version. `ANCHOR_VERSION` must match `[toolchain]` in `Anchor.toml`;
+  check the tag with `git ls-remote https://github.com/solana-foundation/anchor refs/tags/v<version>`.
+- cargo-audit `CARGO_AUDIT_VERSION` (0.23.0) with `--locked`. The newest release is the highest
+  `cargo-audit/v*` tag of
+  `git ls-remote --tags https://github.com/rustsec/rustsec 'refs/tags/cargo-audit/v*'`.
+
+The cache key names all three versions, so a bump installs afresh.
+
 ## Accepted advisories
 
-`pnpm audit --prod --audit-level high` ignores (root `package.json`, `pnpm.auditConfig`):
+Two scanners run in CI. `pnpm audit --prod --audit-level high` reads its list from the root
+`package.json` (`pnpm.auditConfig.ignoreGhsas`) and sees production dependencies only.
+osv-scanner reads `osv-scanner.toml`, sees every package of `pnpm-lock.yaml` and `Cargo.lock`,
+and fails on any advisory not listed there; each entry expires on 2027-02-19, so it is reviewed
+again.
 
-- `GHSA-3gc7-fjrx-p6mg` (bigint-buffer, via `@solana/spl-token`): no fixed release exists for
-  the web3.js 1.x line; it decodes u64 fields of accounts returned by the RPC, never user
-  input.
+- `GHSA-3gc7-fjrx-p6mg` (bigint-buffer 1.1.5, via `@solana/spl-token`; both lists): no fixed
+  release exists for the web3.js 1.x line; it decodes u64 fields of accounts returned by the
+  RPC, never user input.
 - `GHSA-82x6-q7mm-w9cf`, `GHSA-v5mp-jgw5-2x6j`, `GHSA-4qx8-w7c3-pj3p`, `GHSA-9j65-hcg3-gc64`,
-  `GHSA-9qmh-m7c6-f92p`, `GHSA-h895-cgqg-jf52` (toml, via `@anchor-lang/core` in the pm-AMM
-  vendor package): it parses `Anchor.toml` in tooling only.
+  `GHSA-9qmh-m7c6-f92p`, `GHSA-h895-cgqg-jf52` (toml 3.0.0, via `@anchor-lang/core` in the
+  pm-AMM vendor package; both lists): it parses `Anchor.toml` in tooling only.
+- `GHSA-67mh-4wv8-2f99` (esbuild 0.18.20, via drizzle-kit; osv-scanner only): a devDependency of
+  `packages/db` used to generate migrations; it never runs esbuild's serve mode and ships in
+  nothing deployed.
+- `GHSA-g7r4-m6w7-qqqr` (esbuild 0.27.7, via tsup; osv-scanner only): a devDependency of
+  `packages/sdk` and its vendored pm-AMM SDK, used by the build only. The keeper runs on tsx with
+  esbuild 0.28.2, which has no advisory.
 
 Review this list whenever a dependency is upgraded.
+
+## Open advisories (not accepted)
+
+osv-scanner also reports these, and the `security` job fails on them until each is fixed or
+accepted with a reason:
+
+- `GHSA-w5hq-g745-h8pq` (uuid 8.3.2, via `jayson` in `@solana/web3.js`; production in
+  `apps/web`, `packages/api` and `apps/keeper`). web3.js loads `jayson/lib/client/browser`,
+  which calls `uuid.v4()` for request ids.
+- `GHSA-528h-pc64-c93x`, `GHSA-hqr4-qq8f-hg3x`, `GHSA-mjw6-4jj6-33hc` (stream-json 1.9.1, via
+  `jayson`; production in the same three). `jayson/lib/client/browser` does not load it.
+- `RUSTSEC-2025-0141` (bincode 1.3.3, via `anchor-lang` and the Solana crates of the program).
 
 ## Not yet covered (later tiers)
 

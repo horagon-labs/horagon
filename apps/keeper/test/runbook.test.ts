@@ -137,12 +137,59 @@ function tableRows(): TableRow[] {
  */
 const NOT_ALERT_KEYS = new Set(['propose'])
 
+/** A backticked bare word: a bare alert key (`rpc-backup-down`, `archive`) has this shape. */
+const BARE_WORD = /^[a-z][a-z0-9-]*$/
+
+/**
+ * The backticked bare words of the runbook that are not alert keys: commands, keeper steps and
+ * heartbeat fields, market states and halt rules. Every other bare word in backticks must be a
+ * key the code sends, so a bare key the code no longer sends cannot linger in the prose. A new
+ * word that is not an alert key goes here.
+ */
+const NOT_ALERT_WORDS = new Set([
+  // horagon-ops and its commands
+  'horagon-ops',
+  'propose',
+  'init-config',
+  'pause',
+  'resume',
+  'fund-authority',
+  'status',
+  // keeper actions and steps, fields of its heartbeat row
+  'create',
+  'finalize',
+  'recycle',
+  'schedule',
+  'keeper',
+  'round',
+  'actions',
+  'feed',
+  'alert',
+  // market and draft states, halt rules
+  'featured',
+  'proposed',
+  'finalized',
+  'recycled',
+  'postponed',
+  'final-before-end',
+  'not-started',
+  // other words
+  'devnet',
+  'horagon',
+  'ok',
+  'outcome',
+])
+
+/** The alert keys the runbook names, bare or with a colon, outside code blocks. */
 function proseKeys(): Set<string> {
   const text = readFileSync(RUNBOOK, 'utf8').replace(/```[\s\S]*?```/g, '')
   const keys = new Set<string>()
   for (const m of text.matchAll(/`([^`\n]+)`/g)) {
     const token = m[1] ?? ''
-    if (!token.includes(':')) continue
+    if (!token.includes(':')) {
+      if (BARE_WORD.test(token) && !NOT_ALERT_WORDS.has(token)) keys.add(token)
+      continue
+    }
     const key = KEY_TOKEN.exec(token)?.[1]
     if (key && !NOT_ALERT_KEYS.has(key)) keys.add(key)
   }
@@ -217,7 +264,15 @@ describe('docs/runbook.md and the alert keys in the code', () => {
     const table = rows.flatMap((r) => r.keys)
     expect(table.filter((k) => !code.has(k))).toEqual([])
     expect(new Set(table).size, 'a key with two rows').toBe(table.length)
-    expect([...proseKeys()].filter((k) => !code.has(k)).sort()).toEqual([])
+    expect(
+      [...proseKeys()].filter((k) => !code.has(k)).sort(),
+      'backticked in the runbook but not a key the code sends (a word that is no alert key goes in NOT_ALERT_WORDS)',
+    ).toEqual([])
+  })
+
+  it('lists in NOT_ALERT_WORDS no key the code sends', () => {
+    const code = codeKeys()
+    expect([...NOT_ALERT_WORDS].filter((w) => code.has(w))).toEqual([])
   })
 
   it('says "3 h" for exactly the keys that wait on a person', () => {

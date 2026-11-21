@@ -16,8 +16,13 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    # Pinned toolchain (docs/security.md, "GitHub Actions"): Agave 4.1.2 is the release Anchor
+    # 1.2.2's avm switches to (docs/spikes.md); avm comes from the Anchor tag; cargo-audit is the
+    # newest cargo-audit tag of rustsec/rustsec. The cache key names all three.
     env:
+      AGAVE_VERSION: 4.1.2
       ANCHOR_VERSION: 1.2.2
+      CARGO_AUDIT_VERSION: 0.23.0
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
@@ -30,17 +35,20 @@ jobs:
             ~/.local/share/solana
             ~/.avm
             target
-          key: program-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}-anchor-${{ env.ANCHOR_VERSION }}
+          key: program-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}-agave-${{ env.AGAVE_VERSION }}-anchor-${{ env.ANCHOR_VERSION }}-audit-${{ env.CARGO_AUDIT_VERSION }}
       - name: Install Agave and Anchor
         run: |
-          if ! command -v solana >/dev/null; then
-            sh -c "$(curl -sSfL https://release.anza.xyz/stable/install)"
+          solana_bin="$HOME/.local/share/solana/install/active_release/bin"
+          if [ ! -x "$solana_bin/solana" ]; then
+            sh -c "$(curl -sSfL "https://release.anza.xyz/v${AGAVE_VERSION}/install")"
           fi
-          echo "$HOME/.local/share/solana/install/active_release/bin" >> "$GITHUB_PATH"
+          echo "$solana_bin" >> "$GITHUB_PATH"
           if ! command -v avm >/dev/null; then
-            cargo install --git https://github.com/solana-foundation/anchor avm --force
+            cargo install --git https://github.com/solana-foundation/anchor --tag "v${ANCHOR_VERSION}" avm --locked
           fi
-          avm install "$ANCHOR_VERSION" || true
+          if [ ! -x "$HOME/.avm/bin/anchor-${ANCHOR_VERSION}" ]; then
+            avm install "$ANCHOR_VERSION"
+          fi
           avm use "$ANCHOR_VERSION"
       - run: anchor build
       - name: IDL matches the committed copy
@@ -49,5 +57,5 @@ jobs:
           git diff --exit-code packages/sdk/idl/horagon.json
       - name: cargo audit
         run: |
-          command -v cargo-audit >/dev/null || cargo install cargo-audit --locked
+          command -v cargo-audit >/dev/null || cargo install cargo-audit --version "$CARGO_AUDIT_VERSION" --locked
           cargo audit

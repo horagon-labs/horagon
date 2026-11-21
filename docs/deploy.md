@@ -28,7 +28,8 @@ that command ends. The attestor is the one exception: it lives on the VPS.
 
 The Authority PDA pays the rent of every market (0.03538 SOL each; the keeper budgets 0.036):
 fund it with `horagon-ops fund-authority <sol>` (signs with `deployer.json`, at most 10 SOL a
-call). A night of 12 games needs about 0.43 SOL there.
+call). `sol-authority` alerts below 2 × max(n, 4) × 0.036 SOL, where n is the number of next
+night's games still without a market: keep about 0.9 SOL there (two nights of 12 games).
 
 `horagon-ops` below is `pnpm --filter @horagon/keeper ops`, run from the repo root with the
 variables it needs exported (`docs/runbook.md`, "Before you start").
@@ -80,6 +81,6 @@ ssh to `~/horagon` (it never copies keys or `.env.keeper`). Then, in a login she
 it writes `~/horagon/REVISION`, runs `corepack pnpm install --frozen-lockfile` for the keeper
 and its dependencies, builds the SDK, copies the three units of `ops/systemd` to
 `~/.config/systemd/user`, enables and starts `horagon-watchdog.timer`, enables
-`horagon-keeper` and restarts it, then prints its status. A restart is safe during a night
-(`docs/runbook.md`, procedure G). Logs:
+`horagon-keeper` and restarts it, then prints its status. A restart is safe during a night, but
+avoid the last 30 min before a close (`docs/runbook.md`, procedure G). Logs:
 `ssh "$HORAGON_VPS" journalctl --user -u horagon-keeper -f -o cat`.

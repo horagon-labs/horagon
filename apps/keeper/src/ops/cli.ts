@@ -51,13 +51,13 @@ import {
   disputeWindowArg,
   gameDateArg,
   noticeUrl,
+  opsArgv,
   opsErrorReport,
   parsePeriods,
   parseScore,
   publicKeyArg,
   signatureIn,
   solToLamports,
-  stripArgSeparator,
 } from './args'
 import {
   type AttemptLookups,
@@ -86,7 +86,7 @@ const USAGE = `usage: horagon-ops <command>
   fund-authority <sol>
   team <pubkey>...
   watchdog
-  help
+  help | --help | -h
 options:
   --keypair <path>    sign with another key file (a relative path starts at the repo root)
   --replace-evidence  let propose overwrite the evidence an earlier propose stored from other
@@ -108,7 +108,7 @@ const OPTIONS = {
 } as const
 
 const parse = (argv: string[]) =>
-  parseArgs({ args: stripArgSeparator(argv), allowPositionals: true, options: OPTIONS })
+  parseArgs({ args: opsArgv(argv), allowPositionals: true, options: OPTIONS })
 type Values = ReturnType<typeof parse>['values']
 
 const env = process.env
@@ -230,7 +230,7 @@ function proposeArgs(gameId: string, v: Values): ProposeArgs {
 }
 
 async function propose(c: Ctx, gameId: string, a: ProposeArgs): Promise<void> {
-  const { uri, status } = a
+  const { uri } = a
   const { game, market, marketId } = await marketOf(c.db, gameId)
   const gm = await c.program.fetchGameMarket(c.connection, marketId)
   if (!gm || !PROPOSABLE.has(gm.status)) {
