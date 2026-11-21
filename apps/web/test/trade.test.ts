@@ -176,13 +176,32 @@ describe('executeTrade', () => {
     expect(submitted).toHaveLength(1)
   })
 
-  it('does not re-quote a slippage error from submit either', async () => {
-    const err = slippage()
+  it('re-quotes once when the sponsor simulation refuses with slippage and no signature', async () => {
+    const { client, built, submitted } = fakeClient({ submits: [slippage()] })
+    const stages: TradeStage[] = []
+    const r = await executeTrade(client, user, REQ, (s) => stages.push(s))
+    expect(built).toHaveLength(2)
+    expect(submitted).toHaveLength(2)
+    expect(r.requoted).toBe(true)
+    expect(stages).toContain('requoting')
+  })
+
+  it('throws a second submit-time slippage instead of re-quoting again', async () => {
+    const { client, built, submitted } = fakeClient({ submits: [slippage(), slippage()] })
+    await expect(executeTrade(client, user, REQ)).rejects.toMatchObject({
+      code: 'SLIPPAGE_EXCEEDED',
+    })
+    expect(built).toHaveLength(2)
+    expect(submitted).toHaveLength(2)
+  })
+
+  it('rethrows a submit slippage that names a signature by identity, without re-quoting', async () => {
+    const err = withSignature(slippage(), SIG)
     const { client, built, submitted } = fakeClient({ submits: [err] })
     await expect(executeTrade(client, user, REQ)).rejects.toBe(err)
     expect(built).toHaveLength(1)
     expect(submitted).toHaveLength(1)
-    expect(failedSignature(err)).toBeNull()
+    expect(failedSignature(err)).toBe(SIG)
   })
 
   it('keeps the signature readable when waiting times out, and does not resend', async () => {
@@ -210,13 +229,17 @@ describe('executeTrade', () => {
     expect(submitted).toHaveLength(1)
   })
 
-  it('leaves a non-SDK error from waiting as it is', async () => {
+  it('names the signature on a non-SDK error thrown while waiting', async () => {
     const odd = new Error('boom')
-    const { client } = fakeClient()
+    const { client, built, submitted } = fakeClient()
     client.trade.waitFor = async () => {
       throw odd
     }
-    await expect(executeTrade(client, user, REQ)).rejects.toBe(odd)
+    const err = await executeTrade(client, user, REQ).catch((e: unknown) => e)
+    expect(err).toMatchObject({ code: 'NETWORK', message: 'boom' })
+    expect(failedSignature(err)).toBe(SIG)
+    expect(built).toHaveLength(1)
+    expect(submitted).toHaveLength(1)
   })
 })
 

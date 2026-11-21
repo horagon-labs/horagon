@@ -2,8 +2,9 @@
 //
 // A failed send is never repeated automatically: the sponsor may already hold the transaction,
 // and it can still land. A new quote is built exactly once, and only when no earlier
-// transaction can still land: the build itself failed with slippage (nothing was signed), or
-// the transaction landed and failed with slippage (6007). Everything else is thrown for the
+// transaction can still land: the build failed with slippage (nothing was signed), the API's
+// simulation refused the submit with slippage and no signature (nothing was broadcast), or the
+// transaction landed and failed with slippage (6007). Everything else is thrown for the
 // UI, which shows `failedSignature(err)` and the SDK's hint.
 import {
   errorSignature,
@@ -78,9 +79,17 @@ async function submitAndWait(
   try {
     status = await client.trade.waitFor(signature, { timeoutMs: 60_000, pollMs: 1_000 })
   } catch (err) {
-    throw isHoragonError(err) && errorSignature(err) === undefined
-      ? namingSignature(err, signature)
-      : err
+    if (isHoragonError(err)) {
+      throw errorSignature(err) === undefined ? namingSignature(err, signature) : err
+    }
+    // Not an SDK error (a bug, an abort): still name the transaction, which may yet land.
+    throw namingSignature(
+      new HoragonError('NETWORK', err instanceof Error ? err.message : String(err), {
+        cause: err,
+        hint: unsureHint(signature),
+      }),
+      signature,
+    )
   }
   if (
     status.status !== 'confirmed' &&
@@ -126,7 +135,19 @@ export async function executeTrade(
       throw err
     }
     onStage('signing')
-    const sent = await submitAndWait(client, signBuilt(built.tx, signer), onStage)
+    let sent: Sent
+    try {
+      sent = await submitAndWait(client, signBuilt(built.tx, signer), onStage)
+    } catch (err) {
+      // The API simulates before it sends. A slippage refusal with no signature means nothing
+      // was broadcast, so a new quote cannot double up. Any other error is thrown as it is:
+      // every later failure names the signature (or is not slippage).
+      if (attempt === 0 && isSlippage(err) && errorSignature(err) === undefined) {
+        onStage('requoting')
+        continue
+      }
+      throw err
+    }
     if (sent.status.status !== 'failed') {
       return { ...sent, quote: built.quote, requoted: attempt > 0 }
     }

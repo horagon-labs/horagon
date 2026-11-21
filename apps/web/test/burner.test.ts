@@ -108,6 +108,66 @@ describe('burner wallet', () => {
   })
 })
 
+describe('no import drops a key', () => {
+  it('two imports in a row keep the first key in a timestamped slot', () => {
+    const store = affirmedStore()
+    const a = ensureBurner(store)
+    const b = Keypair.generate()
+    const c = Keypair.generate()
+    importBurner(store, exportBurner(b), 1)
+    importBurner(store, exportBurner(c), 2)
+    expect(store.map.get(BURNER_KEY)).toBe(exportBurner(c))
+    expect(store.map.get(BURNER_PREVIOUS_KEY)).toBe(exportBurner(b))
+    expect(store.map.get(`${BURNER_PREVIOUS_KEY}.2`)).toBe(exportBurner(a))
+  })
+
+  it('an unreadable current value never overwrites a valid previous key', () => {
+    const store = affirmedStore()
+    const a = ensureBurner(store)
+    importBurner(store, exportBurner(Keypair.generate()), 1)
+    store.setItem(BURNER_KEY, 'garbage')
+    importBurner(store, exportBurner(Keypair.generate()), 2)
+    expect(store.map.get(`${BURNER_KEY}.unreadable.2`)).toBe('garbage')
+    expect(store.map.get(BURNER_PREVIOUS_KEY)).toBe(exportBurner(a))
+    expect(store.map.has(`${BURNER_PREVIOUS_KEY}.2`)).toBe(false)
+  })
+})
+
+describe('read-only storage', () => {
+  it('still finds the stored burner when writes are refused', () => {
+    const base = affirmedStore()
+    const kp = ensureBurner(base)
+    base.setItem = () => {
+      throw new DOMException('Quota exceeded', 'QuotaExceededError')
+    }
+    const opened = openKeyStore(() => base)
+    expect(opened.ephemeral).toBe(true)
+    expect(ensureBurner(opened.store).publicKey.equals(kp.publicKey)).toBe(true)
+    // New writes stay in the tab and shadow the stored value.
+    const next = Keypair.generate()
+    importBurner(opened.store, exportBurner(next))
+    expect(ensureBurner(opened.store).publicKey.equals(next.publicKey)).toBe(true)
+    opened.store.removeItem(BURNER_KEY)
+    expect(opened.store.getItem(BURNER_KEY)).toBeNull()
+    expect(base.map.get(BURNER_KEY)).toBe(exportBurner(kp))
+  })
+
+  it('reads as empty when both reading and writing are refused', () => {
+    const refusing: KeyStore = {
+      getItem: () => {
+        throw new DOMException('The operation is insecure.', 'SecurityError')
+      },
+      setItem: () => {
+        throw new DOMException('The operation is insecure.', 'SecurityError')
+      },
+      removeItem: () => {},
+    }
+    const opened = openKeyStore(() => refusing)
+    expect(opened.ephemeral).toBe(true)
+    expect(opened.store.getItem(BURNER_KEY)).toBeNull()
+  })
+})
+
 describe('18+ self-declaration (R1)', () => {
   it('does not create a burner before the box is ticked, and stores nothing', () => {
     const store = memoryStore()

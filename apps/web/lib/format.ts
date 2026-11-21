@@ -3,15 +3,28 @@ import type { Game, GameHistory } from '@horagon/sdk'
 
 export const CLUSTER = 'devnet'
 
-export const cents = (p: number | null | undefined): string =>
-  p === null || p === undefined ? '–' : `${Math.round(p * 100)}¢`
+// Edges stay honest while a market trades: under 1 shows "<1", over 99 shows ">99".
+function whole(p: number | null | undefined, unit: string): string {
+  if (p === null || p === undefined) return '–'
+  const r = Math.round(p * 100)
+  if (p > 0 && r < 1) return `<1${unit}`
+  if (p < 1 && r > 99) return `>99${unit}`
+  return `${r}${unit}`
+}
 
-export const percent = (p: number | null | undefined): string =>
-  p === null || p === undefined ? '–' : `${Math.round(p * 100)}%`
+export const cents = (p: number | null | undefined): string => whole(p, '¢')
 
-/** "1234.5" -> "1,234.50" */
+export const percent = (p: number | null | undefined): string => whole(p, '%')
+
+/** "1234.5" -> "1,234.50". Rounds down, so a balance never shows more than the wallet holds. */
 export function usdc(amount: string | number): string {
-  const n = typeof amount === 'number' ? amount : Number(amount)
+  const text = typeof amount === 'number' ? String(amount) : amount.trim()
+  const m = /^(\d+)(?:\.(\d*))?$/.exec(text)
+  if (m) {
+    const int = BigInt(m[1] ?? '0').toLocaleString('en-US')
+    return `${int}.${(m[2] ?? '').padEnd(2, '0').slice(0, 2)}`
+  }
+  const n = Math.floor(Number(text) * 100) / 100
   return n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 

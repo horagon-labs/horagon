@@ -1,7 +1,9 @@
 'use client'
 // Polls the Horagon API (never RPC) every 3 s while the tab is visible (spec 10). Keeps the
-// last good value on an error, and drops answers that arrive after the key changed.
-import { useCallback, useEffect, useRef, useState } from 'react'
+// last good value on an error, drops answers that arrive after a newer run or a key change,
+// and skips a tick while the previous run is still in flight.
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { createPoller } from './poller'
 
 export const POLL_MS = 3_000
 
@@ -16,39 +18,38 @@ export function usePoll<T>(key: string | null, load: () => Promise<T>, everyMs =
   const [error, setError] = useState<Error>()
   const loadRef = useRef(load)
   loadRef.current = load
-  const gen = useRef(0)
 
-  const run = useCallback(async () => {
-    const mine = gen.current
-    try {
-      const value = await loadRef.current()
-      if (mine !== gen.current) return
-      setData(value)
-      setError(undefined)
-    } catch (err) {
-      if (mine === gen.current) setError(err instanceof Error ? err : new Error(String(err)))
-    }
-  }, [])
+  const poller = useMemo(
+    () =>
+      createPoller<T>(() => loadRef.current(), {
+        data: (value) => {
+          setData(value)
+          setError(undefined)
+        },
+        error: setError,
+      }),
+    [],
+  )
 
   useEffect(() => {
-    gen.current++
+    poller.reset()
     setData(undefined)
     setError(undefined)
     if (key === null) return
-    void run()
+    void poller.run()
     const timer = setInterval(() => {
-      if (!document.hidden) void run()
+      if (!document.hidden) void poller.tick()
     }, everyMs)
     const onVisible = () => {
-      if (!document.hidden) void run()
+      if (!document.hidden) void poller.tick()
     }
     document.addEventListener('visibilitychange', onVisible)
     return () => {
-      gen.current++
+      poller.reset()
       clearInterval(timer)
       document.removeEventListener('visibilitychange', onVisible)
     }
-  }, [key, everyMs, run])
+  }, [key, everyMs, poller])
 
-  return { data, error, refresh: () => void run() }
+  return { data, error, refresh: () => void poller.run() }
 }

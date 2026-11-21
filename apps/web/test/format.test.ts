@@ -49,6 +49,24 @@ describe('countdown and prices', () => {
     expect(cents(null)).toBe('–')
   })
 
+  it('keeps the edges honest and rounds balances down', () => {
+    expect(cents(0.004)).toBe('<1¢')
+    expect(cents(0.996)).toBe('>99¢')
+    expect(cents(0.01)).toBe('1¢')
+    expect(cents(0.99)).toBe('99¢')
+    expect(cents(0)).toBe('0¢')
+    expect(cents(1)).toBe('100¢')
+    expect(percent(0.004)).toBe('<1%')
+    expect(percent(0.996)).toBe('>99%')
+    expect(percent(0.5)).toBe('50%')
+    expect(usdc('99.999')).toBe('99.99')
+    expect(usdc('100')).toBe('100.00')
+    expect(usdc('5.5')).toBe('5.50')
+    expect(usdc('1234567.899999')).toBe('1,234,567.89')
+    expect(usdc(99.999)).toBe('99.99')
+    expect(usdc('1e3')).toBe('1,000.00')
+  })
+
   it('shows percent, amounts, short keys and explorer links', () => {
     expect(percent(0.624)).toBe('62%')
     expect(percent(undefined)).toBe('–')

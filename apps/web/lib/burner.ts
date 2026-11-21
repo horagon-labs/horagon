@@ -94,15 +94,32 @@ export function ensureBurner(store: KeyStore, now = Date.now()): Keypair {
 }
 
 /**
- * Replaces the burner; the old key stays under BURNER_PREVIOUS_KEY until the next import.
- * The text is checked first, so a bad key is reported as such; then the box must be ticked.
+ * Replaces the burner. The key it replaces moves to BURNER_PREVIOUS_KEY; a key already in that
+ * slot moves to a timestamped slot first, and an unreadable current value is set aside under
+ * its own name, so no import ever drops a key. The text is checked first, so a bad key is
+ * reported as such; then the box must be ticked.
  */
-export function importBurner(store: KeyStore, text: string): Keypair {
+export function importBurner(store: KeyStore, text: string, now = Date.now()): Keypair {
   const next = decodeSecret(text)
   if (!ageAffirmed(store)) throw new AgeRequired()
   const current = store.getItem(BURNER_KEY)
-  if (current !== null && current !== exportBurner(next)) {
-    store.setItem(BURNER_PREVIOUS_KEY, current)
+  const incoming = exportBurner(next)
+  if (current !== null && current !== incoming) {
+    let readable = true
+    try {
+      decodeSecret(current)
+    } catch {
+      readable = false
+    }
+    if (!readable) {
+      store.setItem(`${BURNER_KEY}.unreadable.${now}`, current)
+    } else {
+      const previous = store.getItem(BURNER_PREVIOUS_KEY)
+      if (previous !== null && previous !== current && previous !== incoming) {
+        store.setItem(`${BURNER_PREVIOUS_KEY}.${now}`, previous)
+      }
+      store.setItem(BURNER_PREVIOUS_KEY, current)
+    }
   }
   return save(store, next)
 }
@@ -116,18 +133,50 @@ export function memoryStore(): KeyStore {
   }
 }
 
+/** Reads fall through to `base`; writes stay in memory (the browser refuses them). */
+function readThrough(base: KeyStore): KeyStore {
+  const memory = new Map<string, string>()
+  const removed = new Set<string>()
+  return {
+    getItem: (k) => {
+      if (memory.has(k)) return memory.get(k) ?? null
+      if (removed.has(k)) return null
+      try {
+        return base.getItem(k)
+      } catch {
+        return null
+      }
+    },
+    setItem: (k, v) => {
+      removed.delete(k)
+      memory.set(k, v)
+    },
+    removeItem: (k) => {
+      memory.delete(k)
+      removed.add(k)
+    },
+  }
+}
+
 /**
  * localStorage, or an in-memory store when the browser blocks it (Safari private mode, site
  * data policies): then the wallet and the 18+ flag last only for this tab, and the UI says so.
+ * When storage can be read but not written (quota full), reads still see what is stored, so an
+ * existing burner is found; new writes stay in this tab.
  */
 export function openKeyStore(getStorage: () => KeyStore): { store: KeyStore; ephemeral: boolean } {
+  let store: KeyStore
   try {
-    const store = getStorage()
+    store = getStorage()
+  } catch {
+    return { store: memoryStore(), ephemeral: true }
+  }
+  try {
     const probe = `${BURNER_KEY}.probe`
     store.setItem(probe, '1')
     store.removeItem(probe)
     return { store, ephemeral: false }
   } catch {
-    return { store: memoryStore(), ephemeral: true }
+    return { store: readThrough(store), ephemeral: true }
   }
 }
