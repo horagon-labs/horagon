@@ -68,6 +68,35 @@ describe('createPoller', () => {
     expect(errors).toEqual([])
   })
 
+  it('refresh and tick do nothing while there is no key (R7)', async () => {
+    let enabled = false
+    const calls: number[] = []
+    const poller = createPoller<number>(
+      async () => {
+        calls.push(1)
+        return 1
+      },
+      { data: () => {}, error: () => {} },
+      () => enabled,
+    )
+    await poller.refresh()
+    await poller.tick()
+    expect(calls).toHaveLength(0)
+    enabled = true
+    await poller.refresh()
+    await poller.tick()
+    expect(calls).toHaveLength(2)
+  })
+
+  it('refreshes on demand when no guard is given', async () => {
+    const { calls, got, poller } = setup()
+    const r = poller.refresh()
+    expect(calls).toHaveLength(1)
+    calls[0]?.resolve(3)
+    await r
+    expect(got).toEqual([3])
+  })
+
   it('reports errors from the current run, wrapping non-errors', async () => {
     const { calls, errors, poller } = setup()
     const a = poller.run()

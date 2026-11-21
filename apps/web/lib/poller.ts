@@ -5,7 +5,15 @@ export interface PollSink<T> {
   error: (err: Error) => void
 }
 
-export function createPoller<T>(load: () => Promise<T>, sink: PollSink<T>) {
+/**
+ * `enabled` says whether there is anything to load (usePoll: a non-null key). While it is
+ * false, `tick` and `refresh` do nothing; `run` is for the caller that already checked.
+ */
+export function createPoller<T>(
+  load: () => Promise<T>,
+  sink: PollSink<T>,
+  enabled: () => boolean = () => true,
+) {
   let latest = 0
   let inflight = false
 
@@ -25,8 +33,10 @@ export function createPoller<T>(load: () => Promise<T>, sink: PollSink<T>) {
   return {
     /** Starts a run now; an older run still in flight is dropped. */
     run,
-    /** A timer tick: skipped while a run is still in flight. */
-    tick: (): Promise<void> => (inflight ? Promise.resolve() : run()),
+    /** A timer tick: skipped while a run is still in flight or there is nothing to load. */
+    tick: (): Promise<void> => (inflight || !enabled() ? Promise.resolve() : run()),
+    /** A reload the UI asked for (after a trade): like `run`, but nothing without a key. */
+    refresh: (): Promise<void> => (enabled() ? run() : Promise.resolve()),
     /** The key changed or the view closed: every run in flight is dropped. */
     reset: (): void => {
       latest++

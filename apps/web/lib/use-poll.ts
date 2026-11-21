@@ -1,8 +1,9 @@
 'use client'
 // Polls the Horagon API (never RPC) every 3 s while the tab is visible (spec 10). Keeps the
 // last good value on an error, drops answers that arrive after a newer run or a key change,
-// and skips a tick while the previous run is still in flight.
-import { useEffect, useMemo, useRef, useState } from 'react'
+// and skips a tick while the previous run is still in flight. With a null key nothing loads,
+// `refresh` included.
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPoller } from './poller'
 
 export const POLL_MS = 3_000
@@ -18,16 +19,22 @@ export function usePoll<T>(key: string | null, load: () => Promise<T>, everyMs =
   const [error, setError] = useState<Error>()
   const loadRef = useRef(load)
   loadRef.current = load
+  const keyRef = useRef(key)
+  keyRef.current = key
 
   const poller = useMemo(
     () =>
-      createPoller<T>(() => loadRef.current(), {
-        data: (value) => {
-          setData(value)
-          setError(undefined)
+      createPoller<T>(
+        () => loadRef.current(),
+        {
+          data: (value) => {
+            setData(value)
+            setError(undefined)
+          },
+          error: setError,
         },
-        error: setError,
-      }),
+        () => keyRef.current !== null,
+      ),
     [],
   )
 
@@ -51,5 +58,7 @@ export function usePoll<T>(key: string | null, load: () => Promise<T>, everyMs =
     }
   }, [key, everyMs, poller])
 
-  return { data, error, refresh: () => void poller.run() }
+  // Stable across renders, so a context value that holds it does not change every poll.
+  const refresh = useCallback(() => void poller.refresh(), [poller])
+  return { data, error, refresh }
 }

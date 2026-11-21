@@ -1,6 +1,8 @@
 // The devnet-only burner wallet (spec section 10): a keypair kept in localStorage as base58,
 // with Export and Import. Nothing here ever throws away a key: a stored value that does not
 // decode is moved aside, and an import keeps the key it replaces under BURNER_PREVIOUS_KEY.
+// Every aside slot is a free one (`freeSlot`), so two writes in the same millisecond never
+// share a name.
 //
 // The 18+ self-declaration (spec section 12) is enforced here, so the UI cannot skip it: no
 // burner is created or imported until the box was ticked. The flag stays on this device.
@@ -69,6 +71,28 @@ export function decodeSecret(text: string): Keypair {
 
 export const exportBurner = (kp: Keypair): string => bs58.encode(kp.secretKey)
 
+/**
+ * The stored burner, or null when none is stored, the value does not decode, or storage cannot
+ * be read. Never writes and never creates one: the UI uses it to decide whether to ask first.
+ */
+export function peekBurner(store: KeyStore): Keypair | null {
+  try {
+    const raw = store.getItem(BURNER_KEY)
+    return raw === null ? null : decodeSecret(raw)
+  } catch {
+    return null
+  }
+}
+
+/** `base`, or `base.1`, `base.2`, ...: the first name that holds nothing yet. */
+function freeSlot(store: KeyStore, base: string): string {
+  if (store.getItem(base) === null) return base
+  for (let n = 1; ; n++) {
+    const name = `${base}.${n}`
+    if (store.getItem(name) === null) return name
+  }
+}
+
 function save(store: KeyStore, kp: Keypair): Keypair {
   store.setItem(BURNER_KEY, exportBurner(kp))
   return kp
@@ -89,14 +113,14 @@ export function ensureBurner(store: KeyStore, now = Date.now()): Keypair {
     }
   }
   if (!ageAffirmed(store)) throw new AgeRequired()
-  if (raw !== null) store.setItem(`${BURNER_KEY}.unreadable.${now}`, raw)
+  if (raw !== null) store.setItem(freeSlot(store, `${BURNER_KEY}.unreadable.${now}`), raw)
   return save(store, Keypair.generate())
 }
 
 /**
  * Replaces the burner. The key it replaces moves to BURNER_PREVIOUS_KEY; a key already in that
- * slot moves to a timestamped slot first, and an unreadable current value is set aside under
- * its own name, so no import ever drops a key. The text is checked first, so a bad key is
+ * slot moves to a free timestamped slot first, and an unreadable current value is set aside
+ * under its own name, so no import ever drops a key. The text is checked first, so a bad key is
  * reported as such; then the box must be ticked.
  */
 export function importBurner(store: KeyStore, text: string, now = Date.now()): Keypair {
@@ -112,11 +136,11 @@ export function importBurner(store: KeyStore, text: string, now = Date.now()): K
       readable = false
     }
     if (!readable) {
-      store.setItem(`${BURNER_KEY}.unreadable.${now}`, current)
+      store.setItem(freeSlot(store, `${BURNER_KEY}.unreadable.${now}`), current)
     } else {
       const previous = store.getItem(BURNER_PREVIOUS_KEY)
       if (previous !== null && previous !== current && previous !== incoming) {
-        store.setItem(`${BURNER_PREVIOUS_KEY}.${now}`, previous)
+        store.setItem(freeSlot(store, `${BURNER_PREVIOUS_KEY}.${now}`), previous)
       }
       store.setItem(BURNER_PREVIOUS_KEY, current)
     }

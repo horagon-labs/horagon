@@ -15,6 +15,7 @@ import {
   type KeyStore,
   needsAge,
   openKeyStore,
+  peekBurner,
 } from '../lib/burner'
 
 function memoryStore(): KeyStore & { map: Map<string, string> } {
@@ -121,6 +122,35 @@ describe('no import drops a key', () => {
     expect(store.map.get(`${BURNER_PREVIOUS_KEY}.2`)).toBe(exportBurner(a))
   })
 
+  it('imports in the same millisecond keep every earlier key (R7)', () => {
+    const store = affirmedStore()
+    const keys = [ensureBurner(store)]
+    for (let i = 0; i < 4; i++) {
+      const next = Keypair.generate()
+      importBurner(store, exportBurner(next), 5)
+      keys.push(next)
+    }
+    const stored = [...store.map.values()]
+    for (const kp of keys) expect(stored).toContain(exportBurner(kp))
+    expect(store.map.get(BURNER_KEY)).toBe(exportBurner(keys[4] as Keypair))
+    expect(store.map.get(`${BURNER_PREVIOUS_KEY}.5`)).toBe(exportBurner(keys[0] as Keypair))
+    expect(store.map.get(`${BURNER_PREVIOUS_KEY}.5.1`)).toBe(exportBurner(keys[1] as Keypair))
+    expect(store.map.get(`${BURNER_PREVIOUS_KEY}.5.2`)).toBe(exportBurner(keys[2] as Keypair))
+  })
+
+  it('unreadable values set aside in the same millisecond keep their own slots (R7)', () => {
+    const store = affirmedStore()
+    store.setItem(BURNER_KEY, 'garbage-1')
+    ensureBurner(store, 9)
+    store.setItem(BURNER_KEY, 'garbage-2')
+    ensureBurner(store, 9)
+    store.setItem(BURNER_KEY, 'garbage-3')
+    importBurner(store, exportBurner(Keypair.generate()), 9)
+    expect(store.map.get(`${BURNER_KEY}.unreadable.9`)).toBe('garbage-1')
+    expect(store.map.get(`${BURNER_KEY}.unreadable.9.1`)).toBe('garbage-2')
+    expect(store.map.get(`${BURNER_KEY}.unreadable.9.2`)).toBe('garbage-3')
+  })
+
   it('an unreadable current value never overwrites a valid previous key', () => {
     const store = affirmedStore()
     const a = ensureBurner(store)
@@ -130,6 +160,36 @@ describe('no import drops a key', () => {
     expect(store.map.get(`${BURNER_KEY}.unreadable.2`)).toBe('garbage')
     expect(store.map.get(BURNER_PREVIOUS_KEY)).toBe(exportBurner(a))
     expect(store.map.has(`${BURNER_PREVIOUS_KEY}.2`)).toBe(false)
+  })
+})
+
+describe('peekBurner', () => {
+  it('returns the stored burner without the flag and writes nothing', () => {
+    const store = memoryStore()
+    const kp = Keypair.generate()
+    store.setItem(BURNER_KEY, exportBurner(kp))
+    expect(peekBurner(store)?.publicKey.equals(kp.publicKey)).toBe(true)
+    expect([...store.map.keys()]).toEqual([BURNER_KEY])
+  })
+
+  it('returns null for no burner or an unreadable one, and never creates one', () => {
+    const store = affirmedStore()
+    expect(peekBurner(store)).toBeNull()
+    store.setItem(BURNER_KEY, 'garbage')
+    expect(peekBurner(store)).toBeNull()
+    expect(store.map.get(BURNER_KEY)).toBe('garbage')
+    expect(store.map.size).toBe(2)
+  })
+
+  it('returns null when storage throws', () => {
+    const refusing: KeyStore = {
+      getItem: () => {
+        throw new DOMException('The operation is insecure.', 'SecurityError')
+      },
+      setItem: () => {},
+      removeItem: () => {},
+    }
+    expect(peekBurner(refusing)).toBeNull()
   })
 })
 

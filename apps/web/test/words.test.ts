@@ -2,7 +2,9 @@ import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
-const LIB = join(import.meta.dirname, '..', 'lib')
+const WEB = join(import.meta.dirname, '..')
+/** Every folder whose sources can put words on screen (R3: components and app too). */
+const SOURCES = ['lib', 'components', 'app']
 
 const FORBIDDEN = ['bet', 'bets', 'betting', 'betslip', 'odds']
 const FORBIDDEN_PREFIX = ['gambl', 'wager']
@@ -30,14 +32,15 @@ describe('product words (R4)', () => {
     }
   })
 
-  it('keeps betting words out of every lib source, subfolders included', () => {
-    const files = readdirSync(LIB, { recursive: true, encoding: 'utf8' }).filter((f) =>
-      /\.tsx?$/.test(f),
+  it.each(SOURCES)('keeps betting words out of every %s source, subfolders included', (dir) => {
+    const root = join(WEB, dir)
+    const files = readdirSync(root, { recursive: true, encoding: 'utf8' }).filter((f) =>
+      /\.(tsx?|css|mjs)$/.test(f),
     )
     expect(files.length).toBeGreaterThan(0)
     for (const file of files) {
-      const hits = words(readFileSync(join(LIB, file), 'utf8')).filter(banned)
-      expect(hits, file).toEqual([])
+      const hits = words(readFileSync(join(root, file), 'utf8')).filter(banned)
+      expect(hits, `${dir}/${file}`).toEqual([])
     }
   })
 })

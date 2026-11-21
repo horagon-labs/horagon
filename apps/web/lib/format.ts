@@ -24,7 +24,10 @@ export function usdc(amount: string | number): string {
     const int = BigInt(m[1] ?? '0').toLocaleString('en-US')
     return `${int}.${(m[2] ?? '').padEnd(2, '0').slice(0, 2)}`
   }
-  const n = Math.floor(Number(text) * 100) / 100
+  // Exponent forms and signed values: whole micro-units first (mUSDC has 6 decimals), so a
+  // float such as 0.29 * 100 = 28.999... cannot lose a cent, then down to cents.
+  const micro = Math.round(Number(text) * 1e6)
+  const n = Math.floor(micro / 10_000) / 100
   return n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 

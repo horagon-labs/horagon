@@ -1,0 +1,43 @@
+import { isHoragonError } from '@horagon/sdk'
+import { explorerTx, shortKey } from '../lib/format'
+import { failedSignature } from '../lib/trade'
+
+/** The API's message and its "what to do now" hint; never a stack or an RPC URL. */
+export function errorText(err: unknown): string {
+  if (isHoragonError(err)) {
+    if (err.code === 'RATE_LIMITED' && err.retryAfterSecs !== undefined) {
+      return `Too many requests. Try again in ${Math.ceil(err.retryAfterSecs)} s.`
+    }
+    return err.hint ? `${err.message} ${err.hint}` : err.message
+  }
+  return 'Something went wrong. Try again.'
+}
+
+/**
+ * An error, and when it names a transaction (`failedSignature`, read through the SDK only),
+ * that transaction: it may still land, so nothing here offers to send again (R2).
+ */
+export function ErrorText({ error }: { error: unknown }) {
+  if (error === undefined || error === null) return null
+  const signature = failedSignature(error)
+  return (
+    <div role="alert" className="space-y-1 text-sm text-red-600 dark:text-red-400">
+      <p>{errorText(error)}</p>
+      {signature && (
+        <p>
+          This transaction may still land:{' '}
+          <a
+            href={explorerTx(signature)}
+            target="_blank"
+            rel="noreferrer"
+            className="font-mono underline"
+          >
+            {shortKey(signature)}
+          </a>
+          . Check its status on the explorer first, then build a new trade only after its blockhash
+          expires (about 90 seconds).
+        </p>
+      )}
+    </div>
+  )
+}

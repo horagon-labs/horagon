@@ -67,6 +67,16 @@ describe('countdown and prices', () => {
     expect(usdc('1e3')).toBe('1,000.00')
   })
 
+  it('keeps exponent forms exact to the cent (R7)', () => {
+    expect(usdc('2.9e-1')).toBe('0.29')
+    expect(usdc(0.29)).toBe('0.29')
+    expect(usdc('1e-7')).toBe('0.00')
+    expect(usdc(1e-7)).toBe('0.00')
+    expect(usdc('5.7e-1')).toBe('0.57')
+    expect(usdc('1.0099e2')).toBe('100.99')
+    expect(usdc('-1.5')).toBe('-1.50')
+  })
+
   it('shows percent, amounts, short keys and explorer links', () => {
     expect(percent(0.624)).toBe('62%')
     expect(percent(undefined)).toBe('–')

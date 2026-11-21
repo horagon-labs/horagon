@@ -163,16 +163,22 @@ export async function executeTrade(
 
 /**
  * Claims every claimable market of `signer`; the API splits them into as few txs as fit. One
- * at a time, stopping at the first failure (rethrown under the rules above). The UI refreshes
- * the claim list afterwards.
+ * at a time, stopping at the first failure (rethrown under the rules above). `onClaimed` hears
+ * each landed claim as it lands, so the UI still shows them when a later one fails. The UI
+ * refreshes the claim list afterwards.
  */
-export async function claimAll(client: TradeClient, signer: Keypair): Promise<string[]> {
+export async function claimAll(
+  client: TradeClient,
+  signer: Keypair,
+  onClaimed: (signature: string) => void = () => {},
+): Promise<string[]> {
   const { txs } = await client.claims.build({ wallet: signer.publicKey.toBase58() })
   const signatures: string[] = []
   for (const built of txs) {
     const sent = await submitAndWait(client, signBuilt(built.tx, signer))
     if (sent.status.status === 'failed') throw landedFailure(sent)
     signatures.push(sent.signature)
+    onClaimed(sent.signature)
   }
   return signatures
 }

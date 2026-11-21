@@ -267,4 +267,14 @@ describe('claimAll', () => {
     expect(failedSignature(err)).toBe(SIG)
     expect(submitted).toHaveLength(1)
   })
+
+  it('reports each landed claim as it lands, so a later failure keeps them (R2)', async () => {
+    const lost = withSignature(new HoragonError('NETWORK', 'answer lost'), SIG)
+    const { client, submitted } = fakeClient({ submits: ['ok', lost] })
+    const landed: string[] = []
+    const err = await claimAll(client, user, (sig) => landed.push(sig)).catch((e: unknown) => e)
+    expect(err).toBe(lost)
+    expect(landed).toEqual([SIG])
+    expect(submitted).toHaveLength(2)
+  })
 })
