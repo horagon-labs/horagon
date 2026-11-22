@@ -152,14 +152,22 @@ function windowNights() {
 // ---------------------------------------------------------------------------------------------
 // Transactions (raw getTransaction JSON, encoding `json`)
 
+const unreadable = (tx) =>
+  new Error(`transaction ${tx.transaction.signatures[0]} cannot be read in full`)
+
 // The account index space of a v0 message: static keys, then loaded writable, then loaded readonly.
+// A top-level instruction that names an index past them comes from a response that lacks keys of
+// the transaction, such as the addresses of a lookup table: it throws instead of dropping a swap.
 function accountKeys(tx) {
+  const { message } = tx.transaction
   const loaded = tx.meta?.loadedAddresses
-  return [
-    ...tx.transaction.message.accountKeys,
-    ...(loaded?.writable ?? []),
-    ...(loaded?.readonly ?? []),
-  ]
+  const keys = [...message.accountKeys, ...(loaded?.writable ?? []), ...(loaded?.readonly ?? [])]
+  for (const ix of message.instructions) {
+    if ([ix.programIdIndex, ...ix.accounts].some((index) => index >= keys.length)) {
+      throw unreadable(tx)
+    }
+  }
+  return keys
 }
 
 export function hasBotMemo(tx) {
@@ -173,7 +181,8 @@ export function hasBotMemo(tx) {
 }
 
 // Top-level pm-AMM swaps of a successful transaction on one of `markets` (pm-AMM market pubkeys).
-// Swaps reached through a CPI live in meta.innerInstructions and are never read.
+// Swaps reached through a CPI live in meta.innerInstructions and are never read. Throws when the
+// transaction cannot be read in full.
 export function extractSwaps(tx, markets) {
   if (!tx.meta || tx.meta.err !== null || typeof tx.blockTime !== 'number') return []
   const { message, signatures } = tx.transaction
@@ -188,6 +197,9 @@ export function extractSwaps(tx, markets) {
     const market = keys[marketIndex]
     if (market === undefined || !markets.has(market)) continue
     if (!startsWith(base58Decode(ix.data), SWAP_DISCRIMINATOR)) continue
+    // Signers are static keys. A header that counts more signers than there are static keys would
+    // make a loaded key the wallet.
+    if (walletIndex >= message.accountKeys.length) throw unreadable(tx)
     swaps.push({
       signature: signatures[0],
       wallet: keys[walletIndex],
@@ -487,14 +499,35 @@ const PAGE_LIMIT = 1000
 // Waits of 500 ms, 1 s, 2 s, 4 s, then 8 s: `retry` counts the retries already made.
 const backoffMs = (retry) => Math.min(8_000, 500 * 2 ** retry)
 
+// True when the transaction uses no address lookup table, or when meta.loadedAddresses holds a
+// writable and a readonly list exactly as long as the indexes its lookups name.
+function hasLoadedAddresses(tx) {
+  const lookups = tx.transaction?.message?.addressTableLookups
+  if (!Array.isArray(lookups) || lookups.length === 0) return true
+  const loaded = tx.meta.loadedAddresses
+  if (!Array.isArray(loaded?.writable) || !Array.isArray(loaded?.readonly)) return false
+  let writable = 0
+  let readonly = 0
+  for (const lookup of lookups) {
+    if (!Array.isArray(lookup?.writableIndexes) || !Array.isArray(lookup?.readonlyIndexes)) {
+      return false
+    }
+    writable += lookup.writableIndexes.length
+    readonly += lookup.readonlyIndexes.length
+  }
+  return loaded.writable.length === writable && loaded.readonly.length === readonly
+}
+
 // A getTransaction result that can be counted: an object whose meta is an object with an err key
-// (null or not) and whose blockTime is a number. Real nodes always send both. Anything else, null
-// included, is not available yet: extractSwaps would drop it silently.
+// (null or not), whose blockTime is a number and, when it uses lookup tables, whose
+// meta.loadedAddresses holds every address they load. Real nodes always send all three. Anything
+// else, null included, is not available yet: extractSwaps would drop it silently.
 const isFullTransaction = (tx) =>
   isRecord(tx) &&
   isRecord(tx.meta) &&
   Object.hasOwn(tx.meta, 'err') &&
-  typeof tx.blockTime === 'number'
+  typeof tx.blockTime === 'number' &&
+  hasLoadedAddresses(tx)
 
 // Retry-After holds delay-seconds or an HTTP-date. undefined when it is absent or unreadable.
 function retryAfterMs(header, nowMs) {
@@ -602,8 +635,9 @@ export function createRpc(url, options = {}) {
       const result = await request(method, params)
       if (method !== 'getTransaction' || isFullTransaction(result)) return result
       // A node that lags behind answers null, or a transaction without meta, meta.err or
-      // blockTime, for a transaction it will have in full soon. Each is retried like null, then
-      // the count stops: a listed signature is never dropped.
+      // blockTime, for a transaction it will have in full soon. A node may also leave out the
+      // addresses that lookup tables load. Each is retried like null, then the count stops: a
+      // listed signature is never dropped.
       if (retry === NULL_RETRIES) throw new Error(`transaction ${params[0]} not available`)
       const waitMs = backoffMs(retry)
       onRetry({ method, attempt: retry + 1, waitMs, status: 'null' })

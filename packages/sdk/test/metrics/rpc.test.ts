@@ -372,6 +372,78 @@ describe('createRpc', () => {
       expect(clock.sleeps).toEqual([500])
     },
   )
+
+  /** A copy of the transaction whose meta.loadedAddresses is `loadedAddresses`. */
+  const withLoaded =
+    (loadedAddresses: unknown): TxChange =>
+    (tx) => ({ ...tx, meta: { ...(tx.meta as Record<string, unknown>), loadedAddresses } })
+  const withoutLoaded: TxChange = (tx) => ({
+    ...tx,
+    meta: without(tx.meta as Record<string, unknown>, 'loadedAddresses'),
+  })
+
+  /**
+   * Answers whose meta.loadedAddresses does not hold the addresses that the lookups of a v0
+   * transaction load: here one writable address, the market, and no readonly one.
+   */
+  const unresolved: [string, TxChange][] = [
+    ['is missing', withoutLoaded],
+    ['is null', withLoaded(null)],
+    ['has no readonly list', withLoaded({ writable: [pmAmmMarketKey('m1')] })],
+    ['is too short', withLoaded({ writable: [], readonly: [] })],
+    ['is too long', withLoaded({ writable: [pmAmmMarketKey('m1'), walletKey('x')], readonly: [] })],
+  ]
+
+  it.each(unresolved)(
+    'treats a lookup-table transaction whose loadedAddresses %s like null',
+    async (_name, change) => {
+      const { rpc, node, retries } = setup(
+        { markets: [M1], swaps: [['fan', 'm1', at(0), { tx: 'lookup', lookup: true }]] },
+        { wrap: changeTransactions(change) },
+      )
+      const signature = fakeSignature('lookup')
+      await expect(
+        rpc.call('getTransaction', [
+          signature,
+          { encoding: 'json', maxSupportedTransactionVersion: 0 },
+        ]),
+      ).rejects.toThrow(new Error(`transaction ${signature} not available`))
+      expect(node.requests).toHaveLength(4)
+      expect(retries.map((r) => [r.attempt, r.status])).toEqual([
+        [1, 'null'],
+        [2, 'null'],
+        [3, 'null'],
+      ])
+    },
+  )
+
+  // addressTableLookups is [] in the first case and missing, as in a legacy message, in the second.
+  it.each<[string, TxChange]>([
+    ['loadedAddresses is missing', withoutLoaded],
+    [
+      'loadedAddresses and addressTableLookups are missing',
+      (tx) => {
+        const transaction = tx.transaction as Record<string, unknown>
+        const message = transaction.message as Record<string, unknown>
+        return {
+          ...withoutLoaded(tx),
+          transaction: { ...transaction, message: without(message, 'addressTableLookups') },
+        }
+      },
+    ],
+  ])('returns at once a transaction without lookup tables whose %s', async (_name, change) => {
+    const { rpc, chain, retries } = setup(
+      { markets: [M1], swaps: [['fan', 'm1', at(0), { tx: 'static' }]] },
+      { wrap: changeTransactions(change) },
+    )
+    await expect(
+      rpc.call('getTransaction', [
+        fakeSignature('static'),
+        { encoding: 'json', maxSupportedTransactionVersion: 0 },
+      ]),
+    ).resolves.toEqual(change(chain.transactions[0] as unknown as Record<string, unknown>))
+    expect(retries).toEqual([])
+  })
 })
 
 describe('fetchGameMarkets', () => {

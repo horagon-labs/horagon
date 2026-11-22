@@ -9,6 +9,7 @@ import {
   type FanReport,
   formatReport,
   main,
+  type RawTransaction,
   type WalletsFile,
 } from '../../../../scripts/count-fans.mjs'
 import {
@@ -334,6 +335,94 @@ describe('main: RPC failures', () => {
       })
     },
   )
+})
+
+describe('main: a swap whose market comes from a lookup table', () => {
+  // A fan on three nights. The third swap is a v0 transaction that loads its market from an
+  // address lookup table, so the market is in meta.loadedAddresses, not in the static keys.
+  const nba = (label: string, game: string, tipoff: string) => ({
+    label,
+    kind: 0,
+    league: 'NBA',
+    game,
+    tipoff,
+  })
+  const chain = seasonChain({
+    markets: [
+      nba('n1', '401810401', '2026-11-24T00:00:00Z'), // night 2026-11-23
+      nba('n2', '401810402', '2026-11-26T00:00:00Z'), // night 2026-11-25
+      nba('n3', '401810403', '2026-11-29T00:00:00Z'), // night 2026-11-28
+    ],
+    swaps: [
+      ['fan', 'n1', '2026-11-24T01:00:00Z'],
+      ['fan', 'n2', '2026-11-26T01:00:00Z'],
+      ['fan', 'n3', '2026-11-29T01:00:00Z', { tx: 'lookup', lookup: true }],
+    ],
+  })
+  const files = { 'w.json': JSON.stringify(EMPTY) }
+  const argv = ['--wallets', 'w.json']
+  const lookup = fakeSignature('lookup')
+
+  type TxChange = (tx: Record<string, unknown>) => Record<string, unknown>
+  /** Answers every getTransaction call for the lookup-table swap with the transaction changed. */
+  const changeLookup =
+    (change: TxChange) =>
+    (serve: typeof fetch): typeof fetch =>
+    async (input: RequestInfo | URL, init?: RequestInit) => {
+      const answer = await serve(input, init)
+      const { method, params } = JSON.parse(String(init?.body))
+      if (method !== 'getTransaction' || params[0] !== lookup) return answer
+      const body = await answer.json()
+      return new Response(JSON.stringify({ ...body, result: change(body.result) }))
+    }
+  const meta = (tx: Record<string, unknown>) => tx.meta as Record<string, unknown>
+  const stopped = (error: string) =>
+    `count-fans: ${error}\ncount-fans: stopped: no number was printed\n`
+
+  it('counts the swap when meta.loadedAddresses holds the market', async () => {
+    const r = await run(argv, { chain, files })
+    expect(r.code).toBe(0)
+    expect(r.stdout).toContain('\nswaps: 3 on counted markets, 3 night touches\n')
+    expect(r.stdout).toContain('\n3-Night Fans (human wallets): 1\n')
+  })
+
+  it.each<[string, TxChange]>([
+    [
+      'without meta.loadedAddresses',
+      (tx) => ({
+        ...tx,
+        meta: Object.fromEntries(Object.entries(meta(tx)).filter(([k]) => k !== 'loadedAddresses')),
+      }),
+    ],
+    [
+      'with meta.loadedAddresses too short',
+      (tx) => ({ ...tx, meta: { ...meta(tx), loadedAddresses: { writable: [], readonly: [] } } }),
+    ],
+  ])('exits 3 and prints no number when the node sends the swap %s', async (_name, change) => {
+    const r = await run(argv, { chain, files, wrap: changeLookup(change) })
+    expect(r.code).toBe(3)
+    expect(r.stdout).toBe('')
+    const asked = r.requests.filter((q) => q.method === 'getTransaction' && q.params[0] === lookup)
+    expect(asked).toHaveLength(4)
+    expect(r.stderr).toContain('count-fans: getTransaction: null, retry 3 in 2.0 s\n')
+    expect(r.stderr.endsWith(stopped(`transaction ${lookup} not available`))).toBe(true)
+  })
+
+  it('exits 3 and prints no number when the swap names an account past the keys', async () => {
+    // meta.loadedAddresses is full, but the market index of the swap is one past the last key.
+    const pastTheKeys: TxChange = (tx) => {
+      const copy = structuredClone(tx) as unknown as RawTransaction
+      const { accountKeys, instructions } = copy.transaction.message
+      const swap = instructions.at(-1)
+      if (swap === undefined) throw new Error('no swap')
+      swap.accounts[1] = accountKeys.length + 1 // the static keys, then the one loaded key
+      return copy as unknown as Record<string, unknown>
+    }
+    const r = await run(argv, { chain, files, wrap: changeLookup(pastTheKeys) })
+    expect(r.code).toBe(3)
+    expect(r.stdout).toBe('')
+    expect(r.stderr.endsWith(stopped(`transaction ${lookup} cannot be read in full`))).toBe(true)
+  })
 })
 
 describe('main: usage and config errors', () => {

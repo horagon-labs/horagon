@@ -230,6 +230,8 @@ export interface TradeInput {
   memo?: MemoKind
   /** The transaction fails in its last swap: meta.err is set. */
   failed?: boolean
+  /** The markets are loaded writable from an address lookup table, not in the static key list. */
+  lookup?: boolean
 }
 
 /** A trade as Horagon builds it: compute budget, an idempotent ATA create, the swap(s) last. */
@@ -261,6 +263,7 @@ export function tradeTransaction(t: TradeInput): RawTransaction {
     signers: t.sponsored ? [SPONSOR, t.wallet] : [t.wallet],
     instructions,
     err: t.failed ? { InstructionError: [instructions.length - 1, { Custom: 6004 }] } : null,
+    loaded: t.lookup ? { writable: [...t.markets], readonly: [] } : undefined,
     inner:
       t.memo === 'inner'
         ? [{ index: firstSwap, instructions: [memoInstruction('exact', t.wallet)] }]
@@ -290,6 +293,8 @@ export interface SwapOptions {
   tx?: string
   /** The transaction fails: meta.err is set, and getSignaturesForAddress still lists it. */
   failed?: boolean
+  /** The markets are loaded from an address lookup table (a v0 transaction that uses one). */
+  lookup?: boolean
 }
 
 export type SeasonSwap = [wallet: string, market: string, at: string, options?: SwapOptions]
@@ -341,6 +346,7 @@ export function seasonChain(season: Season): FakeChain {
         sponsored: options.sponsored,
         memo: options.memo,
         failed: options.failed,
+        lookup: options.lookup,
       })
     }
   }

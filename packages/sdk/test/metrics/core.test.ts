@@ -21,6 +21,7 @@ import {
   isRateBot,
   MEMO_PROGRAM_ID,
   PM_AMM_PROGRAM_ID,
+  type RawInstruction,
   type RawTransaction,
   SWAP_DISCRIMINATOR,
   type TeamRole,
@@ -360,6 +361,56 @@ describe('hasBotMemo and extractSwaps', () => {
     })
     expect(tx.transaction.message.accountKeys).not.toContain(M1)
     expect(extractSwaps(tx, markets).map((s) => s.market)).toEqual([M1])
+  })
+
+  // A response whose instructions name keys it does not hold cannot be read in full: the count
+  // must stop instead of dropping a swap.
+  const unreadable = new Error(`transaction ${SIG} cannot be read in full`)
+
+  it.each<[string, number, (ix: RawInstruction, past: number) => void]>([
+    [
+      'the program id of an instruction',
+      0,
+      (ix, past) => {
+        ix.programIdIndex = past
+      },
+    ],
+    [
+      'an account of an instruction',
+      1,
+      (ix, past) => {
+        ix.accounts[0] = past
+      },
+    ],
+    [
+      'the market of a swap',
+      2,
+      (ix, past) => {
+        ix.accounts[1] = past
+      },
+    ],
+  ])('throws when %s is past the resolved keys', (_name, i, change) => {
+    const tx = structuredClone(trade({ lookup: true }))
+    const { accountKeys, instructions } = tx.transaction.message
+    // M1 is the one loaded key, right after the static keys.
+    expect(instructions[2]?.accounts[1]).toBe(accountKeys.length)
+    const ix = instructions[i]
+    if (ix === undefined) throw new Error(`no instruction ${i}`)
+    change(ix, accountKeys.length + 1)
+    expect(() => extractSwaps(tx, markets)).toThrow(unreadable)
+    expect(() => hasBotMemo(tx)).toThrow(unreadable)
+  })
+
+  it('throws when the signer of a swap is past the static keys', () => {
+    // The header claims one signer more than the static keys hold, so a loaded key would pass
+    // as the signer of the swap. A loaded key never signs.
+    const tx = structuredClone(trade({ lookup: true }))
+    const { header, accountKeys, instructions } = tx.transaction.message
+    header.numRequiredSignatures = accountKeys.length + 1
+    const swap = instructions[2]
+    if (swap === undefined) throw new Error('no swap')
+    swap.accounts[0] = accountKeys.length
+    expect(() => extractSwaps(tx, markets)).toThrow(unreadable)
   })
 
   it('reads a swap whose data carries the discriminator and the 17 argument bytes', () => {
