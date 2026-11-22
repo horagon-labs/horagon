@@ -16,10 +16,14 @@ import {
   type ScanResult,
 } from './fixture-repo'
 
+// Word edges that, unlike the ASCII-only backslash-b, know accented letters.
+const EDGE_L = '(?<![\\p{L}\\p{N}_])'
+const EDGE_R = '(?![\\p{L}\\p{N}_])'
+
 // Fake patterns only. Line 1 is a comment and line 3 is blank, so the patterns are #2, #4 and #5.
 const DENYLIST = [
   '# fixture denylist: fake values only',
-  '\\bQZX\\b',
+  EDGE_L + 'QZX' + EDGE_R,
   '',
   'zebraname',
   'fake@example\\.test',
@@ -119,7 +123,7 @@ describe('scan-repo on the main fixture', { timeout: 60_000 }, () => {
   })
 
   it('matches case-insensitively in messages and content', () => {
-    // pattern \bQZX\b against "Qzx" in the message, pattern zebraname against "ZEBRANAME"
+    // pattern QZX (with word edges) against "Qzx" in the message, pattern zebraname against "ZEBRANAME"
     expect(linesOf(base, c.c3)).toEqual([`HIT message commit=${c.c3} pattern#=2`])
     expect(linesOf(base, c.wip)).toEqual([
       content(c.wip, 'notes/wip.txt', 4),
@@ -127,7 +131,7 @@ describe('scan-repo on the main fixture', { timeout: 60_000 }, () => {
     ])
   })
 
-  it('matches \\bQZX\\b against qzx but not inside PREQZX or QZXPOST', () => {
+  it('matches QZX with word edges against qzx but not inside PREQZX or QZXPOST', () => {
     const prefix = `commit=${c.c1} path#=${repo.pathNumber(c.c1, 'src/prefix.txt')} `
     expect(hitLines(base).filter((line) => line.includes(prefix))).toEqual([])
     expect(hitLines(base)).toContain(content(c.c1, 'src/carry.txt', 2))
@@ -402,14 +406,136 @@ describe('scan-repo exit codes, config errors and edge cases', { timeout: 60_000
     expect(missing.stderr).toBe('scan-repo: the --repo directory does not exist\n')
   })
 
-  it('reads a denylist saved with a byte order mark and CRLF line ends, other lines verbatim', () => {
-    // line 3 is a pattern, since only a line that starts with # is a comment; line 4 keeps its
-    // leading space, so it does not match the qzx at the start of docs/solo.md
-    solo.keys({ denylist: '﻿qzx\r\n# comment\r\n  #x\r\n qzx\r\n' })
+  it('reads a denylist saved with a byte order mark and CRLF line ends, lines trimmed', () => {
+    // lines 2 and 3 are comments (line 3 once its leading spaces are trimmed); line 4 is the
+    // pattern qzx once its leading space is trimmed
+    solo.keys({ denylist: '\uFEFFqzx\r\n# comment\r\n  #x\r\n qzx\r\n' })
     const result = scan(solo)
     expect(result.status).toBe(1)
-    expect(result.stdout).toContain(' 3 patterns\n')
+    expect(result.stdout).toContain(' 2 patterns\n')
+    expect(hitLines(result)).toEqual([
+      `HIT ${soloHit().replace('pattern#=2', 'pattern#=1')}`,
+      `HIT ${soloHit().replace('pattern#=2', 'pattern#=4')}`,
+    ])
+  })
+
+  it('trims trailing whitespace, so an invisible space cannot disable a pattern', () => {
+    solo.keys({ denylist: 'qzx \t\n' })
+    const result = scan(solo)
+    expect(result.status).toBe(1)
     expect(hitLines(result)).toEqual([`HIT ${soloHit().replace('pattern#=2', 'pattern#=1')}`])
+  })
+
+  it('exits 2 when the denylist is not UTF-8 text', () => {
+    const cases: Buffer[] = [
+      Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from('qzx\n', 'utf16le')]),
+      Buffer.concat([Buffer.from([0xfe, 0xff]), Buffer.from('qzx\n', 'utf16le').swap16()]),
+      Buffer.from('qz\0x\n'),
+      Buffer.from([0x7a, 0xe9, 0x62, 0x72, 0x61, 0x0a]), // latin1 e-acute, invalid UTF-8
+    ]
+    for (const bytes of cases) {
+      writeFileSync(join(solo.dir, '.keys', 'scan-denylist.txt'), bytes)
+      const result = scan(solo)
+      expect(result.status).toBe(2)
+      expect(result.stdout).toBe('')
+      expect(result.stderr).toBe('scan-repo: .keys/scan-denylist.txt is not UTF-8 text\n')
+    }
+  })
+
+  it('exits 2 when the accepted list is not UTF-8 text', () => {
+    writeFileSync(
+      join(solo.dir, '.keys', 'scan-accepted.txt'),
+      Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(`${soloSha}\n`, 'utf16le')]),
+    )
+    const result = scan(solo)
+    expect(result.status).toBe(2)
+    expect(result.stderr).toBe('scan-repo: .keys/scan-accepted.txt is not UTF-8 text\n')
+  })
+
+  it('refuses the ASCII-only word boundary escapes, naming only the line', () => {
+    for (const pattern of ['\\bqzx\\b', 'qzx\\B', 'x(\\\\\\b)']) {
+      solo.keys({ denylist: ['# comment', pattern] })
+      const result = scan(solo)
+      expect(result.status).toBe(2)
+      expect(result.stdout).toBe('')
+      expect(result.stderr).toMatch(/^scan-repo: pattern#2 uses a word boundary escape/)
+    }
+    // an escaped backslash followed by the letter b is not a boundary escape
+    solo.keys({ denylist: ['qzx\\\\b'] })
+    expect(scan(solo).status).toBe(0)
+  })
+
+  it('exits 2 on a pattern that is invalid under the u flag', () => {
+    solo.keys({ denylist: ['qzx', 'a\\-b'] })
+    const result = scan(solo)
+    expect(result.status).toBe(2)
+    expect(result.stderr).toBe('scan-repo: pattern#2 is not a valid regular expression\n')
+  })
+
+  it('finds a name that starts with an accented capital with Unicode word edges', () => {
+    const accents = new FixtureRepo('accent-edge-trunk')
+    try {
+      const sha = accents.commit('chore: start', {
+        '.gitignore': '.keys/\n',
+        'docs/inside.md': 'longer word: x\u00C9zebra and \u00C9zebrax\n',
+        'docs/found.md': 'the name \u00C9zebra here\n',
+      })
+      accents.keys({ denylist: [`${EDGE_L}\u00E9zebra${EDGE_R}`] })
+      const result = scan(accents)
+      expect(result.status).toBe(1)
+      const found = accents.pathNumber(sha, 'docs/found.md')
+      expect(hitLines(result)).toEqual([`HIT content commit=${sha} path#=${found} pattern#=1`])
+    } finally {
+      accents.cleanup()
+    }
+  })
+
+  it('matches UTF-16 files (with or without a byte order mark) and a UTF-8 BOM first line', () => {
+    const wide = new FixtureRepo('wide-trunk')
+    try {
+      const le = Buffer.from('hello qzx\r\n', 'utf16le')
+      const sha = wide.commit('chore: start', {
+        '.gitignore': '.keys/\n',
+        'data/bom-le.txt': Buffer.concat([Buffer.from([0xff, 0xfe]), le]),
+        'data/plain-le.txt': le,
+        'data/plain-be.txt': Buffer.from(le).swap16(),
+        'data/bom-be.txt': Buffer.concat([Buffer.from([0xfe, 0xff]), Buffer.from(le).swap16()]),
+        'data/utf8-bom.txt': Buffer.concat([
+          Buffer.from([0xef, 0xbb, 0xbf]),
+          Buffer.from('qzx\nx\n'),
+        ]),
+        'data/none.txt': 'nothing here\n',
+      })
+      wide.keys({ denylist: ['qzx', '^qzx$'] })
+      const result = scan(wide)
+      expect(result.status).toBe(1)
+      const at = (path: string, pattern: number) =>
+        `HIT content commit=${sha} path#=${wide.pathNumber(sha, path)} pattern#=${pattern}`
+      expect(hitLines(result).sort()).toEqual(
+        [
+          at('data/bom-be.txt', 1),
+          at('data/bom-le.txt', 1),
+          at('data/plain-be.txt', 1),
+          at('data/plain-le.txt', 1),
+          at('data/utf8-bom.txt', 1),
+          at('data/utf8-bom.txt', 2),
+        ].sort(),
+      )
+    } finally {
+      wide.cleanup()
+    }
+  })
+
+  it('exits 2 when a ref points to a tree', () => {
+    solo.updateRef('refs/tags/kilo-tree', solo.git('rev-parse', `${soloSha}^{tree}`))
+    try {
+      const result = scan(solo)
+      expect(result.status).toBe(2)
+      expect(result.stdout).toBe('')
+      expect(result.stderr).toBe('scan-repo: ref#2 does not point to a commit\n')
+    } finally {
+      solo.git('update-ref', '-d', 'refs/tags/kilo-tree')
+    }
   })
 
   it('matches ^ and $ at each line end (flag m)', () => {
@@ -426,7 +552,7 @@ describe('scan-repo exit codes, config errors and edge cases', { timeout: 60_000
       // content written decomposed (E + U+0301) and upper case; the pattern composed, lower case
       const sha = accents.commit('chore: start', {
         '.gitignore': '.keys/\n',
-        'docs/accent.md': 'ZÉBRANAME in decomposed form\n',
+        'docs/accent.md': 'ZE\u0301BRANAME in decomposed form\n',
       })
       accents.keys({ denylist: ['zébraname'] })
       const result = scan(accents)
@@ -445,9 +571,9 @@ describe('scan-repo exit codes, config errors and edge cases', { timeout: 60_000
         '.gitignore': '.keys/\n',
         'docs/clean.md': 'clean\n',
       })
-      chain.tag('india-inner', sha, 'inner notes mention qzx')
-      chain.tag('india-outer', 'india-inner', 'outer notes')
-      chain.git('tag', '-d', 'india-inner')
+      chain.tag('indigo-inner', sha, 'inner notes mention qzx')
+      chain.tag('indigo-outer', 'indigo-inner', 'outer notes')
+      chain.git('tag', '-d', 'indigo-inner')
       chain.keys({ denylist: DENYLIST })
       const result = scan(chain)
       expect(result.status).toBe(1)

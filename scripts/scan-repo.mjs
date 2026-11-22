@@ -26,6 +26,10 @@
 // accepted commit prints ACCEPTED too: after any denylist change, re-read the ACCEPTED lines or
 // empty scan-accepted.txt before trusting exit 0.
 //
+// The denylist and accepted files must be UTF-8 text (no UTF-16, no NUL bytes) and every line is
+// trimmed. Patterns use flags i, m and u; \b and \B are refused because they are ASCII-only, so
+// write word edges as (?<![\p{L}\p{N}_]) and (?![\p{L}\p{N}_]).
+//
 // Replacement objects (git replace) are ignored, as push ignores them. A commit with a mergetag
 // header is a config error, because the tag it embeds is not scanned.
 //
@@ -109,26 +113,46 @@ function parseArgs(argv) {
   return options
 }
 
-// Lines with their 1-based line numbers, minus blank lines and lines that start with #. Only the
-// byte order mark and the \r that a Windows editor may write are removed; the rest is verbatim.
-function readLines(file) {
+// Lines with their 1-based line numbers, trimmed, minus blank lines and lines that start with #.
+// The file must be UTF-8 text: a UTF-16 file or one with a NUL byte or invalid UTF-8 is an error,
+// since its patterns would silently never match. A leading byte order mark is removed.
+function readLines(file, label) {
+  const bytes = readFileSync(file)
+  const utf16 = (bytes[0] === 0xff && bytes[1] === 0xfe) || (bytes[0] === 0xfe && bytes[1] === 0xff)
+  let raw = ''
+  try {
+    if (utf16 || bytes.includes(0)) throw new Error('not utf-8')
+    raw = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes)
+  } catch {
+    throw new ConfigError(`${label} is not UTF-8 text`)
+  }
   const lines = []
-  const raw = readFileSync(file, 'utf8').replace(/^﻿/, '')
-  for (const [index, line] of raw.split('\n').entries()) {
-    const text = line.replace(/\r$/, '')
-    if (text.trim() !== '' && !text.startsWith('#')) lines.push({ line: index + 1, text })
+  for (const [index, line] of raw
+    .replace(/^\uFEFF/, '')
+    .split('\n')
+    .entries()) {
+    const text = line.trim()
+    if (text !== '' && !text.startsWith('#')) lines.push({ line: index + 1, text })
   }
   return lines
 }
+
+// An unescaped backslash-b or backslash-B (an even number of backslashes before it).
+const WORD_BOUNDARY = /(?:^|[^\\])(?:\\\\)*\\[bB]/
 
 function loadPatterns(root) {
   if (!existsSync(join(root, DENYLIST))) throw new ConfigError(`${DENYLIST} is missing`)
   const check = run(root, ['check-ignore', '-q', DENYLIST])
   if (check.status === 1) throw new ConfigError(`${DENYLIST} is not ignored by git`)
   if (check.status !== 0) throw new ConfigError('git check-ignore failed')
-  const patterns = readLines(join(root, DENYLIST)).map(({ line, text }) => {
+  const patterns = readLines(join(root, DENYLIST), DENYLIST).map(({ line, text }) => {
+    if (WORD_BOUNDARY.test(text)) {
+      throw new ConfigError(
+        `pattern#${line} uses a word boundary escape, which is ASCII-only; use (?<![\\p{L}\\p{N}_]) and (?![\\p{L}\\p{N}_]) instead`,
+      )
+    }
     try {
-      return { id: line, regex: new RegExp(text.normalize('NFC'), 'im') }
+      return { id: line, regex: new RegExp(text.normalize('NFC'), 'imu') }
     } catch {
       throw new ConfigError(`pattern#${line} is not a valid regular expression`)
     }
@@ -140,7 +164,7 @@ function loadPatterns(root) {
 function loadAccepted(root) {
   const accepted = new Set()
   if (!existsSync(join(root, ACCEPTED))) return accepted
-  for (const { line, text } of readLines(join(root, ACCEPTED))) {
+  for (const { line, text } of readLines(join(root, ACCEPTED), ACCEPTED)) {
     if (!/^[0-9a-f]{40}$/i.test(text)) {
       throw new ConfigError(`${ACCEPTED} line ${line} is not a full 40-hex commit SHA`)
     }
@@ -173,18 +197,31 @@ function readObjects(root, oids, visit) {
   }
 }
 
-// The texts a blob is matched as: its bytes, plus the inflated bytes when it is gzip (1f 8b), so
-// a name inside a compressed recording is still found.
+// The texts a blob is matched as: its decodings, plus those of the inflated bytes when it is gzip
+// (1f 8b), so a name inside a compressed recording is still found.
 function blobTexts(data) {
-  const texts = [data.toString('utf8')]
+  const texts = decodings(data)
   if (data[0] === 0x1f && data[1] === 0x8b) {
     try {
-      texts.push(gunzipSync(data, { maxOutputLength: MAX_OUTPUT }).toString('utf8'))
+      texts.push(...decodings(gunzipSync(data, { maxOutputLength: MAX_OUTPUT })))
     } catch {
       throw new ConfigError('a gzip blob could not be inflated')
     }
   }
   return texts
+}
+
+// UTF-8 always; UTF-16 as the byte order mark says, or both byte orders when there is none but a
+// NUL byte. A leading U+FEFF is dropped so that ^-anchored patterns see the first line.
+function decodings(data) {
+  const even = (bytes) => bytes.subarray(0, bytes.length - (bytes.length % 2))
+  const le = (bytes) => even(bytes).toString('utf16le')
+  const be = (bytes) => Buffer.from(even(bytes)).swap16().toString('utf16le')
+  const texts = [data.toString('utf8')]
+  if (data[0] === 0xff && data[1] === 0xfe) texts.push(le(data.subarray(2)))
+  else if (data[0] === 0xfe && data[1] === 0xff) texts.push(be(data.subarray(2)))
+  else if (data.includes(0)) texts.push(le(data), be(data))
+  return texts.map((text) => text.replace(/^\uFEFF/, ''))
 }
 
 function readObject(root, oid) {
