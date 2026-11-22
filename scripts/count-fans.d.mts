@@ -164,5 +164,62 @@ export function countFans(input: {
 /** Human-readable, without a trailing newline; the last line is 'elapsed: <s.s> s'. */
 export function formatReport(report: FanReport, meta: { rpc: string; elapsedMs: number }): string
 
-// RPC and CLI: Task A2 adds the declarations of createRpc, fetchGameMarkets, fetchSignatures,
-// fetchSwaps and main below this line.
+// RPC and CLI
+
+export interface RpcOptions {
+  /** Default: the global fetch. */
+  fetch?: typeof fetch
+  /** Requests started per second, retries included. Default 4. */
+  ratePerSecond?: number
+  /** Retries after HTTP 429, 500, 502, 503, 504 or a network error. Default 8. */
+  maxRetries?: number
+  /** Default: setTimeout. */
+  sleep?: (ms: number) => Promise<void>
+  /** Milliseconds, like the default Date.now. */
+  now?: () => number
+  /** Called before each wait for a retry. */
+  onRetry?: (info: {
+    method: string
+    /** 1 for the first retry of the call. */
+    attempt: number
+    waitMs: number
+    /**
+     * The HTTP status, the network error, or 'null' for a getTransaction that returned null or a
+     * transaction whose meta is not an object with an err key or whose blockTime is not a number.
+     */
+    status: number | string
+  }) => void
+}
+export interface Rpc {
+  /**
+   * The JSON-RPC `result`. Throws when the retries run out, on a JSON-RPC error, and when
+   * getTransaction still returns null, or a transaction without a meta object that has an err key
+   * or without a numeric blockTime, after 3 retries.
+   */
+  call<T>(method: string, params: unknown[]): Promise<T>
+  /** HTTP requests sent so far, retries included. */
+  readonly calls: number
+}
+export function createRpc(url: string, options?: RpcOptions): Rpc
+/** Every GameMarket account of the Horagon program (getProgramAccounts, discriminator filter). */
+export function fetchGameMarkets(rpc: Rpc): Promise<GameMarketRecord[]>
+/** Every page via `before`; successful transactions only (err === null); newest first. */
+export function fetchSignatures(rpc: Rpc, address: string): Promise<string[]>
+/** The swaps of every successful transaction on the markets' pm-AMM markets, each fetched once. */
+export function fetchSwaps(
+  rpc: Rpc,
+  markets: readonly GameMarketRecord[],
+  onProgress?: (done: number, total: number) => void,
+): Promise<Swap[]>
+/** The CLI. Resolves to the exit code: 0 ok, 1 failed check, 2 usage or config, 3 RPC failure. */
+export function main(
+  argv: readonly string[],
+  io?: {
+    fetch?: typeof fetch
+    stdout?: (s: string) => void
+    stderr?: (s: string) => void
+    now?: () => number
+    sleep?: (ms: number) => Promise<void>
+    readFile?: (path: string) => string
+  },
+): Promise<number>

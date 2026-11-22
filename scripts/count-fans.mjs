@@ -9,6 +9,10 @@
 // Every counting function is pure and exported. packages/sdk/test/metrics/ tests them, and
 // scripts/count-fans.d.mts declares their types.
 
+import { readFileSync, realpathSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+import { parseArgs } from 'node:util'
+
 export const HORAGON_PROGRAM_ID = 'HtDJ3vfx8vtFSmskm2Ks39kBMuDmFZH3H2B173BB9qHF'
 export const PM_AMM_PROGRAM_ID = 'GV1FMGHRYBjQLaghE5fnGuYCuCcpdt3GD5xEX3TwN16y'
 export const MEMO_PROGRAM_ID = 'MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr'
@@ -473,5 +477,363 @@ export function formatReport(report, meta) {
 }
 
 // ---------------------------------------------------------------------------------------------
-// RPC and CLI: Task A2 adds createRpc, fetchGameMarkets, fetchSignatures, fetchSwaps, main and
-// the main guard below this line.
+// RPC
+
+const RETRY_STATUSES = new Set([429, 500, 502, 503, 504])
+const NULL_RETRIES = 3
+const REQUEST_TIMEOUT_MS = 30_000
+const PAGE_LIMIT = 1000
+
+// Waits of 500 ms, 1 s, 2 s, 4 s, then 8 s: `retry` counts the retries already made.
+const backoffMs = (retry) => Math.min(8_000, 500 * 2 ** retry)
+
+// A getTransaction result that can be counted: an object whose meta is an object with an err key
+// (null or not) and whose blockTime is a number. Real nodes always send both. Anything else, null
+// included, is not available yet: extractSwaps would drop it silently.
+const isFullTransaction = (tx) =>
+  isRecord(tx) &&
+  isRecord(tx.meta) &&
+  Object.hasOwn(tx.meta, 'err') &&
+  typeof tx.blockTime === 'number'
+
+// Retry-After holds delay-seconds or an HTTP-date. undefined when it is absent or unreadable.
+function retryAfterMs(header, nowMs) {
+  const text = header?.trim() ?? ''
+  if (/^\d+$/.test(text)) return Number(text) * 1000
+  const at = /[a-z]/i.test(text) ? Date.parse(text) : Number.NaN
+  return Number.isFinite(at) ? Math.max(0, at - nowMs) : undefined
+}
+
+const describeError = (error) =>
+  error?.cause?.code === undefined
+    ? String(error?.message ?? error)
+    : `${error.message} (${error.cause.code})`
+
+// The parsed body, or undefined when it is not JSON.
+function parseBody(text) {
+  try {
+    return JSON.parse(text)
+  } catch {
+    return undefined
+  }
+}
+
+// The error of a JSON-RPC error body, naming the method and the code; undefined for other bodies.
+function jsonRpcError(method, body) {
+  if (!isRecord(body) || !isRecord(body.error)) return undefined
+  return new Error(`${method} failed: JSON-RPC error ${body.error.code}: ${body.error.message}`)
+}
+
+function readResult(method, text) {
+  const body = parseBody(text)
+  if (body === undefined) throw new Error(`${method} failed: the response is not JSON`)
+  const error = jsonRpcError(method, body)
+  if (error !== undefined) throw error
+  if (!isRecord(body) || !('result' in body)) {
+    throw new Error(`${method} failed: the response has no result`)
+  }
+  return body.result
+}
+
+export function createRpc(url, options = {}) {
+  const {
+    fetch: send = globalThis.fetch,
+    ratePerSecond = 4,
+    maxRetries = 8,
+    sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+    now = Date.now,
+    onRetry = () => {},
+  } = options
+  const interval = 1000 / ratePerSecond
+  let nextStart = Number.NEGATIVE_INFINITY
+  let calls = 0
+  let lastId = 0
+
+  // A token bucket that gains ratePerSecond tokens a second and holds one: every request, a retry
+  // included, starts at least 1000 / ratePerSecond ms after the one before, so no second holds
+  // more than ratePerSecond requests. The start is booked before the wait, so calls made at the
+  // same time queue up instead of sharing a token.
+  async function takeToken() {
+    const start = Math.max(now(), nextStart)
+    nextStart = start + interval
+    const wait = start - now()
+    if (wait > 0) await sleep(wait)
+  }
+
+  // One HTTP request. A network error, or a body that cannot be read, gives a string status.
+  async function post(method, params) {
+    await takeToken()
+    calls++
+    try {
+      const response = await send(url, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ jsonrpc: '2.0', id: ++lastId, method, params }),
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      })
+      const text = await response.text()
+      const retryAfter = response.headers.get('retry-after')
+      return { ok: response.ok, status: response.status, retryAfter, text }
+    } catch (error) {
+      return { ok: false, status: describeError(error), retryAfter: null, text: '' }
+    }
+  }
+
+  // The `result` of one JSON-RPC call, retried on HTTP 429, 500, 502, 503, 504 and network errors.
+  async function request(method, params) {
+    for (let retry = 0; ; retry++) {
+      const { ok, status, retryAfter, text } = await post(method, params)
+      if (ok) return readResult(method, text)
+      if (typeof status === 'number' && !RETRY_STATUSES.has(status)) {
+        // Some nodes send a JSON-RPC error with an HTTP error status, such as 401: name its code.
+        throw jsonRpcError(method, parseBody(text)) ?? new Error(`${method} failed: HTTP ${status}`)
+      }
+      if (retry === maxRetries) {
+        throw new Error(`${method} failed after ${maxRetries} retries (${status})`)
+      }
+      const waitMs = retryAfterMs(retryAfter, now()) ?? backoffMs(retry)
+      onRetry({ method, attempt: retry + 1, waitMs, status })
+      await sleep(waitMs)
+    }
+  }
+
+  async function call(method, params) {
+    for (let retry = 0; ; retry++) {
+      const result = await request(method, params)
+      if (method !== 'getTransaction' || isFullTransaction(result)) return result
+      // A node that lags behind answers null, or a transaction without meta, meta.err or
+      // blockTime, for a transaction it will have in full soon. Each is retried like null, then
+      // the count stops: a listed signature is never dropped.
+      if (retry === NULL_RETRIES) throw new Error(`transaction ${params[0]} not available`)
+      const waitMs = backoffMs(retry)
+      onRetry({ method, attempt: retry + 1, waitMs, status: 'null' })
+      await sleep(waitMs)
+    }
+  }
+
+  return {
+    call,
+    get calls() {
+      return calls
+    },
+  }
+}
+
+export async function fetchGameMarkets(rpc) {
+  const accounts = await rpc.call('getProgramAccounts', [
+    HORAGON_PROGRAM_ID,
+    {
+      encoding: 'base64',
+      commitment: 'confirmed',
+      filters: [{ memcmp: { offset: 0, bytes: base58Encode(GAME_MARKET_DISCRIMINATOR) } }],
+    },
+  ])
+  return accounts.map(({ pubkey, account }) => ({
+    address: pubkey,
+    ...decodeGameMarket(Buffer.from(account.data[0], 'base64')),
+  }))
+}
+
+// Successful transactions only, newest first, over every page.
+export async function fetchSignatures(rpc, address) {
+  const signatures = []
+  let before
+  for (;;) {
+    const page = await rpc.call('getSignaturesForAddress', [
+      address,
+      { limit: PAGE_LIMIT, ...(before === undefined ? {} : { before }), commitment: 'confirmed' },
+    ])
+    for (const entry of page) if (entry.err === null) signatures.push(entry.signature)
+    if (page.length < PAGE_LIMIT) return signatures
+    // The next page starts after the last entry of this one, failed or not.
+    before = page[page.length - 1].signature
+  }
+}
+
+export async function fetchSwaps(rpc, markets, onProgress = () => {}) {
+  const pmAmmMarkets = new Set(markets.map((m) => m.market))
+  // A transaction on two markets is listed under both: fetch each signature once.
+  const signatures = new Set()
+  for (const market of pmAmmMarkets) {
+    for (const signature of await fetchSignatures(rpc, market)) signatures.add(signature)
+  }
+  const swaps = []
+  let done = 0
+  onProgress(done, signatures.size)
+  for (const signature of signatures) {
+    const tx = await rpc.call('getTransaction', [
+      signature,
+      { encoding: 'json', maxSupportedTransactionVersion: 0, commitment: 'confirmed' },
+    ])
+    swaps.push(...extractSwaps(tx, pmAmmMarkets))
+    onProgress(++done, signatures.size)
+  }
+  return swaps
+}
+
+// ---------------------------------------------------------------------------------------------
+// CLI
+
+const USAGE = [
+  'usage: node scripts/count-fans.mjs [--rpc <url>] [--wallets <path>] [--json]',
+  '       node scripts/count-fans.mjs --check-wallets [--wallets <path>] [--previous <path>]',
+].join('\n')
+const DEFAULT_WALLETS = fileURLToPath(new URL('../docs/metrics-wallets.json', import.meta.url))
+const CLI_OPTIONS = {
+  rpc: { type: 'string' },
+  wallets: { type: 'string' },
+  json: { type: 'boolean' },
+  'check-wallets': { type: 'boolean' },
+  previous: { type: 'string' },
+}
+
+const isHttpUrl = (text) => URL.canParse(text) && /^https?:$/.test(new URL(text).protocol)
+const hasCredentials = (text) => {
+  const { username, password } = new URL(text)
+  return username !== '' || password !== ''
+}
+
+// { values } or { error }.
+function parseCli(argv) {
+  try {
+    const { values } = parseArgs({ args: [...argv], options: CLI_OPTIONS, strict: true })
+    if (values['check-wallets'] && (values.rpc !== undefined || values.json)) {
+      return { error: '--check-wallets reads only the wallets files: drop --rpc and --json' }
+    }
+    if (!values['check-wallets'] && values.previous !== undefined) {
+      return { error: '--previous goes with --check-wallets' }
+    }
+    if (values.rpc !== undefined && !isHttpUrl(values.rpc)) {
+      return { error: '--rpc needs an http or https URL' }
+    }
+    // fetch refuses such a URL, and its error message would print the whole URL, key included.
+    if (values.rpc !== undefined && hasCredentials(values.rpc)) {
+      return { error: '--rpc must not contain a user name or password' }
+    }
+    return { values }
+  } catch (error) {
+    return { error: error.message }
+  }
+}
+
+// { json } or { error }; `missing` is set when the file cannot be read at all.
+function readJson(readFile, path) {
+  let text
+  try {
+    text = readFile(path)
+  } catch (error) {
+    return { missing: true, error: `cannot read ${path} (${error.code ?? error.message})` }
+  }
+  try {
+    return { json: JSON.parse(text) }
+  } catch (error) {
+    return { error: `${path} is not valid JSON (${error.message})` }
+  }
+}
+
+export async function main(argv, io = {}) {
+  const stdout = io.stdout ?? ((text) => process.stdout.write(text))
+  const stderr = io.stderr ?? ((text) => process.stderr.write(text))
+  const now = io.now ?? Date.now
+  const readFile = io.readFile ?? ((path) => readFileSync(path, 'utf8'))
+  const started = now()
+  const fail = (code, lines) => {
+    stderr(lines.map((line) => `count-fans: ${line}\n`).join(''))
+    return code
+  }
+
+  const cli = parseCli(argv)
+  if (cli.error !== undefined) {
+    stderr(`count-fans: ${cli.error}\n${USAGE}\n`)
+    return 2
+  }
+  const options = cli.values
+  const walletsPath = options.wallets ?? DEFAULT_WALLETS
+  const file = readJson(readFile, walletsPath)
+  if (file.missing) return fail(2, [file.error])
+
+  if (options['check-wallets']) {
+    // The wallets file is under check, so its faults fail the check (1). The previous file is the
+    // reference, so a fault in it is a config error (2).
+    const checked =
+      file.error === undefined
+        ? validateWalletsFile(file.json)
+        : { ok: false, errors: [file.error] }
+    const errors = checked.ok ? [] : [...checked.errors]
+    if (options.previous !== undefined) {
+      const reference = readJson(readFile, options.previous)
+      if (reference.error !== undefined) return fail(2, [reference.error])
+      const previous = validateWalletsFile(reference.json)
+      if (!previous.ok) {
+        return fail(2, [`${options.previous} is not a valid wallets file:`, ...previous.errors])
+      }
+      if (checked.ok) errors.push(...checkAppendOnly(previous.value, checked.value))
+    }
+    stdout(errors.length === 0 ? 'wallets file ok\n' : errors.map((e) => `${e}\n`).join(''))
+    return errors.length === 0 ? 0 : 1
+  }
+
+  if (file.error !== undefined) return fail(2, [file.error])
+  const checked = validateWalletsFile(file.json)
+  if (!checked.ok) {
+    return fail(2, [`${walletsPath} is not a valid wallets file:`, ...checked.errors])
+  }
+  const wallets = checked.value
+  const rpcUrl = options.rpc ?? DEFAULT_RPC
+  // The report shows only the origin, so a key in the path or query of an RPC URL stays private.
+  const rpcShown = new URL(rpcUrl).origin
+  const rpc = createRpc(rpcUrl, {
+    fetch: io.fetch,
+    now: io.now,
+    sleep: io.sleep,
+    onRetry: ({ method, attempt, waitMs, status }) => {
+      const seconds = (waitMs / 1000).toFixed(1)
+      stderr(`count-fans: ${method}: ${status}, retry ${attempt} in ${seconds} s\n`)
+    },
+  })
+  try {
+    const markets = await fetchGameMarkets(rpc)
+    const excludedAddresses = new Set(wallets.excludedMarkets.map((e) => e.gameMarket))
+    const read = markets.filter((m) => marketClass(m, excludedAddresses) !== 'ignored')
+    stderr(
+      `count-fans: ${markets.length} GameMarket accounts on ${rpcShown}; reading the ` +
+        `transactions of ${read.length} counted or excluded markets\n`,
+    )
+    const swaps = await fetchSwaps(rpc, read, (done, total) => {
+      if (done % 100 === 0 || done === total) stderr(`count-fans: transactions ${done}/${total}\n`)
+    })
+    const report = countFans({ markets, swaps, wallets })
+    const meta = { rpc: rpcShown, elapsedMs: now() - started }
+    stdout(
+      options.json
+        ? `${JSON.stringify({ ...report, ...meta }, null, 2)}\n`
+        : `${formatReport(report, meta)}\n`,
+    )
+    stderr(`count-fans: RPC requests sent: ${rpc.calls}\n`)
+    return 0
+  } catch (error) {
+    return fail(3, [describeError(error), 'stopped: no number was printed'])
+  }
+}
+
+// Runs main only when this file is the program, as in `node scripts/count-fans.mjs`. Importing the
+// module, as the tests do, runs nothing.
+function isProgram() {
+  if (process.argv[1] === undefined) return false
+  let invoked
+  try {
+    invoked = realpathSync(process.argv[1])
+  } catch {
+    return false
+  }
+  const self = fileURLToPath(import.meta.url)
+  return process.platform === 'win32'
+    ? invoked.toLowerCase() === self.toLowerCase()
+    : invoked === self
+}
+
+if (isProgram()) {
+  main(process.argv.slice(2)).then((code) => {
+    process.exitCode = code
+  })
+}

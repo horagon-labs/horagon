@@ -1,7 +1,7 @@
-// Fake Horagon chain data for the count-fans tests: GameMarket account bytes and raw
-// getTransaction JSON. This file encodes with its own code (a BigInt base58, Buffer writes, hex
-// discriminators) and never calls the script's decoders, so a test cannot pass by checking the
-// script against itself.
+// Fake Horagon chain data for the count-fans tests: GameMarket account bytes, raw getTransaction
+// JSON, and a fake JSON-RPC endpoint that serves them. This file encodes with its own code (a
+// BigInt base58, Buffer writes, hex discriminators) and never calls the script's decoders, so a
+// test cannot pass by checking the script against itself.
 import { createHash } from 'node:crypto'
 import type { RawTransaction, TeamRole, WalletsFile } from '../../../../scripts/count-fans.mjs'
 
@@ -228,6 +228,8 @@ export interface TradeInput {
   markets: string[]
   sponsored?: boolean
   memo?: MemoKind
+  /** The transaction fails in its last swap: meta.err is set. */
+  failed?: boolean
 }
 
 /** A trade as Horagon builds it: compute budget, an idempotent ATA create, the swap(s) last. */
@@ -258,6 +260,7 @@ export function tradeTransaction(t: TradeInput): RawTransaction {
     blockTime: t.blockTime,
     signers: t.sponsored ? [SPONSOR, t.wallet] : [t.wallet],
     instructions,
+    err: t.failed ? { InstructionError: [instructions.length - 1, { Custom: 6004 }] } : null,
     inner:
       t.memo === 'inner'
         ? [{ index: firstSwap, instructions: [memoInstruction('exact', t.wallet)] }]
@@ -285,6 +288,8 @@ export interface SwapOptions {
   every?: number
   /** Swaps with the same label share one transaction (wallet, time and options of the first). */
   tx?: string
+  /** The transaction fails: meta.err is set, and getSignaturesForAddress still lists it. */
+  failed?: boolean
 }
 
 export type SeasonSwap = [wallet: string, market: string, at: string, options?: SwapOptions]
@@ -335,6 +340,7 @@ export function seasonChain(season: Season): FakeChain {
         markets: [pmAmmMarketKey(market)],
         sponsored: options.sponsored,
         memo: options.memo,
+        failed: options.failed,
       })
     }
   }
@@ -355,5 +361,201 @@ export function seasonChain(season: Season): FakeChain {
         addedAt: '2026-11-22T09:00:00Z',
       })),
     },
+  }
+}
+
+// ---------------------------------------------------------------------------------------------
+// A fake JSON-RPC endpoint over fake chain data, for the RPC and CLI tests
+
+/** Base58 to bytes by BigInt, for the memcmp filter of getProgramAccounts. */
+function fromBase58(text: string): Uint8Array {
+  let n = 0n
+  for (const c of text) {
+    const digit = DIGITS.indexOf(c)
+    if (digit < 0) throw new Error(`not base58: ${text}`)
+    n = n * 58n + BigInt(digit)
+  }
+  const bytes: number[] = []
+  for (; n > 0n; n /= 256n) bytes.unshift(Number(n % 256n))
+  const zeros = text.length - text.replace(/^1+/, '').length
+  return Uint8Array.from([...new Array<number>(zeros).fill(0), ...bytes])
+}
+
+export interface FakeClock {
+  /** Milliseconds, like Date.now. */
+  now: () => number
+  /** Moves the clock forward at once instead of waiting. */
+  sleep: (ms: number) => Promise<void>
+  /** Every sleep, in order. */
+  sleeps: number[]
+}
+
+/** A clock that moves only when the code under test sleeps. It suits one caller at a time. */
+export function fakeClock(start = 0): FakeClock {
+  let time = start
+  const sleeps: number[] = []
+  return {
+    now: () => time,
+    sleep: async (ms) => {
+      sleeps.push(ms)
+      time += ms
+    },
+    sleeps,
+  }
+}
+
+export interface RpcRequest {
+  url: string
+  method: string
+  params: unknown[]
+  /** The fake clock's time when the request arrived, 0 without a clock. */
+  at: number
+}
+
+/** One entry of a getSignaturesForAddress page. */
+export interface SignatureInfo {
+  signature: string
+  slot: number
+  err: unknown
+  memo: string | null
+  blockTime: number | null
+  confirmationStatus: 'confirmed'
+}
+
+export interface FakeRpc {
+  fetch: typeof fetch
+  /** Every request received, in order. */
+  requests: RpcRequest[]
+  /** Every transaction that holds the address, newest first: all the pages in one list. */
+  signaturesFor(address: string): SignatureInfo[]
+}
+
+type RpcReply = { result: unknown } | { error: { code: number; message: string } }
+const rpcError = (code: number, message: string): RpcReply => ({ error: { code, message } })
+
+interface AccountFilter {
+  memcmp?: { offset: number; bytes: string; encoding?: 'base58' | 'base64' }
+  dataSize?: number
+}
+
+function passes(filter: AccountFilter, data: Uint8Array): boolean {
+  if (filter.dataSize !== undefined) return data.length === filter.dataSize
+  const memcmp = filter.memcmp
+  if (memcmp === undefined) throw new Error(`unknown filter ${JSON.stringify(filter)}`)
+  const bytes =
+    memcmp.encoding === 'base64' ? Buffer.from(memcmp.bytes, 'base64') : fromBase58(memcmp.bytes)
+  return bytes.every((b, i) => data[memcmp.offset + i] === b)
+}
+
+/**
+ * Serves getProgramAccounts, getSignaturesForAddress and getTransaction over `chain` the way a
+ * Solana RPC node does: account data in base64 after the filters; signature pages of at most
+ * 1,000, newest first, continued with `before`, failed transactions included with their `err`;
+ * null for an unknown signature; error -32015 for a v0 transaction asked for without
+ * maxSupportedTransactionVersion 0.
+ */
+export function fakeRpc(
+  chain: Pick<FakeChain, 'accounts' | 'transactions'>,
+  clock?: FakeClock,
+): FakeRpc {
+  const requests: RpcRequest[] = []
+  const bySignature = new Map<string, RawTransaction>()
+  const byAddress = new Map<string, SignatureInfo[]>()
+  // Newest first: the later block time first and, on a tie, the transaction listed later.
+  const newestFirst = chain.transactions
+    .map((tx, i) => ({ tx, i }))
+    .sort((a, b) => (b.tx.blockTime ?? 0) - (a.tx.blockTime ?? 0) || b.i - a.i)
+  for (const { tx } of newestFirst) {
+    const signature = tx.transaction.signatures[0]
+    if (signature === undefined) throw new Error('a transaction without a signature')
+    bySignature.set(signature, tx)
+    const info: SignatureInfo = {
+      signature,
+      slot: tx.slot ?? 0,
+      err: tx.meta?.err ?? null,
+      memo: null,
+      blockTime: tx.blockTime,
+      confirmationStatus: 'confirmed',
+    }
+    const loaded = tx.meta?.loadedAddresses
+    const keys = [
+      ...tx.transaction.message.accountKeys,
+      ...(loaded?.writable ?? []),
+      ...(loaded?.readonly ?? []),
+    ]
+    for (const key of new Set(keys)) byAddress.set(key, [...(byAddress.get(key) ?? []), info])
+  }
+
+  function reply(method: string, params: unknown[]): RpcReply {
+    if (method === 'getProgramAccounts') {
+      const [program, config] = params as [
+        string,
+        { encoding?: string; filters?: AccountFilter[] }?,
+      ]
+      if (config?.encoding !== 'base64') return rpcError(-32602, 'the fake serves base64 only')
+      const owned = program === PROGRAMS.horagon ? chain.accounts : []
+      return {
+        result: owned
+          .filter(({ data }) => (config.filters ?? []).every((filter) => passes(filter, data)))
+          .map(({ address, data }) => ({
+            pubkey: address,
+            account: {
+              data: [Buffer.from(data).toString('base64'), 'base64'],
+              executable: false,
+              lamports: 3_160_080,
+              owner: PROGRAMS.horagon,
+              rentEpoch: 0,
+              space: data.length,
+            },
+          })),
+      }
+    }
+    if (method === 'getSignaturesForAddress') {
+      const [address, config = {}] = params as [string, { limit?: number; before?: string }?]
+      const all = byAddress.get(address) ?? []
+      const from =
+        config.before === undefined ? 0 : all.findIndex((s) => s.signature === config.before) + 1
+      if (config.before !== undefined && from === 0) return rpcError(-32602, 'unknown before')
+      return { result: all.slice(from, from + Math.min(config.limit ?? 1000, 1000)) }
+    }
+    if (method === 'getTransaction') {
+      const [signature, config = {}] = params as [
+        string,
+        { encoding?: string; maxSupportedTransactionVersion?: number }?,
+      ]
+      const tx = bySignature.get(signature)
+      if (tx === undefined) return { result: null }
+      if (config.encoding !== 'json') return rpcError(-32602, 'the fake serves encoding json only')
+      if (tx.version === 0 && config.maxSupportedTransactionVersion !== 0) {
+        return rpcError(-32015, 'Transaction version (0) is not supported by the requesting client')
+      }
+      return { result: tx }
+    }
+    return rpcError(-32601, 'Method not found')
+  }
+
+  const serve = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    const body = JSON.parse(String(init?.body)) as {
+      jsonrpc?: string
+      id?: unknown
+      method: string
+      params?: unknown[]
+    }
+    const params = body.params ?? []
+    requests.push({ url: String(input), method: body.method, params, at: clock?.now() ?? 0 })
+    const json = new Headers(init?.headers).get('content-type') === 'application/json'
+    if (init?.method !== 'POST' || !json || body.jsonrpc !== '2.0' || body.id === undefined) {
+      return new Response('not a JSON-RPC 2.0 request', { status: 400 })
+    }
+    const payload = { jsonrpc: '2.0', ...reply(body.method, params), id: body.id }
+    return new Response(JSON.stringify(payload), {
+      headers: { 'content-type': 'application/json' },
+    })
+  }
+
+  return {
+    fetch: serve,
+    requests,
+    signaturesFor: (address) => [...(byAddress.get(address) ?? [])],
   }
 }
