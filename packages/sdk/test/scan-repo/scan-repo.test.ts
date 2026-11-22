@@ -365,7 +365,9 @@ describe('scan-repo exit codes, config errors and edge cases', { timeout: 60_000
     const result = scan(solo)
     expect(result.status).toBe(2)
     expect(result.stdout).toBe('')
-    expect(result.stderr).toBe('scan-repo: pattern#3 is not a valid regular expression\n')
+    expect(result.stderr).toBe(
+      'scan-repo: pattern#3 is not a valid regular expression (flags i, m, u)\n',
+    )
   })
 
   it('exits 2 when the denylist has no patterns', () => {
@@ -452,24 +454,169 @@ describe('scan-repo exit codes, config errors and edge cases', { timeout: 60_000
     expect(result.stderr).toBe('scan-repo: .keys/scan-accepted.txt is not UTF-8 text\n')
   })
 
-  it('refuses the ASCII-only word boundary escapes, naming only the line', () => {
-    for (const pattern of ['\\bqzx\\b', 'qzx\\B', 'x(\\\\\\b)']) {
+  // Scans a scratch repository holding `files` with `denylist`; returns the files that got a
+  // content hit, by name, plus the raw result.
+  function probe(denylist: string[] | string, files: Record<string, string | Uint8Array>) {
+    const scratch = new FixtureRepo('probe-trunk')
+    try {
+      const sha = scratch.commit('chore: start', { '.gitignore': '.keys/\n', ...files })
+      scratch.keys({ denylist })
+      const result = scan(scratch)
+      const hit = Object.keys(files).filter((path) =>
+        hitLines(result).some((line) =>
+          line.startsWith(`HIT content commit=${sha} path#=${scratch.pathNumber(sha, path)} `),
+        ),
+      )
+      return { result, hit: hit.sort() }
+    } finally {
+      scratch.cleanup()
+    }
+  }
+
+  it('translates \\b so that it knows letters, digits and underscore beyond ASCII', () => {
+    const word = probe(['\\bqzx\\b'], {
+      'a.txt': 'say qzx now\n',
+      'b.txt': 'aqzxb\n',
+      'c.txt': 'qzx_x and xqzx\n',
+    })
+    expect(word.hit).toEqual(['a.txt'])
+    const accent = probe(['\\b\u00e9zebra\\b'], {
+      'a.txt': 'the \u00c9zebra here\n',
+      'b.txt': 'a\u00e9zebra\n',
+    })
+    expect(accent.hit).toEqual(['a.txt'])
+    const notEdge = probe(['qz\\Bx'], { 'a.txt': 'qzx\n', 'b.txt': 'qz x\n' })
+    expect(notEdge.hit).toEqual(['a.txt'])
+  })
+
+  it('translates \\w and \\W to Unicode letters, digits and underscore', () => {
+    expect(probe(['zebranam\\w'], { 'a.txt': 'zebranam\u00e9\n' }).hit).toEqual(['a.txt'])
+    expect(probe(['zeb\\w+name'], { 'a.txt': 'zeb\u01b0\u1edd name\n' }).hit).toEqual([])
+    expect(probe(['zeb\\w+name'], { 'a.txt': 'zeb\u01b0\u1eddname\n' }).hit).toEqual(['a.txt'])
+    expect(probe(['qz[\\w]x'], { 'a.txt': 'qz\u00e9x\n', 'b.txt': 'qz-x\n' }).hit).toEqual([
+      'a.txt',
+    ])
+    expect(probe(['qz\\Wx'], { 'a.txt': 'qz-x\n', 'b.txt': 'qz\u00e9x\n' }).hit).toEqual(['a.txt'])
+  })
+
+  it('keeps identity escapes literal under the u flag', () => {
+    expect(probe(['qzx\\-fake'], { 'a.txt': 'qzx-fake\n', 'b.txt': 'qzxxfake\n' }).hit).toEqual([
+      'a.txt',
+    ])
+    expect(probe(['qzx\\ fake', 'q\\@z', 'q\\#z'], { 'a.txt': 'qzx fake\n' }).hit).toEqual([
+      'a.txt',
+    ])
+    expect(probe(['[a\\-c]zx'], { 'a.txt': '-zx\n', 'b.txt': 'bzx\n' }).hit).toEqual(['a.txt'])
+  })
+
+  it('treats an escaped backslash before b as a literal backslash and the letter b', () => {
+    const result = probe(['x\\\\b'], { 'a.txt': 'x\\b\n', 'b.txt': 'xb\n', 'c.txt': 'x b\n' })
+    expect(result.hit).toEqual(['a.txt'])
+  })
+
+  it('exits 2 on \\W or \\b inside a character class, naming only the line', () => {
+    for (const pattern of ['[\\W]', 'x[a\\b]']) {
       solo.keys({ denylist: ['# comment', pattern] })
       const result = scan(solo)
       expect(result.status).toBe(2)
       expect(result.stdout).toBe('')
-      expect(result.stderr).toMatch(/^scan-repo: pattern#2 uses a word boundary escape/)
+      expect(result.stderr).toBe('scan-repo: pattern#2 uses \\W or \\b inside a character class\n')
     }
-    // an escaped backslash followed by the letter b is not a boundary escape
-    solo.keys({ denylist: ['qzx\\\\b'] })
-    expect(scan(solo).status).toBe(0)
   })
 
   it('exits 2 on a pattern that is invalid under the u flag', () => {
-    solo.keys({ denylist: ['qzx', 'a\\-b'] })
+    solo.keys({ denylist: ['qzx', '[z-a]'] })
     const result = scan(solo)
     expect(result.status).toBe(2)
-    expect(result.stderr).toBe('scan-repo: pattern#2 is not a valid regular expression\n')
+    expect(result.stderr).toBe(
+      'scan-repo: pattern#2 is not a valid regular expression (flags i, m, u)\n',
+    )
+  })
+
+  it('exits 2 on invisible or control characters in a pattern, naming only the line', () => {
+    const invisible = [
+      'qzx\u200b', // zero width space
+      'qz\u00adx', // soft hyphen
+      'qzx\u200e', // left-to-right mark
+      'qzx\u00a0fake', // no-break space inside
+      'qzx\u0001',
+      'qz\u2028x', // line separator
+      'q\tx', // tab inside
+    ]
+    for (const pattern of invisible) {
+      solo.keys({ denylist: ['# comment', pattern] })
+      const result = scan(solo)
+      expect(result.status).toBe(2)
+      expect(result.stdout).toBe('')
+      expect(result.stderr).toBe(
+        'scan-repo: pattern#2 contains an invisible or control character\n',
+      )
+    }
+    // CR-only line ends fold the file into one line that holds a CR
+    solo.keys({ denylist: 'qzx\rfake\r' })
+    const result = scan(solo)
+    expect(result.status).toBe(2)
+    expect(result.stderr).toBe('scan-repo: pattern#1 contains an invisible or control character\n')
+  })
+
+  it('exits 2 on an accepted list line with extra whitespace: that file is not trimmed', () => {
+    solo.keys({ accepted: [` ${soloSha} `] })
+    const result = scan(solo)
+    expect(result.status).toBe(2)
+    expect(result.stdout).toBe('')
+    expect(result.stderr).toBe(
+      'scan-repo: .keys/scan-accepted.txt line 1 is not a full 40-hex commit SHA\n',
+    )
+  })
+
+  it('exits 2 on a commit with a non-UTF-8 encoding header, naming only its SHA', () => {
+    const latin = new FixtureRepo('latin-trunk')
+    try {
+      latin.commit('chore: start', { '.gitignore': '.keys/\n', 'docs/clean.md': 'clean\n' })
+      latin.git(
+        ...['-c', 'i18n.commitEncoding=ISO-8859-1'],
+        ...['-c', 'user.name=Fixture Project', '-c', 'user.email=project@noreply.test'],
+        ...['commit', '-q', '--allow-empty', '-m', 'note'],
+      )
+      const sha = latin.git('rev-parse', 'HEAD')
+      latin.keys({ denylist: DENYLIST })
+      const result = scan(latin)
+      expect(result.status).toBe(2)
+      expect(result.stdout).toBe('')
+      expect(result.stderr).toBe(`scan-repo: commit ${sha} has a non-UTF-8 encoding header\n`)
+    } finally {
+      latin.cleanup()
+    }
+  })
+
+  it('matches UTF-16 at an odd offset and text behind a doubled UTF-8 byte order mark', () => {
+    const odd = Buffer.concat([
+      Buffer.from([0x07]),
+      Buffer.from('qzx rest', 'utf16le'),
+      Buffer.from([0, 0]),
+    ])
+    const bom = Buffer.from([0xef, 0xbb, 0xbf])
+    const result = probe(['^qzx'], {
+      'odd-le.bin': odd,
+      'odd-be.bin': Buffer.concat([
+        Buffer.from([0x07]),
+        Buffer.from('qzx rest', 'utf16le').swap16(),
+      ]),
+      'double-bom.txt': Buffer.concat([bom, bom, Buffer.from('qzx\nx\n')]),
+      'none.bin': Buffer.from([0x07, 0x00, 0x01]),
+    })
+    expect(result.hit).toEqual(['double-bom.txt', 'odd-be.bin', 'odd-le.bin'])
+  })
+
+  it('matches BOM-prefixed UTF-16 text that has no zero byte', () => {
+    // U+0101 U+0115 U+0159 U+0105: every byte of the UTF-16 text is non-zero
+    const text = Buffer.from('\u0101\u0115\u0159\u0105', 'utf16le')
+    const result = probe(['\u0101\u0115\u0159\u0105'], {
+      'bom-le.bin': Buffer.concat([Buffer.from([0xff, 0xfe]), text]),
+      'bom-be.bin': Buffer.concat([Buffer.from([0xfe, 0xff]), Buffer.from(text).swap16()]),
+      'no-bom.bin': Buffer.from(text),
+    })
+    expect(result.hit).toEqual(['bom-be.bin', 'bom-le.bin'])
   })
 
   it('finds a name that starts with an accented capital with Unicode word edges', () => {
