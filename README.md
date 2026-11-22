@@ -450,6 +450,18 @@ interfaces it uses are tested.
 - **Not audited.** No third party has reviewed this code. The reviews so far were done by AI
   agents (see [AI-assisted code](#libraries-templates-and-ai-assisted-code)).
 
+## Legal perimeter
+
+Horagon is play money on Solana devnet. Horagon never does any of the following:
+
+- **No real-money markets.** Horagon does not create, seed, resolve or take fees on any market
+  that trades real money.
+- **No custody.** Horagon never holds a user's funds. Players sign with their own wallets; the
+  sponsor pays only devnet transaction fees and token-account rent.
+- **No prizes.** Nothing on Horagon can be exchanged for money or anything of value.
+- **No project token.** Horagon issues no token of its own without a lawyer's opinion first. The
+  YES and NO outcome tokens that pm-AMM mints for each market are devnet play money.
+
 ## The case against Horagon
 
 Here is the argument against building it:
