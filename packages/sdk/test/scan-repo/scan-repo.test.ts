@@ -525,7 +525,7 @@ describe('scan-repo exit codes, config errors and edge cases', { timeout: 60_000
   })
 
   it('exits 2 on a pattern that is invalid under the u flag', () => {
-    solo.keys({ denylist: ['qzx', '[z-a]'] })
+    solo.keys({ denylist: ['qzx', 'qzx]'] })
     const result = scan(solo)
     expect(result.status).toBe(2)
     expect(result.stderr).toBe(
@@ -587,6 +587,152 @@ describe('scan-repo exit codes, config errors and edge cases', { timeout: 60_000
     } finally {
       latin.cleanup()
     }
+  })
+
+  it('fails closed on a range that touches \\w, and still accepts a hyphen next to it', () => {
+    for (const pattern of ['zebra[\\w-z]name', 'zebra[\\w-_]name', 'zebra[a-\\w]name']) {
+      solo.keys({ denylist: ['# comment', pattern] })
+      const result = scan(solo)
+      expect(result.status).toBe(2)
+      expect(result.stdout).toBe('')
+      expect(result.stderr).toBe(
+        'scan-repo: pattern#2 is not a valid regular expression (flags i, m, u)\n',
+      )
+    }
+    const files = { 'a.txt': 'zebra-name\n', 'b.txt': 'zebraXname\n' }
+    for (const pattern of ['zebra[\\w-]name', 'zebra[-\\w]name', 'zebra[\\w.-]name']) {
+      expect(probe([pattern], files).hit).toEqual(['a.txt', 'b.txt'])
+    }
+    expect(probe(['zebra[^\\w]name'], files).hit).toEqual(['a.txt'])
+  })
+
+  it('refuses an invisible character in a comment line, where it would hide a pattern', () => {
+    for (const sep of ['\r', '\u2028', '\u0085', '\u000b', '\u000c']) {
+      solo.keys({ denylist: `qzx\n# note${sep}zebraname\n` })
+      const result = scan(solo)
+      expect(result.status).toBe(2)
+      expect(result.stdout).toBe('')
+      expect(result.stderr).toBe(
+        'scan-repo: .keys/scan-denylist.txt line 2 contains an invisible or control character\n',
+      )
+    }
+    // a CRLF file and blank lines are still fine
+    solo.keys({ denylist: '# note\r\n\r\nqzx\r\n' })
+    expect(scan(solo).status).toBe(1)
+  })
+
+  it('refuses default-ignorable characters in a pattern', () => {
+    // variation selector 16, combining grapheme joiner, Hangul filler
+    for (const mark of ['\ufe0f', '\u034f', '\u3164']) {
+      solo.keys({ denylist: [`qzx${mark}`] })
+      const result = scan(solo)
+      expect(result.status).toBe(2)
+      expect(result.stderr).toBe(
+        'scan-repo: pattern#1 contains an invisible or control character\n',
+      )
+    }
+  })
+
+  // A fresh repository with one clean commit, for tests that plant hand-made objects.
+  function withObjects(
+    run: (repo: FixtureRepo, put: (type: string, bytes: Buffer) => string, base: string) => void,
+  ) {
+    const repo = new FixtureRepo('objects-trunk')
+    try {
+      const base = repo.commit('chore: start', {
+        '.gitignore': '.keys/\n',
+        'docs/clean.md': 'clean\n',
+      })
+      repo.keys({ denylist: DENYLIST })
+      const put = (type: string, bytes: Buffer) => {
+        const file = join(repo.root, `object-${type}.bin`)
+        writeFileSync(file, bytes)
+        return repo.git('hash-object', '-t', type, '-w', '--literally', file)
+      }
+      run(repo, put, base)
+    } finally {
+      repo.cleanup()
+    }
+  }
+
+  const person = `${identity(PROJECT)} 1793527200 +0000`
+  const latin1 = (text: string) => Buffer.from(text, 'latin1')
+
+  it('exits 2 on a commit that is not valid UTF-8 and has no encoding header', () => {
+    withObjects((repo, put, base) => {
+      const tree = repo.git('rev-parse', `${base}^{tree}`)
+      const head = `tree ${tree}\nauthor ${person}\ncommitter ${person}\n\n`
+      const sha = put('commit', Buffer.concat([Buffer.from(head), latin1('zébraname\n')]))
+      repo.updateRef('refs/heads/lima-latin', sha)
+      const result = scan(repo)
+      expect(result.status).toBe(2)
+      expect(result.stdout).toBe('')
+      expect(result.stderr).toBe(`scan-repo: commit ${sha} is not valid UTF-8\n`)
+    })
+  })
+
+  it('exits 2 on an annotated tag that is not valid UTF-8 and has no encoding header', () => {
+    withObjects((repo, put, base) => {
+      const head = `object ${base}\ntype commit\ntag mike-note\ntagger ${person}\n\n`
+      const sha = put('tag', Buffer.concat([Buffer.from(head), latin1('release zébraname\n')]))
+      repo.updateRef('refs/tags/mike-note', sha)
+      const result = scan(repo)
+      expect(result.status).toBe(2)
+      expect(result.stdout).toBe('')
+      expect(result.stderr).toBe(`scan-repo: tag ${sha} is not valid UTF-8\n`)
+    })
+  })
+
+  it('exits 2 on an annotated tag with a non-UTF-8 encoding header, naming only its SHA', () => {
+    withObjects((repo, put, base) => {
+      const head = `object ${base}\ntype commit\ntag november-note\ntagger ${person}\n`
+      const sha = put('tag', Buffer.from(`${head}encoding ISO-8859-1\n\nplain note\n`))
+      repo.updateRef('refs/tags/november-note', sha)
+      const result = scan(repo)
+      expect(result.status).toBe(2)
+      expect(result.stdout).toBe('')
+      expect(result.stderr).toBe(`scan-repo: tag ${sha} has a non-UTF-8 encoding header\n`)
+    })
+  })
+
+  it('exits 2 on a tree entry name that is not valid UTF-8, naming only the commit', () => {
+    withObjects((repo, put) => {
+      const blob = put('blob', Buffer.from('plain\n'))
+      const name = Buffer.concat([Buffer.from('100644 z'), latin1('é'), Buffer.from('bra.txt\0')])
+      const tree = put('tree', Buffer.concat([name, Buffer.from(blob, 'hex')]))
+      const body = `tree ${tree}\nauthor ${person}\ncommitter ${person}\n\nlatin path\n`
+      const sha = put('commit', Buffer.from(body))
+      repo.updateRef('refs/heads/oscar-path', sha)
+      const result = scan(repo)
+      expect(result.status).toBe(2)
+      expect(result.stdout).toBe('')
+      expect(result.stderr).toBe(`scan-repo: commit ${sha} has a path that is not valid UTF-8\n`)
+    })
+  })
+
+  it('exits 2 on a ref name that is not valid UTF-8, without printing it', () => {
+    withObjects((repo, _put, base) => {
+      const packed = Buffer.concat([
+        Buffer.from('# pack-refs with: peeled fully-peeled sorted \n'),
+        Buffer.from(`${base} refs/heads/papa-z`),
+        latin1('é'),
+        Buffer.from('bra\n'),
+      ])
+      writeFileSync(join(repo.dir, '.git', 'packed-refs'), packed)
+      const result = scan(repo)
+      expect(result.status).toBe(2)
+      expect(result.stdout).toBe('')
+      expect(result.stderr).toBe('scan-repo: a ref name is not valid UTF-8\n')
+    })
+  })
+
+  it('translates \\B next to a non-ASCII letter', () => {
+    expect(probe(['zeb\\Bra'], { 'a.txt': 'zebra\n', 'b.txt': 'zeb ra\n' }).hit).toEqual(['a.txt'])
+    const accent = probe(['é\\Bzebra'], {
+      'a.txt': 'ézebra\n',
+      'b.txt': 'é zebra\n',
+    })
+    expect(accent.hit).toEqual(['a.txt'])
   })
 
   it('matches UTF-16 at an odd offset and text behind a doubled UTF-8 byte order mark', () => {

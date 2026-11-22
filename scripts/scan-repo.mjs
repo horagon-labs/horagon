@@ -11,17 +11,23 @@
 // --repo defaults to the current directory; .keys/ is read at the top of its work tree.
 //
 // Denylist rules (.keys/scan-denylist.txt):
-//   - The file is UTF-8 text; UTF-16, a NUL byte or invalid UTF-8 exits 2. A leading BOM is dropped.
+//   - The file is UTF-8 text; UTF-16, a NUL byte or invalid UTF-8 exits 2. Leading BOMs go.
 //   - Each line is trimmed; a blank line or one starting with # is skipped. pattern#=<k> is the
-//     1-based line number. A pattern with an invisible or control character (zero-width, soft
-//     hyphen, NBSP, tab, CR, ...) exits 2, since it would silently never match.
+//     1-based line number.
+//   - Every line, comment lines included, is checked for invisible or control characters
+//     (zero-width, soft hyphen, NBSP inside, tab, lone CR, NEL, U+2028, default-ignorable ones
+//     such as U+FE0F or U+3164): one exits 2, because it would silently disable a pattern or hide
+//     the text that follows it.
 //   - Each pattern is a regex matched with flags i, m and u on Unicode NFC text. Before it is
-//     compiled, \b \B \w \W are translated to Unicode-aware forms (letters, digits and _ from
-//     \p{L}\p{N}_), \W or \b inside a [...] class exits 2, and an identity escape such as \- or
-//     \@ keeps its literal meaning under the u flag.
+//     compiled, \b \B \w \W are translated to Unicode-aware forms (letters, digits and _, written
+//     \p{L}_\p{N}); \W or \b inside a [...] class exits 2; an identity escape such as \- or \@
+//     keeps its literal meaning under the u flag. A range that touches \w (as in [\w-z] or
+//     [a-\w]) is a regex error, so it exits 2; [\w-] and [-\w] are fine.
 // Content rules: a blob is matched as UTF-8 and also as UTF-16LE/BE (when it has a UTF-16 BOM or
 // a NUL byte, at both byte alignments), with leading BOMs dropped; a gzip blob is matched both
-// raw and inflated. A commit or tag with a non-UTF-8 encoding header exits 2.
+// raw and inflated. Commits, tags, tree entry names and ref names are read as strict UTF-8: bytes
+// that are not valid UTF-8, or a commit or tag with a non-UTF-8 encoding header, exit 2 (the
+// message names only a SHA, or nothing for a ref name).
 //
 // Scope: refs/remotes/<remote>/* (default origin) except HEAD, every refs/heads/* not named by
 // --skip, and refs/tags/*; never refs/original/*, refs/stash or refs/notes/*. Refs are numbered
@@ -143,6 +149,12 @@ function readLines(file, label, trim) {
     .split('\n')
     .entries()) {
     const text = trim ? line.trim() : line.replace(/\r$/, '')
+    // Checked on comment lines too: a lone CR, NEL or U+2028 inside a comment would hide the
+    // text after it, which an editor shows as a pattern line of its own.
+    if (trim && INVISIBLE.test(text)) {
+      const what = text.startsWith('#') ? `${label} line ${index + 1}` : `pattern#${index + 1}`
+      throw new ConfigError(`${what} contains an invisible or control character`)
+    }
     if (text.trim() !== '' && !text.startsWith('#')) lines.push({ line: index + 1, text })
   }
   return lines
@@ -150,8 +162,10 @@ function readLines(file, label, trim) {
 
 // Characters that survive trim() but are invisible or control characters: they would make a
 // pattern silently never match. Only the plain space may appear inside a pattern.
-const INVISIBLE = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]|(?! )\p{Zs}/u
-const WORD = '\\p{L}\\p{N}_'
+const INVISIBLE = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\p{Default_Ignorable_Code_Point}]|(?! )\p{Zs}/u
+// The underscore sits between the two property escapes, so that a range next to a translated \w
+// (as in [\w-z]) has a class escape at its end, which is a SyntaxError under u: it fails closed.
+const WORD = '\\p{L}_\\p{N}'
 // Characters that may follow a backslash and keep their meaning under the u flag.
 const SYNTAX = new Set('^$\\.*+?()[]{}|/')
 
@@ -195,9 +209,6 @@ function loadPatterns(root) {
   if (check.status === 1) throw new ConfigError(`${DENYLIST} is not ignored by git`)
   if (check.status !== 0) throw new ConfigError('git check-ignore failed')
   const patterns = readLines(join(root, DENYLIST), DENYLIST, true).map(({ line, text }) => {
-    if (INVISIBLE.test(text)) {
-      throw new ConfigError(`pattern#${line} contains an invisible or control character`)
-    }
     try {
       return { id: line, regex: new RegExp(translate(text.normalize('NFC'), line), 'imu') }
     } catch (error) {
@@ -280,8 +291,37 @@ function readObject(root, oid) {
   return objects[0]
 }
 
+// Git objects are scanned as UTF-8, so bytes that are not valid UTF-8 would be decoded lossily and
+// could hide a match: they are an error, naming only a SHA or nothing.
+const STRICT = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true })
+
+// Splits the NUL-separated output of git into strings, decoded strictly. `fail(commit)` builds the
+// error for a token that is not valid UTF-8; `commit` is the last 40-hex token seen before it.
+function strictTokens(out, commit, fail) {
+  const tokens = []
+  for (let start = 0; start <= out.length; ) {
+    let end = out.indexOf(0, start)
+    if (end === -1) end = out.length
+    let token = ''
+    try {
+      token = STRICT.decode(out.subarray(start, end))
+    } catch {
+      throw fail(commit)
+    }
+    if (/^[0-9a-f]{40}$/.test(token)) commit = token
+    tokens.push(token)
+    start = end + 1
+  }
+  return tokens
+}
+
+function pathError(sha) {
+  return new ConfigError(`commit ${sha} has a path that is not valid UTF-8`)
+}
+
 // Splits a raw commit or tag object into its headers (first value of each key) and raw message.
-function parseObject(data) {
+// A non-UTF-8 encoding header or bytes that are not valid UTF-8 are errors (SHA only).
+function parseObject(data, kind, sha) {
   const text = data.toString('utf8')
   const blank = text.indexOf('\n\n')
   const headers = new Map()
@@ -290,15 +330,16 @@ function parseObject(data) {
     const key = space === -1 ? line : line.slice(0, space)
     if (key !== '' && !headers.has(key)) headers.set(key, line.slice(space + 1))
   }
-  return { headers, message: blank === -1 ? '' : text.slice(blank + 2) }
-}
-
-// The message is read as UTF-8, so any other declared encoding would hide a match.
-function checkEncoding(kind, sha, headers) {
   const encoding = headers.get('encoding')
   if (encoding !== undefined && !/^utf-?8$/i.test(encoding.trim())) {
     throw new ConfigError(`${kind} ${sha} has a non-UTF-8 encoding header`)
   }
+  try {
+    STRICT.decode(data)
+  } catch {
+    throw new ConfigError(`${kind} ${sha} is not valid UTF-8`)
+  }
+  return { headers, message: blank === -1 ? '' : text.slice(blank + 2) }
 }
 
 // "Name <email> 1767225600 +0200" -> identity "Name <email>", offset "+0200".
@@ -317,7 +358,10 @@ function listRefs(root, options) {
   const remote = `refs/remotes/${options.remote}/`
   const format = '--format=%(refname)%00%(objectname)%00%(objecttype)'
   const refs = []
-  const out = git(root, ['for-each-ref', '--sort=refname', format]).toString('utf8')
+  const raw = git(root, ['for-each-ref', '--sort=refname', format])
+  const out = strictTokens(raw, '', () => new ConfigError('a ref name is not valid UTF-8')).join(
+    '\0',
+  )
   for (const line of out.split('\n')) {
     const [name = '', oid, type] = line.split('\0')
     const inScope =
@@ -339,8 +383,7 @@ function scanRefs(root, refs, patterns, identities) {
     const tagHits = []
     let { oid, type } = ref
     while (type === 'tag') {
-      const tag = parseObject(readObject(root, oid).data)
-      checkEncoding('tag', oid, tag.headers)
+      const tag = parseObject(readObject(root, oid).data, 'tag', oid)
       names.push(tag.headers.get('tag') ?? '')
       for (const id of matching(patterns, tag.message)) {
         tagHits.push(`field=annotation pattern#=${id}`)
@@ -379,9 +422,7 @@ function listCommits(root, tips) {
 function listIntroductions(root, commits) {
   if (commits.length === 0) return []
   const args = ['diff-tree', '--stdin', '-r', '-c', '--root', '--raw', '-z', '--no-renames']
-  const tokens = git(root, args, `${commits.join('\n')}\n`)
-    .toString('utf8')
-    .split('\0')
+  const tokens = strictTokens(git(root, args, `${commits.join('\n')}\n`), '', pathError)
   const introduced = []
   let commit = ''
   let i = 0
@@ -432,7 +473,7 @@ function scanTrees(root, commits, patterns, hitsOf) {
   const pathNumber = (commit, path) => {
     if (!numbers.has(commit)) {
       const args = ['ls-tree', '-r', '-z', '--full-tree', '--name-only', commit]
-      const names = git(root, args).toString('utf8').split('\0')
+      const names = strictTokens(git(root, args), commit, pathError)
       numbers.set(commit, new Map(names.map((name, index) => [name, index + 1])))
     }
     return numbers.get(commit).get(path)
@@ -451,8 +492,7 @@ function scanTrees(root, commits, patterns, hitsOf) {
 
 function scanCommits(root, commits, patterns, identities, hitsOf) {
   readObjects(root, commits, (sha, _type, data) => {
-    const commit = parseObject(data)
-    checkEncoding('commit', sha, commit.headers)
+    const commit = parseObject(data, 'commit', sha)
     // A merge of a signed tag embeds that tag (tagger, offset, annotation) in this header.
     if (commit.headers.has('mergetag')) {
       throw new ConfigError(`commit ${sha} has a mergetag header, which scan-repo does not scan`)
