@@ -628,6 +628,9 @@ export async function fetchGameMarkets(rpc) {
       filters: [{ memcmp: { offset: 0, bytes: base58Encode(GAME_MARKET_DISCRIMINATOR) } }],
     },
   ])
+  if (!Array.isArray(accounts)) {
+    throw new Error('getProgramAccounts failed: the result is not an array')
+  }
   return accounts.map(({ pubkey, account }) => ({
     address: pubkey,
     ...decodeGameMarket(Buffer.from(account.data[0], 'base64')),
@@ -643,7 +646,16 @@ export async function fetchSignatures(rpc, address) {
       address,
       { limit: PAGE_LIMIT, ...(before === undefined ? {} : { before }), commitment: 'confirmed' },
     ])
-    for (const entry of page) if (entry.err === null) signatures.push(entry.signature)
+    if (!Array.isArray(page)) {
+      throw new Error('getSignaturesForAddress failed: the result is not an array')
+    }
+    for (const entry of page) {
+      // A page that cannot be read in full must stop the count: a dropped entry is a missing swap.
+      if (!isRecord(entry) || typeof entry.signature !== 'string' || !Object.hasOwn(entry, 'err')) {
+        throw new Error(`getSignaturesForAddress returned a malformed entry for ${address}`)
+      }
+      if (entry.err === null) signatures.push(entry.signature)
+    }
     if (page.length < PAGE_LIMIT) return signatures
     // The next page starts after the last entry of this one, failed or not.
     before = page[page.length - 1].signature

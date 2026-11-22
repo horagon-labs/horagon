@@ -257,6 +257,29 @@ describe('main: RPC failures', () => {
     ).toBe(true)
   })
 
+  it('exits 3 and prints no number when a signature page has an entry without err', async () => {
+    const r = await run(argv, {
+      chain,
+      files,
+      wrap: (serve) => async (input: RequestInfo | URL, init?: RequestInit) => {
+        const answer = await serve(input, init)
+        if (JSON.parse(String(init?.body)).method !== 'getSignaturesForAddress') return answer
+        const body = await answer.json()
+        const [first, ...rest] = body.result as Record<string, unknown>[]
+        const { err: _err, ...entry } = first ?? {}
+        return new Response(JSON.stringify({ ...body, result: [entry, ...rest] }))
+      },
+    })
+    expect(r.code).toBe(3)
+    expect(r.stdout).toBe('')
+    expect(
+      r.stderr.endsWith(
+        `count-fans: getSignaturesForAddress returned a malformed entry for ${pmAmmMarketKey('rehearsal')}\n` +
+          'count-fans: stopped: no number was printed\n',
+      ),
+    ).toBe(true)
+  })
+
   type TxChange = (tx: Record<string, unknown>) => Record<string, unknown>
   // Answers of a node that has the transaction, but not in full yet.
   const incomplete: [string, TxChange][] = [

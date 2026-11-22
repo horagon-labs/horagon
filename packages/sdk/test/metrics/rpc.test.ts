@@ -456,6 +456,64 @@ describe('fetchSignatures', () => {
     await expect(fetchSignatures(rpc, pmAmmMarketKey('quiet'))).resolves.toEqual([])
     expect(node.requests).toHaveLength(1)
   })
+
+  /** Sends every request on to the node, but changes the result of the calls to `method`. */
+  const changeResult =
+    (method: string, change: (result: unknown) => unknown) =>
+    (serve: typeof fetch): typeof fetch =>
+    async (input: RequestInfo | URL, init?: RequestInit) => {
+      const answer = await serve(input, init)
+      if (JSON.parse(String(init?.body)).method !== method) return answer
+      const body = await answer.json()
+      return new Response(JSON.stringify({ ...body, result: change(body.result) }))
+    }
+  const oneSwap: Season = { markets: [M1], swaps: [['fan', 'm1', at(0)]] }
+
+  it('throws on a page entry without err instead of dropping it', async () => {
+    const { rpc } = setup(oneSwap, {
+      wrap: changeResult('getSignaturesForAddress', (page) =>
+        (page as Record<string, unknown>[]).map(({ err: _err, ...rest }) => rest),
+      ),
+    })
+    await expect(fetchSignatures(rpc, pmAmmMarketKey('m1'))).rejects.toThrow(
+      new Error(`getSignaturesForAddress returned a malformed entry for ${pmAmmMarketKey('m1')}`),
+    )
+  })
+
+  it('throws on a full page whose last entry has no signature, and does not loop', async () => {
+    const { rpc, node } = setup(
+      { markets: [M1], swaps: [['fan', 'm1', at(0), { repeat: 1000, every: 30 }]] },
+      {
+        wrap: changeResult('getSignaturesForAddress', (page) =>
+          (page as Record<string, unknown>[]).map((entry, i, all) =>
+            i === all.length - 1 ? { ...entry, signature: undefined } : entry,
+          ),
+        ),
+      },
+    )
+    await expect(fetchSignatures(rpc, pmAmmMarketKey('m1'))).rejects.toThrow(
+      'getSignaturesForAddress returned a malformed entry',
+    )
+    expect(node.requests).toHaveLength(1)
+  })
+
+  it('throws when the page is not an array', async () => {
+    const { rpc } = setup(oneSwap, {
+      wrap: changeResult('getSignaturesForAddress', () => ({ signatures: [] })),
+    })
+    await expect(fetchSignatures(rpc, pmAmmMarketKey('m1'))).rejects.toThrow(
+      new Error('getSignaturesForAddress failed: the result is not an array'),
+    )
+  })
+
+  it('throws when the GameMarket list is not an array', async () => {
+    const { rpc } = setup(oneSwap, {
+      wrap: changeResult('getProgramAccounts', () => null),
+    })
+    await expect(fetchGameMarkets(rpc)).rejects.toThrow(
+      new Error('getProgramAccounts failed: the result is not an array'),
+    )
+  })
 })
 
 describe('fetchSwaps', () => {
