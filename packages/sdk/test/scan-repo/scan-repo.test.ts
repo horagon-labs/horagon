@@ -1,6 +1,7 @@
 // Black-box tests of scripts/scan-repo.mjs: each test spawns the script on a throwaway repository
 // (see fixture-repo.ts) and every run is checked for leaks of matched text, paths, ref names,
 // identities and offsets.
+import { spawnSync } from 'node:child_process'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { gzipSync } from 'node:zlib'
@@ -658,6 +659,23 @@ describe('scan-repo exit codes, config errors and edge cases', { timeout: 60_000
   const person = `${identity(PROJECT)} 1793527200 +0000`
   const latin1 = (text: string) => Buffer.from(text, 'latin1')
 
+  // Runs a git command that writes a commit or tag (git commit -F, git tag -a -F) as the fixture
+  // project, dated at +0000.
+  function gitAt(repo: FixtureRepo, ...args: string[]): void {
+    const at = '2026-11-01T12:00:00+0000'
+    const env = {
+      ...repo.env,
+      GIT_AUTHOR_NAME: PROJECT.name,
+      GIT_AUTHOR_EMAIL: PROJECT.email,
+      GIT_AUTHOR_DATE: at,
+      GIT_COMMITTER_NAME: PROJECT.name,
+      GIT_COMMITTER_EMAIL: PROJECT.email,
+      GIT_COMMITTER_DATE: at,
+    }
+    const result = spawnSync('git', args, { cwd: repo.dir, env, encoding: 'utf8' })
+    if (result.status !== 0) throw new Error(`git ${args[0]} failed: ${result.stderr}`)
+  }
+
   it('exits 2 on a commit that is not valid UTF-8 and has no encoding header', () => {
     withObjects((repo, put, base) => {
       const tree = repo.git('rev-parse', `${base}^{tree}`)
@@ -723,6 +741,92 @@ describe('scan-repo exit codes, config errors and edge cases', { timeout: 60_000
       expect(result.status).toBe(2)
       expect(result.stdout).toBe('')
       expect(result.stderr).toBe('scan-repo: a ref name is not valid UTF-8\n')
+    })
+  })
+
+  it('names the real commit, not a 40-hex file name, when a path is not valid UTF-8', () => {
+    withObjects((repo, put) => {
+      const blob = put('blob', Buffer.from('plain\n'))
+      const hex = '0123456789abcdef0123456789abcdef01234567'
+      const entry = (name: Buffer) =>
+        Buffer.concat([Buffer.from('100644 '), name, Buffer.from([0]), Buffer.from(blob, 'hex')])
+      const latinName = Buffer.concat([Buffer.from('z'), latin1('é'), Buffer.from('bra.txt')])
+      // tree entries in byte order: the hex name sorts before the Latin-1 one
+      const tree = put('tree', Buffer.concat([entry(Buffer.from(hex)), entry(latinName)]))
+      const body = `tree ${tree}\nauthor ${person}\ncommitter ${person}\n\nhex and latin paths\n`
+      const sha = put('commit', Buffer.from(body))
+      repo.updateRef('refs/heads/tango-hex', sha)
+      const result = scan(repo)
+      expect(result.status).toBe(2)
+      expect(result.stdout).toBe('')
+      expect(result.stderr).toBe(`scan-repo: commit ${sha} has a path that is not valid UTF-8\n`)
+      expect(result.stderr).not.toContain(hex)
+    })
+  })
+
+  it('exits 2 on a NUL byte in a tag or commit, as in UTF-16 text with no BOM', () => {
+    withObjects((repo, put, base) => {
+      // git tag -a -F keeps the bytes of a UTF-16LE file: ASCII letters with a NUL after each
+      const file = join(repo.root, 'wide-message.txt')
+      writeFileSync(file, Buffer.from('release zebraname\n', 'utf16le'))
+      gitAt(repo, 'tag', '-a', 'quebec-wide', '-F', file, base)
+      repo.refNames.add('quebec-wide')
+      const tag = repo.git('rev-parse', 'refs/tags/quebec-wide')
+      const tagged = scan(repo)
+      expect(tagged.status).toBe(2)
+      expect(tagged.stdout).toBe('')
+      expect(tagged.stderr).toBe(`scan-repo: tag ${tag} is not valid UTF-8\n`)
+      repo.git('tag', '-d', 'quebec-wide')
+      // git commit refuses a NUL in a message; hash-object does not
+      const tree = repo.git('rev-parse', `${base}^{tree}`)
+      const head = Buffer.from(`tree ${tree}\nauthor ${person}\ncommitter ${person}\n\n`)
+      const sha = put('commit', Buffer.concat([head, Buffer.from('zebraname\n', 'utf16le')]))
+      repo.updateRef('refs/heads/quebec-commit', sha)
+      const committed = scan(repo)
+      expect(committed.status).toBe(2)
+      expect(committed.stdout).toBe('')
+      expect(committed.stderr).toBe(`scan-repo: commit ${sha} is not valid UTF-8\n`)
+    })
+  })
+
+  it('exits 2 on a tag whose object or type header is malformed, naming only that tag', () => {
+    withObjects((repo, put, base) => {
+      repo.tag('romeo-inner', base, 'inner note')
+      repo.refNames.add('romeo-outer')
+      const headers = [
+        'object refs/tags/romeo-inner\ntype tag', // a ref name, which cat-file would resolve
+        `object ${base}\ntype zebraname`,
+      ]
+      for (const header of headers) {
+        const body = `${header}\ntag romeo-outer\ntagger ${person}\n\nouter note\n`
+        const sha = put('tag', Buffer.from(body))
+        // update-ref refuses a tag that git cannot parse, so the ref is written by hand
+        writeFileSync(join(repo.dir, '.git', 'refs', 'tags', 'romeo-outer'), `${sha}\n`)
+        const result = scan(repo)
+        expect(result.status).toBe(2)
+        expect(result.stdout).toBe('')
+        expect(result.stderr).toBe(`scan-repo: tag ${sha} has a malformed object header\n`)
+      }
+    })
+  })
+
+  it('drops leading byte order marks from commit and tag messages, as from files', () => {
+    withObjects((repo, _put, base) => {
+      const bom = Buffer.from([0xef, 0xbb, 0xbf])
+      const file = join(repo.root, 'bom-message.txt')
+      writeFileSync(file, Buffer.concat([bom, Buffer.from('zebraname release\n')]))
+      gitAt(repo, 'commit', '-q', '--allow-empty', '-F', file)
+      const sha = repo.git('rev-parse', 'HEAD')
+      writeFileSync(file, Buffer.concat([bom, bom, Buffer.from('zebraname notes\n')]))
+      gitAt(repo, 'tag', '-a', 'sierra-bom', '-F', file, base)
+      repo.refNames.add('sierra-bom')
+      repo.keys({ denylist: ['^zebraname'] })
+      const result = scan(repo)
+      expect(result.status).toBe(1)
+      expect(hitLines(result)).toEqual([
+        `HIT message commit=${sha} pattern#=1`,
+        'HIT tag ref#=2 field=annotation pattern#=1',
+      ])
     })
   })
 

@@ -27,7 +27,9 @@
 // a NUL byte, at both byte alignments), with leading BOMs dropped; a gzip blob is matched both
 // raw and inflated. Commits, tags, tree entry names and ref names are read as strict UTF-8: bytes
 // that are not valid UTF-8, or a commit or tag with a non-UTF-8 encoding header, exit 2 (the
-// message names only a SHA, or nothing for a ref name).
+// message names only a SHA, or nothing for a ref name). A NUL byte in a commit or tag (as in
+// UTF-16 text) counts as not UTF-8; leading BOMs are dropped from their messages. A tag whose
+// object header is not a 40-hex SHA, or whose type is not commit, tag, tree or blob, exits 2.
 //
 // Scope: refs/remotes/<remote>/* (default origin) except HEAD, every refs/heads/* not named by
 // --skip, and refs/tags/*; never refs/original/*, refs/stash or refs/notes/*. Refs are numbered
@@ -60,6 +62,7 @@ const USAGE =
 const DENYLIST = '.keys/scan-denylist.txt'
 const ACCEPTED = '.keys/scan-accepted.txt'
 const OBJECTS_PER_BATCH = 500
+const OBJECT_TYPES = new Set(['commit', 'tag', 'tree', 'blob'])
 const MAX_OUTPUT = 1024 ** 3
 // Inside a git hook these point git at a repository other than --repo, so they are dropped.
 const REPO_LOCATION_VARS = [
@@ -295,32 +298,38 @@ function readObject(root, oid) {
 // could hide a match: they are an error, naming only a SHA or nothing.
 const STRICT = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true })
 
-// Splits the NUL-separated output of git into strings, decoded strictly. `fail(commit)` builds the
-// error for a token that is not valid UTF-8; `commit` is the last 40-hex token seen before it.
-function strictTokens(out, commit, fail) {
+// Splits the NUL-separated output of git into its byte tokens, not yet decoded.
+function rawTokens(out) {
   const tokens = []
   for (let start = 0; start <= out.length; ) {
     let end = out.indexOf(0, start)
     if (end === -1) end = out.length
-    let token = ''
-    try {
-      token = STRICT.decode(out.subarray(start, end))
-    } catch {
-      throw fail(commit)
-    }
-    if (/^[0-9a-f]{40}$/.test(token)) commit = token
-    tokens.push(token)
+    tokens.push(out.subarray(start, end))
     start = end + 1
   }
   return tokens
+}
+
+// Decodes bytes strictly; `fail()` builds the error for bytes that are not valid UTF-8.
+function strict(bytes, fail) {
+  try {
+    return STRICT.decode(bytes)
+  } catch {
+    throw fail()
+  }
+}
+
+function strictTokens(out, fail) {
+  return rawTokens(out).map((bytes) => strict(bytes, fail))
 }
 
 function pathError(sha) {
   return new ConfigError(`commit ${sha} has a path that is not valid UTF-8`)
 }
 
-// Splits a raw commit or tag object into its headers (first value of each key) and raw message.
-// A non-UTF-8 encoding header or bytes that are not valid UTF-8 are errors (SHA only).
+// Splits a raw commit or tag object into its headers (first value of each key) and its message,
+// minus leading BOMs. A non-UTF-8 encoding header, bytes that are not valid UTF-8 or a NUL byte
+// (git refuses one in a message; UTF-16 text has them) are errors (SHA only).
 function parseObject(data, kind, sha) {
   const text = data.toString('utf8')
   const blank = text.indexOf('\n\n')
@@ -334,12 +343,10 @@ function parseObject(data, kind, sha) {
   if (encoding !== undefined && !/^utf-?8$/i.test(encoding.trim())) {
     throw new ConfigError(`${kind} ${sha} has a non-UTF-8 encoding header`)
   }
-  try {
-    STRICT.decode(data)
-  } catch {
-    throw new ConfigError(`${kind} ${sha} is not valid UTF-8`)
-  }
-  return { headers, message: blank === -1 ? '' : text.slice(blank + 2) }
+  const notUtf8 = () => new ConfigError(`${kind} ${sha} is not valid UTF-8`)
+  if (data.includes(0)) throw notUtf8()
+  strict(data, notUtf8)
+  return { headers, message: blank === -1 ? '' : text.slice(blank + 2).replace(/^\uFEFF+/, '') }
 }
 
 // "Name <email> 1767225600 +0200" -> identity "Name <email>", offset "+0200".
@@ -359,9 +366,7 @@ function listRefs(root, options) {
   const format = '--format=%(refname)%00%(objectname)%00%(objecttype)'
   const refs = []
   const raw = git(root, ['for-each-ref', '--sort=refname', format])
-  const out = strictTokens(raw, '', () => new ConfigError('a ref name is not valid UTF-8')).join(
-    '\0',
-  )
+  const out = strictTokens(raw, () => new ConfigError('a ref name is not valid UTF-8')).join('\0')
   for (const line of out.split('\n')) {
     const [name = '', oid, type] = line.split('\0')
     const inScope =
@@ -395,8 +400,14 @@ function scanRefs(root, refs, patterns, identities) {
         }
         if (tagger.offset !== '+0000') tagHits.push('field=tagger-offset')
       }
-      oid = tag.headers.get('object')
+      // cat-file would resolve a ref name or path here, and errors would print it: only a SHA is
+      // followed, which also rules out a loop.
+      const next = tag.headers.get('object') ?? ''
       type = tag.headers.get('type')
+      if (!/^[0-9a-f]{40}$/.test(next) || !OBJECT_TYPES.has(type)) {
+        throw new ConfigError(`tag ${oid} has a malformed object header`)
+      }
+      oid = next
     }
     if (type !== 'commit') throw new ConfigError(`ref#${ref.number} does not point to a commit`)
     tips.add(oid)
@@ -422,20 +433,24 @@ function listCommits(root, tips) {
 function listIntroductions(root, commits) {
   if (commits.length === 0) return []
   const args = ['diff-tree', '--stdin', '-r', '-c', '--root', '--raw', '-z', '--no-renames']
-  const tokens = strictTokens(git(root, args, `${commits.join('\n')}\n`), '', pathError)
+  const tokens = rawTokens(git(root, args, `${commits.join('\n')}\n`))
   const introduced = []
   let commit = ''
+  // Each token is decoded here, where its position tells a commit id from a path (which can look
+  // like a SHA too), so an error names the commit whose path it is.
+  const decode = (bytes) => strict(bytes, () => pathError(commit))
   let i = 0
   while (i < tokens.length) {
-    const token = tokens[i]
+    const token = decode(tokens[i])
     if (token.startsWith(':')) {
+      const path = decode(tokens[i + 1])
       const parents = token.length - token.replace(/^:+/, '').length
       const fields = token.slice(parents).split(' ')
       const mode = fields[parents]
       const blob = fields[2 * parents + 1]
       const before = fields.slice(parents + 1, 2 * parents + 1)
       if (mode !== '000000' && !before.includes(blob)) {
-        introduced.push({ commit, path: tokens[i + 1], mode, blob })
+        introduced.push({ commit, path, mode, blob })
       }
       i += 2
     } else {
@@ -473,7 +488,7 @@ function scanTrees(root, commits, patterns, hitsOf) {
   const pathNumber = (commit, path) => {
     if (!numbers.has(commit)) {
       const args = ['ls-tree', '-r', '-z', '--full-tree', '--name-only', commit]
-      const names = strictTokens(git(root, args), commit, pathError)
+      const names = strictTokens(git(root, args), () => pathError(commit))
       numbers.set(commit, new Map(names.map((name, index) => [name, index + 1])))
     }
     return numbers.get(commit).get(path)
