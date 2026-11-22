@@ -1,0 +1,88 @@
+{
+  "description": "A small season in the compact form that packages/sdk/test/metrics/fake-chain.ts expands into GameMarket accounts, raw transactions and a wallets file. Wallet and market names are labels; keys are derived from them. A swap is [wallet, market, time, options?]. Expected excluded entries name the market by label.",
+  "season": {
+    "team": [
+      { "wallet": "sponsor", "role": "sponsor" },
+      { "wallet": "team-burner-1", "role": "team-burner" }
+    ],
+    "excluded": [{ "market": "rehearsal", "reason": "rehearsal market inside the window" }],
+    "markets": [
+      { "label": "rehearsal", "kind": 0, "league": "NBA", "game": "401810010rh1", "tipoff": "2026-11-23T14:00:00-05:00" },
+      { "label": "pre", "kind": 0, "league": "NBA", "game": "401810000", "tipoff": "2026-11-22T19:00:00-05:00" },
+      { "label": "n1-a", "kind": 0, "league": "NBA", "game": "401810001", "tipoff": "2026-11-23T19:30:00-05:00" },
+      { "label": "n1-a-clutch", "kind": 2, "league": "NBA", "game": "401810001", "tipoff": "2026-11-23T19:30:00-05:00" },
+      { "label": "n1-a-half", "kind": 1, "league": "NBA", "game": "401810001", "tipoff": "2026-11-23T19:30:00-05:00" },
+      { "label": "n1-b", "kind": 0, "league": "NBA", "game": "401810002", "tipoff": "2026-11-23T22:30:00-05:00" },
+      { "label": "n2", "kind": 0, "league": "NBA", "game": "401810003", "tipoff": "2026-11-25T19:00:00-05:00" },
+      { "label": "n3", "kind": 0, "league": "NBA", "game": "401810004", "tipoff": "2026-11-28T20:00:00-05:00" },
+      { "label": "n4", "kind": 0, "league": "NBA", "game": "401810005", "tipoff": "2026-12-04T22:00:00-05:00" },
+      { "label": "post", "kind": 0, "league": "NBA", "game": "401810006", "tipoff": "2026-12-05T19:00:00-05:00" },
+      { "label": "practice", "kind": 0, "league": "PRACTICE", "game": "p-0001", "tipoff": "2026-11-24T12:00:00-05:00" }
+    ],
+    "swaps": [
+      ["ana", "n1-a", "2026-11-24T00:40:00Z", { "sponsored": true }],
+      ["ana", "n1-a-clutch", "2026-11-24T02:55:00Z", { "sponsored": true }],
+      ["ana", "n2", "2026-11-26T00:20:00Z", { "sponsored": true }],
+      ["ana", "n3", "2026-11-29T01:15:00Z", { "sponsored": true }],
+      ["ben", "n1-b", "2026-11-24T05:10:00Z"],
+      ["ben", "n4", "2026-12-05T03:30:00Z", { "sponsored": true }],
+      ["cai", "n1-a", "2026-11-24T00:35:00Z"],
+      ["cai", "n1-a", "2026-11-24T01:05:00Z"],
+      ["cai", "n1-a-clutch", "2026-11-24T02:58:00Z"],
+      ["dee", "pre", "2026-11-23T00:30:00Z"],
+      ["dee", "post", "2026-12-06T00:30:00Z"],
+      ["eve", "n2", "2026-11-26T00:25:00Z", { "memo": "exact" }],
+      ["eve", "n3", "2026-11-29T01:20:00Z"],
+      ["fox", "pre", "2026-11-23T00:10:00Z", { "repeat": 20, "every": 12 }],
+      ["fox", "n1-a", "2026-11-24T01:00:00Z"],
+      ["gus", "n2", "2026-11-26T00:30:00Z", { "repeat": 19, "every": 3, "memo": "wrong-text" }],
+      ["team-burner-1", "n1-a", "2026-11-24T00:45:00Z"],
+      ["team-burner-1", "n2", "2026-11-26T00:40:00Z", { "repeat": 20, "every": 5, "memo": "exact" }],
+      ["team-burner-1", "rehearsal", "2026-11-23T19:10:00Z", { "repeat": 2, "every": 60 }],
+      ["outsider", "rehearsal", "2026-11-23T19:20:00Z"],
+      ["outsider", "rehearsal", "2026-11-23T19:30:00Z", { "repeat": 20, "every": 5, "memo": "exact" }],
+      ["outsider", "n3", "2026-11-29T01:30:00Z"],
+      ["hal", "practice", "2026-11-24T17:05:00Z", { "repeat": 3, "every": 30 }],
+      ["hal", "n1-a-half", "2026-11-24T02:00:00Z"],
+      ["ivy", "n1-a", "2026-11-24T01:10:00Z", { "tx": "ivy-two-markets" }],
+      ["ivy", "n1-b", "2026-11-24T01:10:00Z", { "tx": "ivy-two-markets" }],
+      ["ivy", "n2", "2026-11-26T01:00:00Z"],
+      ["joy", "pre", "2026-11-23T00:20:00Z", { "memo": "exact" }],
+      ["joy", "n2", "2026-11-26T00:35:00Z"],
+      ["kim", "n1-a", "2026-11-24T01:20:00Z", { "repeat": 3, "every": 60 }],
+      ["kim", "pre", "2026-11-23T00:40:00Z"],
+      ["lea", "n1-b", "2026-11-24T04:00:00Z"],
+      ["lea", "n3", "2026-11-29T02:00:00Z"],
+      ["lea", "post", "2026-12-06T01:00:00Z"],
+      ["mia", "n2", "2026-11-26T01:10:00Z", { "repeat": 19, "every": 30 }],
+      ["mia", "pre", "2026-11-23T00:50:00Z"]
+    ]
+  },
+  "expected": {
+    "window": { "first": "2026-11-23", "last": "2026-12-04" },
+    "markets": { "counted": 8, "excluded": 1, "ignored": 2 },
+    "swaps": { "counted": 107, "nightTouches": 81 },
+    "classes": {
+      "human": { "wallets": 10, "firstTrade": 9, "returning": 4, "threeNightFans": 1, "engaged": 2 },
+      "bot": { "wallets": 3, "firstTrade": 3, "returning": 1, "threeNightFans": 0, "engaged": 0 },
+      "team": { "wallets": 1, "firstTrade": 1, "returning": 1, "threeNightFans": 0, "engaged": 1 }
+    },
+    "bots": { "memo": 2, "rate": 1 },
+    "nights": [
+      { "night": "2026-11-23", "human": 6, "bot": 1, "team": 1, "touches": { "human": 12, "bot": 1, "team": 1 } },
+      { "night": "2026-11-24", "human": 0, "bot": 0, "team": 0, "touches": { "human": 0, "bot": 0, "team": 0 } },
+      { "night": "2026-11-25", "human": 4, "bot": 2, "team": 1, "touches": { "human": 40, "bot": 2, "team": 20 } },
+      { "night": "2026-11-26", "human": 0, "bot": 0, "team": 0, "touches": { "human": 0, "bot": 0, "team": 0 } },
+      { "night": "2026-11-27", "human": 0, "bot": 0, "team": 0, "touches": { "human": 0, "bot": 0, "team": 0 } },
+      { "night": "2026-11-28", "human": 3, "bot": 1, "team": 0, "touches": { "human": 3, "bot": 1, "team": 0 } },
+      { "night": "2026-11-29", "human": 0, "bot": 0, "team": 0, "touches": { "human": 0, "bot": 0, "team": 0 } },
+      { "night": "2026-11-30", "human": 0, "bot": 0, "team": 0, "touches": { "human": 0, "bot": 0, "team": 0 } },
+      { "night": "2026-12-01", "human": 0, "bot": 0, "team": 0, "touches": { "human": 0, "bot": 0, "team": 0 } },
+      { "night": "2026-12-02", "human": 0, "bot": 0, "team": 0, "touches": { "human": 0, "bot": 0, "team": 0 } },
+      { "night": "2026-12-03", "human": 0, "bot": 0, "team": 0, "touches": { "human": 0, "bot": 0, "team": 0 } },
+      { "night": "2026-12-04", "human": 1, "bot": 0, "team": 0, "touches": { "human": 1, "bot": 0, "team": 0 } }
+    ],
+    "excluded": [{ "market": "rehearsal", "reason": "rehearsal market inside the window", "nonTeamSwaps": 21 }],
+    "threeNightFans": 1
+  }
+}

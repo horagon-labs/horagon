@@ -1,0 +1,23 @@
+{
+  "$schema": "https://turborepo.com/schema.json",
+  "extends": ["//"],
+  "tasks": {
+    "test": {
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/scripts/count-fans.mjs",
+        "$TURBO_ROOT$/scripts/count-fans.d.mts",
+        "$TURBO_ROOT$/scripts/scan-repo.mjs",
+        "$TURBO_ROOT$/tests/fixtures/metrics/**"
+      ]
+    },
+    "typecheck": {
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/scripts/count-fans.mjs",
+        "$TURBO_ROOT$/scripts/count-fans.d.mts",
+        "$TURBO_ROOT$/tests/fixtures/metrics/**"
+      ]
+    }
+  }
+}
