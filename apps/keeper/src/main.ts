@@ -5,12 +5,13 @@
 // turn; the heartbeat goes out every round regardless. SIGTERM ends the round after the step in
 // progress. Every RPC's cluster is verified before anything else runs; a backup RPC that does
 // not answer is left out.
-import { connectPostgres, heartbeat } from '@horagon/db'
+import { heartbeat } from '@horagon/db'
 import { errorSummary, HoragonProgram } from '@horagon/sdk'
 import { type Alerter, logAlerter, personAlertWindow, telegramAlerter } from './alerts'
 import { pruneArchive } from './archive-retention'
 import { watchSponsoredAtas } from './ata-watch'
 import { BACKUP_RPC_TRIES, createLogger, loadConfig, makeConnection, verifyCluster } from './config'
+import { connectKeeperDb } from './db'
 import { loadRatings } from './elo'
 import { TxSender } from './executor'
 import { espnFeed, RawArchive, USER_AGENT } from './feeds/espn'
@@ -67,7 +68,7 @@ async function main(): Promise<void> {
     },
   )
 
-  const { db, close } = connectPostgres(cfg.databaseUrl)
+  const { db, close } = connectKeeperDb(cfg.databaseUrl)
   const sender = new TxSender({ connections, payer: cfg.attestor, log, alerts })
   const program = new HoragonProgram({ collateralMint: cfg.collateralMint })
   const ratings = await loadRatings(cfg.eloFile)

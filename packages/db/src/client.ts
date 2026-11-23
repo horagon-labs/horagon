@@ -15,10 +15,21 @@ export interface DbHandle {
 
 /**
  * Postgres (Supabase). `prepare: false` because Supabase's pooler runs in transaction mode;
- * `max` stays small since Vercel functions open one client each.
+ * `max` stays small since Vercel functions open one client each. `pipeline: false` keeps one
+ * query in flight per connection: postgres.js 4 otherwise pipelines (up to 100) once more
+ * queries wait than the pool has connections, and the transaction-mode pooler answers only the
+ * first query of a pipelined burst; the others wait forever.
  */
-export function connectPostgres(url: string, opts: { max?: number } = {}): DbHandle {
-  const client = postgres(url, { prepare: false, max: opts.max ?? 5, idle_timeout: 20 })
+export function connectPostgres(
+  url: string,
+  opts: { max?: number; pipeline?: boolean } = {},
+): DbHandle {
+  const client = postgres(url, {
+    prepare: false,
+    max: opts.max ?? 5,
+    idle_timeout: 20,
+    ...(opts.pipeline === false ? { max_pipeline: 1 } : {}),
+  })
   return {
     db: drizzlePostgres(client, { schema }) as unknown as Db,
     close: () => client.end({ timeout: 5 }),
