@@ -70,6 +70,7 @@ export class FakeChain {
   accounts = new Map<string, AccountInfo<Buffer>>()
   statuses = new Map<string, SignatureStatus>()
   simulateErr: unknown = null
+  simulateLogs: string[] = []
   simulateFails = false
   sendFails = false
   /** getAccountInfo and getMultipleAccountsInfo throw. */
@@ -112,7 +113,7 @@ export class FakeChain {
       async simulateTransaction() {
         if (self.simulateFails) throw new Error(RPC_FAILURE)
         self.simulated++
-        return { context: { slot: 1 }, value: { err: self.simulateErr, logs: [] } }
+        return { context: { slot: 1 }, value: { err: self.simulateErr, logs: self.simulateLogs } }
       },
       async sendRawTransaction(raw: Uint8Array) {
         if (self.sendFails) throw new Error(RPC_FAILURE)

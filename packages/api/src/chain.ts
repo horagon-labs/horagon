@@ -1,4 +1,4 @@
-import { decodeMarketAccount, isHoragonError, type MarketAccount } from '@horagon/sdk'
+import { decodeMarketAccount, isHoragonError, type MarketAccount, redactUrls } from '@horagon/sdk'
 import type { AccountInfo, Connection, PublicKey } from '@solana/web3.js'
 import { ApiError } from './problem'
 
@@ -23,6 +23,26 @@ export async function rpc<T>(what: string, fn: () => Promise<T>): Promise<T> {
       hint: RPC_DOWN_HINT,
       cause,
     })
+  }
+}
+
+/**
+ * A failed simulation or status as the server log keeps it: the raw error and the program logs,
+ * with URLs and keys cut. Never part of an answer to a client.
+ */
+export function rawProgramFailure(
+  err: unknown,
+  logs: readonly string[] = [],
+): { err: string; logs: string[] } {
+  let text: string
+  try {
+    text = JSON.stringify(err) ?? String(err)
+  } catch {
+    text = String(err)
+  }
+  return {
+    err: redactUrls(text),
+    logs: logs.slice(0, 40).map((l) => redactUrls(String(l)).slice(0, 300)),
   }
 }
 

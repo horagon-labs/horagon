@@ -294,6 +294,23 @@ describe('POST /tx/submit', () => {
     expect(await sponsorSpentSince(env.h.db, new Date(0))).toBe(0n)
   })
 
+  it('keeps a raw simulation failure in the server log, never in the answer', async () => {
+    env.chain.simulateErr = { InstructionError: [1, 'InvalidAccountData'] }
+    env.chain.simulateLogs = [
+      'Program log: raw-marker',
+      'failed at https://rpc.example/?api-key=KEYVALUE',
+    ]
+    const built = await builtTrade()
+    const res = await post('/tx/submit', { tx: signAsUser(built.tx) })
+    const body = await res.text()
+    expect(res.status).toBeGreaterThanOrEqual(400)
+    expect(body).not.toMatch(/InstructionError|raw-marker|KEYVALUE|[{]"InstructionError/)
+    const logs = env.logs.join(String.fromCharCode(10))
+    expect(logs).toContain('InstructionError')
+    expect(logs).toContain('raw-marker')
+    expect(logs).not.toContain('KEYVALUE')
+  })
+
   it('answers 429 when the daily cap is used up', async () => {
     await replaceEnv({ capSol: 0.000001 })
     const built = await builtTrade()
@@ -506,6 +523,23 @@ describe('status, claim, positions, faucet, health', () => {
       error: { code: string }
     }
     expect(failed).toMatchObject({ status: 'failed', error: { code: 'SLIPPAGE_EXCEEDED' } })
+  })
+
+  it('answers a failed signature in words with a hint, keeping the raw error in the log', async () => {
+    const sig = 's'.repeat(88)
+    env.chain.statuses.set(sig, {
+      slot: 9,
+      confirmations: null,
+      err: { InstructionError: [1, 'InvalidAccountData'] },
+      confirmationStatus: 'confirmed',
+    })
+    const res = await get(`/tx/${sig}`)
+    const text = await res.text()
+    const body = JSON.parse(text) as { error: { message: string; hint: string } }
+    expect(body.error.message).toMatch(/invalid account data/)
+    expect(body.error.hint).toBeTruthy()
+    expect(text).not.toContain('InstructionError')
+    expect(env.logs.join(String.fromCharCode(10))).toContain('InstructionError')
   })
 
   it('builds a claim that creates the missing NO ATA for a YES winner', async () => {

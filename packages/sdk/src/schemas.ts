@@ -210,6 +210,7 @@ export const TxStatusSchema = z.object({
     .object({
       code: z.enum(HORAGON_ERROR_CODES),
       message: z.string(),
+      hint: z.string().optional(),
       programCode: z.number().int().optional(),
     })
     .nullable(),

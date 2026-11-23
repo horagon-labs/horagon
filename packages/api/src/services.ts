@@ -31,7 +31,7 @@ import {
   tradeAtas,
 } from '@horagon/sdk'
 import { PublicKey, type VersionedTransaction } from '@solana/web3.js'
-import { type ChainReader, rpc, tokenAmount } from './chain'
+import { type ChainReader, rawProgramFailure, rpc, tokenAmount } from './chain'
 import type { ApiDeps } from './deps'
 import { aggregatePositions } from './positions'
 import { ApiError } from './problem'
@@ -220,6 +220,7 @@ export async function txStatus(ctx: Ctx, signature: string): Promise<TxStatus> {
   if (!s) return { signature, status: 'unknown', slot: null, error: null }
   if (s.err) {
     const e = fromProgramError(s.err)
+    ctx.deps.log.warn({ raw: rawProgramFailure(s.err), code: e.code, sig: signature }, 'tx failed')
     return {
       signature,
       status: 'failed',
@@ -227,6 +228,7 @@ export async function txStatus(ctx: Ctx, signature: string): Promise<TxStatus> {
       error: {
         code: e.code,
         message: e.message,
+        hint: e.hint,
         ...(e.programCode === undefined ? {} : { programCode: e.programCode }),
       },
     }

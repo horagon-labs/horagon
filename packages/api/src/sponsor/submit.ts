@@ -28,7 +28,7 @@ import {
 import { assertNotMainnetGenesis, errorSummary, fromProgramError, PROTOCOL_DAO } from '@horagon/sdk'
 import { ComputeBudgetProgram, PublicKey, VersionedTransaction } from '@solana/web3.js'
 import bs58 from 'bs58'
-import { RPC_DOWN_HINT, rpc } from '../chain'
+import { RPC_DOWN_HINT, rawProgramFailure, rpc } from '../chain'
 import type { ApiDeps, SponsorConfig } from '../deps'
 import { ApiError } from '../problem'
 import { DEFAULT_SPONSOR_LIMITS, type SponsorPolicy, type SponsorVerdict } from './policy'
@@ -260,8 +260,11 @@ export async function submitSponsored(
     })
     if (sim.value.err) {
       const err = fromProgramError({ err: sim.value.err, logs: sim.value.logs ?? [] })
+      const raw = rawProgramFailure(sim.value.err, sim.value.logs ?? [])
+      deps.log.warn({ raw, code: err.code, sig: signature }, 'sponsor simulation failed')
       throw new ApiError(err.code, err.message, {
         hint: err.hint,
+        cause: raw,
         ...(err.programCode === undefined ? {} : { programCode: err.programCode }),
       })
     }

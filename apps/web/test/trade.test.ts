@@ -160,6 +160,16 @@ describe('executeTrade', () => {
     expect(again.built).toHaveLength(2)
   })
 
+  it('keeps the hint of a landed failure', async () => {
+    const { client } = fakeClient({
+      chain: [{ code: 'PROGRAM_ERROR', message: 'Plain words.', hint: 'Refresh and retry.' }],
+    })
+    await expect(executeTrade(client, user, REQ)).rejects.toMatchObject({
+      message: 'Plain words.',
+      hint: 'Refresh and retry.',
+    })
+  })
+
   it('does not retry other failures and keeps their code', async () => {
     const { client, built } = fakeClient({ chain: [{ code: 'MARKET_HALTED', message: 'halted' }] })
     await expect(executeTrade(client, user, REQ)).rejects.toMatchObject({ code: 'MARKET_HALTED' })

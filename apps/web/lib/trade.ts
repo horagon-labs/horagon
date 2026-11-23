@@ -111,6 +111,7 @@ function landedFailure({ signature, status }: Sent): HoragonError {
   const e = status.error
   return new HoragonError(e?.code ?? 'PROGRAM_ERROR', e?.message ?? `${signature} failed`, {
     ...(e?.programCode === undefined ? {} : { programCode: e.programCode }),
+    ...(e?.hint === undefined ? {} : { hint: e.hint }),
   })
 }
 
