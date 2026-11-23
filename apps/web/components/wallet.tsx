@@ -34,6 +34,7 @@ import {
   openKeyStore,
   peekBurner,
 } from '../lib/burner'
+import { requestFunds } from '../lib/faucet'
 import { singleFlight } from '../lib/single-flight'
 import { claimAll } from '../lib/trade'
 import { usePoll } from '../lib/use-poll'
@@ -79,6 +80,17 @@ interface WalletState {
   claimed: string[]
   /** What stopped the last Claim all run, if anything. */
   claimError: unknown
+  /**
+   * Asks the faucet for test mUSDC for the burner, through the 18+ gate; refreshes the balance
+   * after it lands. One request at a time. The wallet sheet and the trade panel both use it.
+   */
+  requestFaucet: () => void
+  /** A faucet request is in flight. */
+  funding: boolean
+  /** What the last faucet request added, until the next one starts. */
+  fundNote: string | undefined
+  /** What stopped the last faucet request, if anything. */
+  fundError: unknown
 }
 
 const WalletContext = createContext<WalletState | null>(null)
@@ -114,6 +126,10 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     error: undefined,
   })
   // What the gate continues once the box is ticked (one at a time; a new ask replaces it).
+  const [fund, setFund] = useState<{ busy: boolean; note?: string; error?: unknown }>({
+    busy: false,
+  })
+  const fundBusy = useRef(false)
   const pending = useRef<Pending | null>(null)
   const claimFlight = useMemo(() => singleFlight(), [])
 
@@ -236,6 +252,23 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     [claimFlight, refreshPortfolio],
   )
 
+  const requestFaucet = useCallback(() => {
+    withAge((kp) => {
+      if (fundBusy.current) return
+      fundBusy.current = true
+      setFund({ busy: true })
+      requestFunds(api, kp.publicKey.toBase58())
+        .then((note) => {
+          setFund({ busy: false, note })
+          refreshPortfolio()
+        })
+        .catch((error: unknown) => setFund({ busy: false, error }))
+        .finally(() => {
+          fundBusy.current = false
+        })
+    }, 'faucet')
+  }, [withAge, refreshPortfolio])
+
   const startClaims = useCallback(() => {
     if (!claimFlight.running()) withAge(runClaims, 'claim')
   }, [claimFlight, withAge, runClaims])
@@ -257,6 +290,10 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       claiming: claimRun.claiming,
       claimed: claimRun.claimed,
       claimError: claimRun.error,
+      requestFaucet,
+      funding: fund.busy,
+      fundNote: fund.note,
+      fundError: fund.error,
     }),
     [
       opened,
@@ -271,6 +308,8 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       ask,
       startClaims,
       claimRun,
+      requestFaucet,
+      fund,
     ],
   )
   return (

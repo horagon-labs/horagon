@@ -41,7 +41,17 @@ function useDebounced<T>(value: T, ms: number): T {
 }
 
 export function TradePanel({ game, market }: { game: GameDetail; market: MarketSummary }) {
-  const { address, portfolio, refreshPortfolio, withAge, openGate } = useWallet()
+  const {
+    address,
+    portfolio,
+    refreshPortfolio,
+    withAge,
+    openGate,
+    requestFaucet,
+    funding,
+    fundNote,
+    fundError,
+  } = useWallet()
   const [side, setSide] = useState<Side>('home')
   const [action, setAction] = useState<TradeAction>('buy')
   const [amount, setAmount] = useState('10')
@@ -200,7 +210,25 @@ export function TradePanel({ game, market }: { game: GameDetail; market: MarketS
       {action === 'buy' && (
         <p className="text-xs text-zinc-500">Each share pays 1 mUSDC if {team} wins.</p>
       )}
-      {!check.ok && check.reason && <p className="text-sm text-amber-600">{check.reason}</p>}
+      {!check.ok && check.reason && (
+        <p className="text-sm text-amber-600">
+          {check.reason}
+          {check.fund && ready === 'ready' && (
+            <>
+              {' '}
+              <button
+                type="button"
+                disabled={funding}
+                onClick={requestFaucet}
+                className="font-semibold underline disabled:opacity-50"
+              >
+                {funding ? 'Requesting…' : 'Get test mUSDC'}
+              </button>
+            </>
+          )}
+        </p>
+      )}
+      {fundNote && <p className="text-sm text-emerald-600">{fundNote}</p>}
       <button
         type="button"
         disabled={ready === 'loading' || (ready === 'ready' && (!check.ok || stage !== null))}
@@ -230,7 +258,7 @@ export function TradePanel({ game, market }: { game: GameDetail; market: MarketS
           </a>
         </p>
       )}
-      <ErrorText error={error ?? (check.quote ? quote.error : undefined)} />
+      <ErrorText error={error ?? fundError ?? (check.quote ? quote.error : undefined)} />
     </section>
   )
 }

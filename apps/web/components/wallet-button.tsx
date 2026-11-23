@@ -3,7 +3,6 @@
 // The sheet opens by itself when the 18+ gate has just created a wallet: it starts empty, so
 // the faucet comes first.
 import { useEffect, useRef, useState } from 'react'
-import { api } from '../lib/api'
 import { shortKey, usdc } from '../lib/format'
 import { readyHint, replacePrompt } from '../lib/wallet-copy'
 import { AgeCheckbox } from './age-dialog'
@@ -19,10 +18,12 @@ export function WalletButton() {
     ageNeeded,
     walletsCreated,
     portfolio,
-    refreshPortfolio,
+    requestFaucet,
+    funding,
+    fundNote,
+    fundError,
     exportKey,
     importKey,
-    withAge,
     openGate,
   } = useWallet()
   const dialog = useRef<HTMLDialogElement>(null)
@@ -30,9 +31,7 @@ export function WalletButton() {
   const [importText, setImportText] = useState('')
   const [importAge, setImportAge] = useState(false)
   const [importError, setImportError] = useState<string>()
-  const [funding, setFunding] = useState(false)
   const [note, setNote] = useState<string>()
-  const [error, setError] = useState<unknown>()
   const seenCreated = useRef(walletsCreated)
 
   useEffect(() => {
@@ -55,21 +54,6 @@ export function WalletButton() {
     )
   }
 
-  async function fund(wallet: string) {
-    setFunding(true)
-    setError(undefined)
-    setNote(undefined)
-    try {
-      const r = await api.faucet(wallet)
-      setNote(`Added ${usdc(r.amountUsdc)} test mUSDC.`)
-      refreshPortfolio()
-    } catch (err) {
-      setError(err)
-    } finally {
-      setFunding(false)
-    }
-  }
-
   function onImport() {
     if (!window.confirm(replacePrompt(ephemeral))) return
     setImportError(undefined)
@@ -79,7 +63,6 @@ export function WalletButton() {
       setImportAge(false)
       setShown(undefined)
       setNote('Wallet imported.')
-      setError(undefined)
     } catch (err) {
       // The key's own problem (not base58, wrong length, mismatched halves), in words.
       setImportError(err instanceof Error ? err.message : 'This key could not be imported.')
@@ -122,13 +105,14 @@ export function WalletButton() {
           <button
             type="button"
             disabled={funding}
-            onClick={() => withAge((kp) => void fund(kp.publicKey.toBase58()), 'faucet')}
+            onClick={requestFaucet}
             className="w-full rounded-lg bg-zinc-900 py-2 font-semibold text-white disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900"
           >
             {funding ? 'Requesting…' : 'Get test mUSDC'}
           </button>
           {note && <p className="text-sm text-emerald-600">{note}</p>}
-          <ErrorText error={error} />
+          {fundNote && <p className="text-sm text-emerald-600">{fundNote}</p>}
+          <ErrorText error={fundError} />
           <section>
             <h3 className="mb-1 text-sm font-semibold">Positions</h3>
             <Positions />
