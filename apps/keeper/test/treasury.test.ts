@@ -13,6 +13,7 @@ import type { Alerter } from '../src/alerts'
 import type { SendSpec } from '../src/executor'
 import { DEFAULT_SEEDS } from '../src/planner'
 import {
+  isMissingAccount,
   KEEPER_MIN_LAMPORTS,
   LAMPORTS_PER_MARKET,
   type TreasuryDeps,
@@ -208,6 +209,21 @@ describe('treasury', () => {
     expect(r.target).toBe(360n * MUSDC)
   })
 
+  it("treats Surfpool's 'Account <key> not found' as a missing token account", async () => {
+    await upsertScheduledGames(h.db, night.slice(0, 1))
+    f.tokens.set(
+      treasury.toBase58(),
+      new Error(
+        'failed to get token account balance: Account 2uj7R2JFiyupN6pXwq6n8Vgk5Tgt29D8vQcSmxSn4Sd5 not found',
+      ),
+    )
+    f.tokens.set(keeperAta.toBase58(), 5_000n * MUSDC)
+    const r = await treasuryTick(f.deps(h.db))
+    expect(r.moved).toBe(r.target)
+    expect(r.target).toBe(360n * MUSDC)
+    expect(f.sends).toHaveLength(1)
+  })
+
   it('skips the top-up and pages nobody when a balance cannot be read', async () => {
     await upsertScheduledGames(h.db, night)
     f.tokens.set(treasury.toBase58(), new Error('429 Too Many Requests'))
@@ -323,5 +339,24 @@ describe('treasury', () => {
     await expect(treasuryTick(f.deps(h.db))).resolves.toEqual({ moved: 0n, target: 0n })
     expect(f.alerts).toEqual([])
     expect(f.logs.some(([l, m]) => l === 'warn' && m.includes('SOL balance check'))).toBe(true)
+  })
+})
+
+describe('isMissingAccount', () => {
+  it.each([
+    'failed to get token account balance: Account 2uj7R2JFiyupN6pXwq6n8Vgk5Tgt29D8vQcSmxSn4Sd5 not found',
+    'failed to get token account balance: Invalid param: could not find account',
+    'account does not exist',
+  ])('matches %s', (m) => {
+    expect(isMissingAccount(new Error(m))).toBe(true)
+  })
+
+  it.each([
+    'Blockhash not found',
+    'Method not found',
+    'fetch failed',
+    'Request failed with status code 404 Not Found',
+  ])('does not match %s', (m) => {
+    expect(isMissingAccount(new Error(m))).toBe(false)
   })
 })

@@ -73,7 +73,9 @@ export async function upcomingSeeds(
 
 /** A token account that does not exist holds nothing; any other RPC failure is not an answer. */
 export const isMissingAccount = (err: unknown) =>
-  /could not find account|account does not exist/i.test(errorSummary(err).message)
+  /could not find account|account does not exist|\baccount [1-9A-HJ-NP-Za-km-z]{32,44} not found/i.test(
+    errorSummary(err).message,
+  )
 
 export async function treasuryTick(deps: TreasuryDeps): Promise<{ moved: bigint; target: bigint }> {
   const conn = deps.sender.connection
