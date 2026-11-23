@@ -21,7 +21,7 @@ import {
   swapDirectionFor,
   toPoolState,
 } from '@horagon/sdk'
-import { ASSOCIATED_TOKEN_PROGRAM_ID } from '@solana/spl-token'
+import { ASSOCIATED_TOKEN_PROGRAM_ID, TOKEN_PROGRAM_ID } from '@solana/spl-token'
 import { ComputeBudgetProgram, Keypair, VersionedTransaction } from '@solana/web3.js'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createApp } from '../src/app'
@@ -546,9 +546,31 @@ describe('status, claim, positions, faucet, health', () => {
     expect(res.status).toBe(200)
     const body = (await res.json()) as { txs: Array<{ tx: string }>; markets: string[] }
     expect(body.markets).toEqual([m.pubkey.toBase58()])
+    expect(body.txs).toHaveLength(1)
     const tx = VersionedTransaction.deserialize(Buffer.from(body.txs[0]?.tx ?? '', 'base64'))
     const keys = tx.message.staticAccountKeys.map((k) => k.toBase58())
     expect(keys).toContain(ataAddress({ owner: wallet, mint: m.decoded.noMint }).toBase58())
+    // claim_winnings closes YES and NO itself (rent to the user), so the claim is last: a
+    // CloseAccount after it would fail the whole transaction on chain.
+    const programs = tx.message.compiledInstructions.map((ix) => keys[ix.programIdIndex])
+    expect(programs).not.toContain(TOKEN_PROGRAM_ID.toBase58())
+    expect(programs.at(-1)).toBe(PM_AMM_PROGRAM_ID.toBase58())
+    // The sponsor co-signs exactly what the API built.
+    const set = new MarketSet(env.deps)
+    await set.refresh(true)
+    const verdict = validateSponsoredTransaction(tx, {
+      sponsor: env.sponsor.publicKey,
+      collateralMint: DEVNET_MUSDC_MINT,
+      feeOwners: [PROTOCOL_DAO, program.authority],
+      isHoragonMarket: (k) => set.hasMarket(k),
+      outcomeMintMarket: (k) => set.marketOfMint(k),
+      limits: DEFAULT_SPONSOR_LIMITS,
+    })
+    expect(verdict).toEqual({
+      ok: true,
+      user: wallet,
+      ataCreates: inspect(body.txs[0]?.tx ?? '').ataCreates,
+    })
   })
 
   it('reports an open position at the indexed or initial price', async () => {

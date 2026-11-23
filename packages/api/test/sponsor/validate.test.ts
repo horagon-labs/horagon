@@ -1,3 +1,4 @@
+import { buildClaimTransactions } from '@horagon/sdk'
 import {
   DEVNET_MUSDC_MINT,
   PM_AMM_IX_DISCRIMINATORS,
@@ -87,6 +88,18 @@ function pmAmm(
   })
 }
 
+/**
+ * `ix` with the user as a signer. With CloseAccount gone, no allowed instruction but a pm-AMM
+ * one has the user sign; this reaches the checks behind the two-signer rule without one.
+ */
+const userSigns = (ix: TransactionInstruction) =>
+  new TransactionInstruction({
+    programId: ix.programId,
+    data: ix.data,
+    keys: ix.keys.map((k) => (k.pubkey.equals(user) ? { ...k, isSigner: true } : k)),
+  })
+
+/** The CloseAccount the SDK used to append after claim_winnings, which already closed it. */
 const close = (destination = sponsor) =>
   createCloseAccountInstruction(getAssociatedTokenAddressSync(yesMint, user), destination, user)
 
@@ -119,9 +132,24 @@ describe('validateSponsoredTransaction accepts', () => {
     expect(verdict).toEqual({ ok: true, user, ataCreates: 5 })
   })
 
-  it('a claim that closes the emptied ATA back to the sponsor', () => {
-    const tx = build([pmAmm('claimWinnings'), close()])
-    expect(validateSponsoredTransaction(tx, policy).ok).toBe(true)
+  it('a claim with nothing after it, creating the missing NO account first', () => {
+    const tx = build([ata(user, noMint), pmAmm('claimWinnings')])
+    expect(validateSponsoredTransaction(tx, policy)).toEqual({ ok: true, user, ataCreates: 1 })
+  })
+
+  it('every claim transaction the SDK builds', () => {
+    const txs = buildClaimTransactions({
+      user,
+      feePayer: sponsor,
+      recentBlockhash: PublicKey.default.toBase58(),
+      markets: [
+        { market, collateralMint: usdc, createAtas: [{ owner: user, mint: noMint }] },
+        { market: otherMarket, collateralMint: usdc },
+      ],
+      createCollateralAta: { owner: user, mint: usdc },
+    })
+    expect(txs.length).toBeGreaterThan(0)
+    for (const tx of txs) expect(validateSponsoredTransaction(tx, policy).ok).toBe(true)
   })
 
   it('a redeem', () => {
@@ -274,12 +302,24 @@ describe('validateSponsoredTransaction rejects', () => {
         ),
         pmAmm('swap'),
       ]),
-      'TOKEN_RULE',
+      'PROGRAM_NOT_ALLOWED',
+    ],
+    // claim_winnings closes the user's YES and NO accounts itself: a CloseAccount after it can
+    // only fail on chain, whoever the rent goes to, so the sponsor never pays for one.
+    [
+      'a close back to the sponsor after a claim',
+      build([pmAmm('claimWinnings'), close()]),
+      'SPONSOR_MISUSE',
+    ],
+    [
+      'a close to the user after a claim',
+      build([pmAmm('claimWinnings'), close(user)]),
+      'PROGRAM_NOT_ALLOWED',
     ],
     [
       'a close that sends rent to a stranger',
       build([pmAmm('claimWinnings'), close(stranger)]),
-      'TOKEN_RULE',
+      'PROGRAM_NOT_ALLOWED',
     ],
     [
       'a close the sponsor must authorize',
@@ -301,7 +341,7 @@ describe('validateSponsoredTransaction rejects', () => {
       ]),
       'PROGRAM_NOT_ALLOWED',
     ],
-    ['no pm-AMM instruction at all', build([ata(user, usdc), close()]), 'NO_TRADE'],
+    ['no pm-AMM instruction at all', build([userSigns(ata(user, usdc))]), 'NO_TRADE'],
     [
       'a pm-AMM instruction whose first account is not the user',
       build([
@@ -373,7 +413,7 @@ describe('validateSponsoredTransaction ties outcome ATAs to the traded markets',
 
   it.each([
     ['a swap on another market', [ata(user, otherYesMint), pmAmm('swap')], otherMarket],
-    ['no pm-AMM instruction', [ata(user, yesMint), close()], market],
+    ['no pm-AMM instruction', [userSigns(ata(user, yesMint))], market],
   ])('refuses an outcome ATA with %s and names its market', (_label, instructions, mintMarket) => {
     const verdict = verdictOf(instructions)
     expect(verdict.ok).toBe(false)
@@ -418,9 +458,9 @@ describe('validateSponsoredTransaction property', () => {
     ata(authority, usdc),
     pmAmm('redeemPair'),
     pmAmm('claimWinnings'),
-    close(),
   ]
   const bad: TransactionInstruction[] = [
+    close(),
     ComputeBudgetProgram.setComputeUnitLimit({ units: 1_000_001 }),
     SystemProgram.transfer({ fromPubkey: sponsor, toPubkey: stranger, lamports: 5_000 }),
     SystemProgram.transfer({ fromPubkey: user, toPubkey: stranger, lamports: 5_000 }),

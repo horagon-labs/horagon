@@ -14,7 +14,6 @@ import {
 import type { SponsorPolicy, SponsorRejection, SponsorVerdict } from './policy'
 
 const ATA_CREATE_IDEMPOTENT = 1
-const TOKEN_CLOSE_ACCOUNT = 9
 const CB_SET_COMPUTE_UNIT_LIMIT = 2
 const CB_SET_COMPUTE_UNIT_PRICE = 3
 /** The only pm-AMM instructions a player may get sponsored. */
@@ -110,24 +109,9 @@ function checkPmAmm(
   }
 }
 
-function checkToken(
-  accounts: Array<PublicKey | undefined>,
-  data: Uint8Array,
-  user: PublicKey,
-  policy: SponsorPolicy,
-): void {
-  if (data.length !== 1 || data[0] !== TOKEN_CLOSE_ACCOUNT || accounts.length !== 3) {
-    reject('TOKEN_RULE', 'Only CloseAccount is allowed')
-  }
-  if (!same(accounts[1], policy.sponsor)) reject('TOKEN_RULE', 'Rent must go back to the sponsor')
-  if (!same(accounts[2], user)) reject('TOKEN_RULE', 'The account owner must be the user')
-}
-
-/** Where the sponsor key may appear inside an instruction's account list. */
+/** Where the sponsor key may appear inside an instruction's account list: the ATA payer only. */
 function sponsorSlotAllowed(program: PublicKey, position: number): boolean {
-  if (program.equals(ASSOCIATED_TOKEN_PROGRAM_ID)) return position === 0
-  if (program.equals(TOKEN_PROGRAM_ID)) return position === 1
-  return false
+  return program.equals(ASSOCIATED_TOKEN_PROGRAM_ID) && position === 0
 }
 
 /**
@@ -186,8 +170,11 @@ function validate(
     } else if (program.equals(PM_AMM_PROGRAM_ID)) {
       checkPmAmm(accounts, ix.data, user, policy)
       trades++
-    } else if (program.equals(TOKEN_PROGRAM_ID)) checkToken(accounts, ix.data, user, policy)
-    else reject('PROGRAM_NOT_ALLOWED', `Program ${program.toBase58()} is not allowed`)
+    } else {
+      // SPL Token included: Horagon builds no Token instruction for a player. claim_winnings
+      // closes the YES and NO accounts itself, so a CloseAccount after it can only fail.
+      reject('PROGRAM_NOT_ALLOWED', `Program ${program.toBase58()} is not allowed`)
+    }
   }
   if (trades === 0) reject('NO_TRADE', 'A sponsored transaction must contain a pm-AMM instruction')
   return { user, ataCreates }

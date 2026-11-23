@@ -42,7 +42,6 @@ export type SponsorRejection =
   | 'COMPUTE_BUDGET'
   | 'ATA_RULE'
   | 'PM_AMM_RULE'
-  | 'TOKEN_RULE'
   | 'SPONSOR_MISUSE'
   | 'NO_TRADE'
 

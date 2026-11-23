@@ -191,6 +191,9 @@ export async function buildClaims(ctx: Ctx, req: { wallet: string; sponsored?: b
   }
   const feePayer = sponsored && sponsor ? sponsor : user
   const { blockhash } = await ctx.chain.blockhash()
+  // claim_winnings closes the YES and NO accounts itself and pays their rent to the user, the
+  // sponsored ones included: that rent was counted as sponsor spend when the account was made
+  // (sponsor/submit.ts), so nothing is owed back and no close follows the claim.
   const txs = buildClaimTransactions({
     user,
     feePayer,
@@ -200,9 +203,6 @@ export async function buildClaims(ctx: Ctx, req: { wallet: string; sponsored?: b
       collateralMint: account.collateralMint,
       createAtas: missing,
     })),
-    closeAccounts: true,
-    // Sponsored ATAs were paid for by the sponsor, so their rent goes back to it.
-    rentDestination: feePayer,
     ...(collateralInfo ? {} : { createCollateralAta: { owner: user, mint: collateralMint } }),
   })
   const expiresAt = Date.now() + BLOCKHASH_LIFETIME_MS
