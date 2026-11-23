@@ -6,7 +6,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./migrate": "./src/migrate.ts",
-    "./testing": "./src/testing.ts"
+    "./testing": "./src/testing.ts",
+    "./test-support": "./test/support/lossy-pooler.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
