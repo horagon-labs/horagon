@@ -78,6 +78,17 @@ export interface ProgramErrorContext {
   instruction?: PmAmmInstructionName
 }
 
+/** The builtin error name of an `{InstructionError: [index, "Name"]}` status, if that is the shape. */
+function builtinInstructionError(err: unknown): { index: number; name: string } | undefined {
+  const status = (err as { err?: unknown } | null)?.err ?? err
+  const ie = (status as { InstructionError?: unknown } | null)?.InstructionError
+  if (!Array.isArray(ie) || typeof ie[0] !== 'number' || typeof ie[1] !== 'string') return undefined
+  return { index: ie[0], name: ie[1] }
+}
+
+const FAILED_HINT =
+  'Refresh the page and try again. If it fails again, open the transaction on the explorer.'
+
 /** Map anything thrown while sending a pm-AMM transaction to a HoragonError. */
 export function fromProgramError(err: unknown, context: ProgramErrorContext = {}): HoragonError {
   if (isHoragonError(err)) return err
@@ -123,5 +134,20 @@ export function fromProgramError(err: unknown, context: ProgramErrorContext = {}
   if (/fetch failed|ECONNREFUSED|ECONNRESET|ETIMEDOUT|ENOTFOUND|socket hang up/i.test(text)) {
     return new HoragonError('NETWORK', 'Network error while talking to the RPC', { cause: err })
   }
-  return new HoragonError('PROGRAM_ERROR', text.split('\n')[0] ?? 'Unknown error', { cause: err })
+  const builtin = builtinInstructionError(err)
+  if (builtin) {
+    const words = builtin.name.replace(/([a-z0-9])([A-Z])/g, '$1 $2').toLowerCase()
+    return new HoragonError(
+      'PROGRAM_ERROR',
+      `The network rejected step ${builtin.index + 1} of the transaction: ${words}.`,
+      { cause: err, hint: FAILED_HINT },
+    )
+  }
+  // Raw error JSON and program logs stay in `cause` (and the server log); a user reads a sentence.
+  const first = text.split('\n')[0] ?? ''
+  const plain = first !== '' && !/[{}[\]]|InstructionError/.test(first)
+  return new HoragonError('PROGRAM_ERROR', plain ? first : 'The transaction failed on chain.', {
+    cause: err,
+    hint: FAILED_HINT,
+  })
 }

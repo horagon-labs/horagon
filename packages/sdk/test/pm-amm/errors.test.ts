@@ -75,3 +75,38 @@ describe('fromProgramError', () => {
     expect(fromProgramError(original)).toBe(original)
   })
 })
+
+describe('fromProgramError never puts raw error JSON in what a user reads', () => {
+  const shapes: [string, unknown][] = [
+    ['a builtin instruction error name', { InstructionError: [1, 'InvalidAccountData'] }],
+    [
+      'the same, as the status the API reads',
+      { err: { InstructionError: [1, 'InvalidAccountData'] }, logs: [] },
+    ],
+    ['a Token program custom error', { InstructionError: [1, { Custom: 3 }] }],
+    [
+      'a Token program error with its logs',
+      {
+        err: { InstructionError: [2, { Custom: 1 }] },
+        logs: [
+          'Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA invoke [1]',
+          'Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA failed: custom program error: 0x1',
+        ],
+      },
+    ],
+    ['an error whose message is JSON', new Error('{"InstructionError":[1,"InvalidAccountData"]}')],
+  ]
+  it.each(shapes)('%s', (_name, raw) => {
+    const e = fromProgramError(raw)
+    for (const text of [e.message, e.hint]) {
+      expect(text).not.toMatch(/[{}[\]]|InstructionError/)
+    }
+    expect(e.message).toMatch(/^[A-Z][^\n]*\.?$/)
+  })
+
+  it('says what failed in words for a builtin error name', () => {
+    const e = fromProgramError({ InstructionError: [1, 'InvalidAccountData'] })
+    expect(e.code).toBe('PROGRAM_ERROR')
+    expect(e.message).toBe('The network rejected step 2 of the transaction: invalid account data.')
+  })
+})
