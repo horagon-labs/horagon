@@ -10,6 +10,7 @@ import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import {
+  buildClaimTransactions,
   buildClaimWinningsIx,
   buildTradeTransaction,
   CREATE_MARKET_COMPUTE_UNITS,
@@ -652,5 +653,111 @@ describe.skipIf(!RPC)('horagon program on Surfpool', () => {
         quoteSwap({ pool: after, direction: 'usdcToYes', amountIn, now: after.lastAccrualTs }),
       )
     }
+  })
+
+  // Task 24 e2e: "Claim all" always failed, because claim_winnings closes the user's YES and NO
+  // accounts itself and the SDK then appended CloseAccount on them. A user holding both sides
+  // claims with the SDK's own claim transaction, a separate fee payer standing in for the
+  // sponsor, as POST /tx/claim builds it. Last: it travels past its own end_ts.
+  it("a user holding YES and NO claims with the SDK's claim transaction", async () => {
+    const user = Keypair.generate()
+    const feePayer = Keypair.generate()
+    for (const k of [user, feePayer]) {
+      await conn.confirmTransaction(await conn.requestAirdrop(k.publicKey, 2e9), 'confirmed')
+    }
+    const userUsdc = getAssociatedTokenAddressSync(mint, user.publicKey)
+    await send(
+      [
+        createAssociatedTokenAccountIdempotentInstruction(
+          admin.publicKey,
+          userUsdc,
+          user.publicKey,
+          mint,
+        ),
+      ],
+      admin,
+    )
+    await mintTo(conn, admin, mint, userUsdc, admin, 50n * USDC)
+
+    const externalGameId = `${externalId}c`
+    const id = await marketIdFor('NBA', externalGameId, 0)
+    const claimEnd = (await chainTime()) + 600
+    await send(
+      [createIx(attestor.publicKey, { marketId: id, externalGameId, endTs: claimEnd })],
+      attestor,
+      [],
+      CREATE_MARKET_COMPUTE_UNITS,
+    )
+    const gm = await gameMarket(id)
+    const info = await conn.getAccountInfo(gm.market, 'confirmed')
+    if (!info) throw new Error('market account missing')
+    const { yesMint, noMint } = decodeMarketAccount(info)
+    const yesAta = getAssociatedTokenAddressSync(yesMint, user.publicKey)
+    const noAta = getAssociatedTokenAddressSync(noMint, user.publicKey)
+    const p = {
+      user: user.publicKey,
+      market: gm.market,
+      collateralMint: mint,
+      authority: program.authority,
+    }
+    for (const [direction, amountIn] of [
+      ['usdcToYes', 10n * USDC],
+      ['usdcToNo', 20n * USDC],
+    ] as const) {
+      const { blockhash } = await conn.getLatestBlockhash('confirmed')
+      await sendTx(
+        buildTradeTransaction({
+          feePayer: user.publicKey,
+          recentBlockhash: blockhash,
+          swap: { ...p, direction, amountIn, minOut: 0n },
+          createAtas: tradeAtas(p),
+        }),
+        [user],
+      )
+    }
+    const yes = (await getAccount(conn, yesAta, 'confirmed')).amount
+    const no = (await getAccount(conn, noAta, 'confirmed')).amount
+    expect(yes).toBeGreaterThan(0n)
+    expect(no).toBeGreaterThan(0n)
+
+    const claim = async () => {
+      const { blockhash } = await conn.getLatestBlockhash('confirmed')
+      const txs = buildClaimTransactions({
+        user: user.publicKey,
+        feePayer: feePayer.publicKey,
+        recentBlockhash: blockhash,
+        markets: [{ market: gm.market, collateralMint: mint }],
+      })
+      expect(txs).toHaveLength(1)
+      return sendTx(txs[0] as VersionedTransaction, [feePayer, user])
+    }
+
+    // NO wins, as in the e2e run: the user holds winning NO and losing YES.
+    await travelTo(claimEnd + 1)
+    await propose(attestor, id, 'no')
+    // pm-AMM refuses claim_winnings until the market is resolved, so a claim's closes always
+    // mark a resolved market (the keeper's ata-watch relies on it).
+    await expectError(claim(), { program: 'pm-amm' })
+    await travelTo((await gameMarket(id)).proposedAt + WINDOW_SECS + 1)
+    await finalize(stranger, id)
+    expect((await gameMarket(id)).status).toBe('finalized')
+
+    const usdcBefore = await balance(user.publicKey)
+    const solBefore = await conn.getBalance(user.publicKey, 'confirmed')
+    const outcomeRent = await Promise.all(
+      [yesAta, noAta].map(async (a) => (await conn.getAccountInfo(a, 'confirmed'))?.lamports ?? 0),
+    )
+    const sig = await claim()
+    await measure('claim_winnings (SDK claim transaction)', sig, 200_000)
+
+    expect(await balance(user.publicKey)).toBe(usdcBefore + no)
+    // claim_winnings closed both outcome accounts and paid their rent to the user, who paid no fee.
+    for (const ata of [yesAta, noAta]) {
+      expect(await conn.getAccountInfo(ata, 'confirmed')).toBeNull()
+    }
+    expect(await conn.getBalance(user.publicKey, 'confirmed')).toBe(
+      solBefore + (outcomeRent[0] ?? 0) + (outcomeRent[1] ?? 0),
+    )
+    measured['claimed (SDK), raw mUSDC'] = Number(no)
   })
 })
