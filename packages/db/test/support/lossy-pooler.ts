@@ -23,7 +23,9 @@ const READY = msg('Z', Buffer.from('I'))
  * that matters here: it answers a transaction, hands the backend back at its ReadyForQuery, and
  * loses whatever the client pipelined behind that transaction's Sync, which is never answered
  * (the real pooler does the same: the first query of a pipelined burst returns, the others hang).
- * Every query gets no rows. `pipelined` counts the messages it lost.
+ * Every query gets no rows. `pipelined` counts the messages it lost. Transactions are not
+ * supported by the stand-in: each Sync ends the "transaction" and returns the backend, so a
+ * `BEGIN ... COMMIT` spanning several round trips is not modelled.
  */
 export async function transactionPooler() {
   let pipelined = 0

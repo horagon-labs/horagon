@@ -11,7 +11,9 @@ import postgres from 'postgres'
 export const MIGRATIONS_FOLDER = fileURLToPath(new URL('../migrations', import.meta.url))
 
 export async function migratePostgresDb(url: string): Promise<void> {
-  const client = postgres(url, { prepare: false, max: 1 })
+  // One query in flight, as in `connectPostgres`: DATABASE_URL may be the transaction-mode
+  // pooler, which never answers pipelined queries (migrations run one statement at a time).
+  const client = postgres(url, { prepare: false, max: 1, max_pipeline: 1 })
   try {
     await migratePostgres(drizzlePostgres(client), { migrationsFolder: MIGRATIONS_FOLDER })
   } finally {

@@ -23,6 +23,11 @@ export interface DbHandle {
  * query of a pipelined burst; the others are never answered and wait forever. Every deployed
  * client goes through that pooler, so the safe value is the default. Opt in only for a direct
  * or session-mode connection.
+ *
+ * `max_pipeline: 1` limits queries in flight per connection, so it does not help inside one
+ * `db.transaction` or `sql.reserve`: they hold a single connection, and queries started
+ * concurrently there (`Promise.all`, an unawaited call) still pipeline on it. Await each query in
+ * turn inside them.
  */
 export function connectPostgres(
   url: string,
