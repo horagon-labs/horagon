@@ -238,7 +238,10 @@ export const sponsoredAtas = pgTable(
     checkedAt: ts('checked_at'),
     closedSig: text('closed_sig'),
     closedAt: ts('closed_at'),
-    /** Who received the rent on close; 'unknown' when no close instruction was found. */
+    /**
+     * Who received the rent on close. Two markers: 'unknown' when no close instruction was found,
+     * and 'claim' when pm-AMM's claim_winnings closed it (rent to the user, never counted).
+     */
     closedTo: text('closed_to'),
   },
   (t) => [

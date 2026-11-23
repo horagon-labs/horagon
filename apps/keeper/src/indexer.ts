@@ -35,6 +35,7 @@ import {
 } from '@solana/web3.js'
 import type { Logger } from 'pino'
 import type { Alerter } from './alerts'
+import { base58Decode } from './base58'
 
 type TradeInsert = Parameters<typeof insertTrades>[1][number]
 type ClaimInsert = Parameters<typeof insertClaims>[1][number]
@@ -61,31 +62,6 @@ interface Ctx {
 }
 
 const TOKEN_PROGRAMS = new Set([TOKEN_PROGRAM_ID.toBase58(), TOKEN_2022_PROGRAM_ID.toBase58()])
-const B58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
-
-/** Base58 text to bytes: a transaction response gives inner instruction data in base58. */
-export function base58Decode(text: string): Uint8Array {
-  const bytes: number[] = []
-  for (const ch of text) {
-    let carry = B58.indexOf(ch)
-    if (carry < 0) throw new Error('bad base58')
-    for (let i = 0; i < bytes.length; i++) {
-      carry += (bytes[i] as number) * 58
-      bytes[i] = carry & 0xff
-      carry >>= 8
-    }
-    while (carry > 0) {
-      bytes.push(carry & 0xff)
-      carry >>= 8
-    }
-  }
-  for (const ch of text) {
-    if (ch !== '1') break
-    bytes.push(0)
-  }
-  return Uint8Array.from(bytes.reverse())
-}
-
 /**
  * Signed token movements (by account index) of the SPL Token CPIs inside one instruction.
  * Undefined when a CPI names a program or account past the static keys (a lookup-table key):

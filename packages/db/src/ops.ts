@@ -22,6 +22,9 @@ import {
   wallets,
 } from './schema'
 
+/** `closed_to` of an ATA that pm-AMM's claim_winnings closed (rent to the user, as expected). */
+export const CLAIM_CLOSE = 'claim'
+
 export type SponsoredAtaRow = typeof sponsoredAtas.$inferSelect
 
 /**
@@ -214,7 +217,10 @@ export async function markAtaClosed(
     )
 }
 
-/** How many sponsor-paid ATAs `wallet` closed with the rent going anywhere but `sponsor`. */
+/**
+ * How many sponsor-paid ATAs `wallet` closed with the rent going anywhere but `sponsor`. A close
+ * recorded as 'claim' (pm-AMM's claim_winnings, rent to the user) is expected and not counted.
+ */
 export async function atasClosedAway(db: Db, wallet: string, sponsor: string): Promise<number> {
   const rows = await db
     .select({ n: count() })
@@ -224,6 +230,7 @@ export async function atasClosedAway(db: Db, wallet: string, sponsor: string): P
         eq(sponsoredAtas.wallet, wallet),
         isNotNull(sponsoredAtas.closedTo),
         ne(sponsoredAtas.closedTo, sponsor),
+        ne(sponsoredAtas.closedTo, CLAIM_CLOSE),
       ),
     )
   return Number(rows[0]?.n ?? 0)

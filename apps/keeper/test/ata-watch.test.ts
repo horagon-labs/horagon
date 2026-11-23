@@ -21,6 +21,7 @@ import {
 import {
   Keypair,
   type PublicKey,
+  SystemProgram,
   type TransactionInstruction,
   TransactionMessage,
   VersionedTransaction,
@@ -86,6 +87,43 @@ function closedInside(
   return { tx: confirmed(sponsor, [ix], [{ index: 0, instructions }]), outcome }
 }
 
+/**
+ * A transaction of `ixs` where the inner group at each `index` closes `ata` (rent to `to`,
+ * authority `owner`) through a Token CPI.
+ */
+function withCloses(
+  ixs: TransactionInstruction[],
+  closes: Array<{ index: number; ata: PublicKey; to: PublicKey; owner: PublicKey }>,
+) {
+  // The close instructions only register their keys: they are cut from the top level below.
+  const message = new TransactionMessage({
+    payerKey: sponsor,
+    recentBlockhash: 'EkSnNWid2cvwEVnVx9aBqawnmiCNiDgp3gUdkDPTKN1N',
+    instructions: [
+      ...ixs,
+      ...closes.map((c) => createCloseAccountInstruction(c.ata, c.to, c.owner)),
+    ],
+  }).compileToV0Message()
+  message.compiledInstructions = message.compiledInstructions.slice(0, ixs.length)
+  const at = (k: PublicKey) => message.staticAccountKeys.findIndex((x) => x.equals(k))
+  const inner = closes.map((c) => ({
+    index: c.index,
+    instructions: [
+      {
+        programIdIndex: at(TOKEN_PROGRAM_ID),
+        accounts: [at(c.ata), at(c.to), at(c.owner)],
+        data: CLOSE_DATA_B58,
+      },
+    ],
+  }))
+  return {
+    slot: 1,
+    blockTime: 1,
+    transaction: new VersionedTransaction(message),
+    meta: { err: null, innerInstructions: inner },
+  } as unknown as VersionedTransactionResponse
+}
+
 describe('closeOf', () => {
   it('finds where a CloseAccount of this ATA sent the rent', () => {
     const owner = key()
@@ -106,6 +144,60 @@ describe('closeOf', () => {
       expect(closeOf(tx, ata.toBase58())).toEqual({ to: user.toBase58(), byClaim: true })
     }
     expect(closeOf(tx, ataAddress({ owner: user, mint }).toBase58())).toBeUndefined()
+  })
+
+  it('maps an inner close to its own parent: a claim next to another program is not the claim', () => {
+    const user = key()
+    const market = key()
+    const yes = ataAddress({ owner: user, mint: deriveYesMint(market) })
+    const other = SystemProgram.transfer({ fromPubkey: user, toPubkey: key(), lamports: 1 })
+    const claim = buildClaimWinningsIx({ user, market, collateralMint: mint })
+    // The close sits in the inner group of instruction 1 (the other program), not the claim's.
+    const tx = withCloses([claim, other], [{ index: 1, ata: yes, to: user, owner: user }])
+    expect(closeOf(tx, yes.toBase58())).toEqual({ to: user.toBase58(), byClaim: false })
+    // The same close under instruction 0 is the claim's.
+    const own = withCloses([claim, other], [{ index: 0, ata: yes, to: user, owner: user }])
+    expect(closeOf(own, yes.toBase58())).toEqual({ to: user.toBase58(), byClaim: true })
+  })
+
+  it('gives each claim of a two-market transaction its own closes', () => {
+    const user = key()
+    const [a, b] = [key(), key()]
+    const ataA = ataAddress({ owner: user, mint: deriveYesMint(a) })
+    const ataB = ataAddress({ owner: user, mint: deriveNoMint(b) })
+    const claims = [a, b].map((market) =>
+      buildClaimWinningsIx({ user, market, collateralMint: mint }),
+    )
+    const tx = withCloses(claims, [
+      { index: 0, ata: ataA, to: user, owner: user },
+      { index: 1, ata: ataB, to: user, owner: user },
+    ])
+    for (const ata of [ataA, ataB]) {
+      expect(closeOf(tx, ata.toBase58())).toEqual({ to: user.toBase58(), byClaim: true })
+    }
+    // Each close is only a claim close under its own parent: swapped, both are flagged.
+    const swapped = withCloses(claims, [
+      { index: 1, ata: ataA, to: user, owner: user },
+      { index: 0, ata: ataB, to: user, owner: user },
+    ])
+    for (const ata of [ataA, ataB]) {
+      expect(closeOf(swapped, ata.toBase58())).toEqual({ to: user.toBase58(), byClaim: false })
+    }
+  })
+
+  it('flags a claim on one market that appears to close an ATA of another market', () => {
+    const user = key()
+    const [a, b] = [key(), key()]
+    const claimA = buildClaimWinningsIx({ user, market: a, collateralMint: mint })
+    for (const mintOf of [deriveYesMint, deriveNoMint]) {
+      const ataB = ataAddress({ owner: user, mint: mintOf(b) })
+      const tx = withCloses([claimA], [{ index: 0, ata: ataB, to: user, owner: user }])
+      expect(closeOf(tx, ataB.toBase58())).toEqual({ to: user.toBase58(), byClaim: false })
+    }
+    // Nor does it close another owner's account of market A.
+    const stranger = ataAddress({ owner: key(), mint: deriveYesMint(a) })
+    const tx = withCloses([claimA], [{ index: 0, ata: stranger, to: user, owner: user }])
+    expect(closeOf(tx, stranger.toBase58())).toEqual({ to: user.toBase58(), byClaim: false })
   })
 
   it('does not take a close inside any other instruction for a claim', () => {
@@ -238,6 +330,8 @@ describe('watchSponsoredAtas', () => {
     expect(await atasClosedAway(h.db, wallet.toBase58(), sponsor.toBase58())).toBe(0)
     const rows = await h.db.select().from(schema.sponsoredAtas)
     expect(rows.map((r) => r.closedSig)).toEqual(['claim-sig', 'claim-sig'])
+    // The marker says what it was; the rent went to the user, not the sponsor.
+    expect(rows.map((r) => r.closedTo)).toEqual(['claim', 'claim'])
     expect(await sponsoredAtasToCheck(h.db)).toEqual([])
   })
 
@@ -308,7 +402,10 @@ describe('watchSponsoredAtas', () => {
         sent.push(k)
       },
     },
-    log: { warn: (obj: Record<string, unknown>) => warns.push(obj) } as unknown as Logger,
+    log: {
+      warn: (obj: Record<string, unknown>) => warns.push(obj),
+      info: () => {},
+    } as unknown as Logger,
     now: () => NOW_SECS,
     ...extra,
   })
@@ -383,5 +480,109 @@ describe('watchSponsoredAtas', () => {
     })
     expect(await watchSponsoredAtas(deps)).toEqual({ checked: 1, closed: 1, flagged: 1 })
     expect(await atasClosedAway(h.db, row?.wallet ?? '', sponsor.toBase58())).toBe(1)
+  })
+
+  /** A connection whose address history is `sigs` (newest first), paged like the RPC. */
+  const history = (sigs: string[], tx: (sig: string) => VersionedTransactionResponse | null) => {
+    const calls: Array<{ limit?: number; before?: string; until?: string }> = []
+    return {
+      calls,
+      connection: {
+        getSignaturesForAddress: async (
+          _k: PublicKey,
+          o: { limit?: number; before?: string; until?: string },
+        ) => {
+          calls.push(o)
+          const from = o.before ? sigs.indexOf(o.before) + 1 : 0
+          const until = o.until ? sigs.indexOf(o.until) : -1
+          return sigs
+            .slice(from, until < 0 ? sigs.length : until)
+            .slice(0, o.limit ?? 1000)
+            .map((signature) => ({ signature, err: null }))
+        },
+        getTransaction: async (sig: string) => tx(sig),
+      },
+    }
+  }
+  const transfer = () =>
+    confirmed(sponsor, [createTransferCheckedInstruction(key(), mint, key(), key(), 1n, 6)])
+
+  it('finds a claim pushed past the first 10 signatures by cheap transactions naming the address', async () => {
+    const wallet = key()
+    const { tx: claim, outcome } = closedInside(buildClaimWinningsIx, wallet)
+    await recordSponsoredAtas(h.db, [
+      {
+        ata: (outcome[0] as PublicKey).toBase58(),
+        wallet: wallet.toBase58(),
+        mint: mint.toBase58(),
+        createdSig: 'create-sig',
+        createdAt: new Date('2026-11-24T01:00:00Z'),
+      },
+    ])
+    const noise = Array.from({ length: 25 }, (_, i) => `noise-${i}`)
+    const h2 = history([...noise, 'claim-sig', 'create-sig'], (sig) =>
+      sig === 'claim-sig' ? claim : transfer(),
+    )
+    const sent: string[] = []
+    expect(await watchSponsoredAtas(depsWith(h2.connection, {}, sent))).toEqual({
+      checked: 1,
+      closed: 1,
+      flagged: 0,
+    })
+    expect(sent).toEqual([])
+    expect(await atasClosedAway(h.db, wallet.toBase58(), sponsor.toBase58())).toBe(0)
+    const [saved] = await h.db.select().from(schema.sponsoredAtas)
+    expect([saved?.closedSig, saved?.closedTo]).toEqual(['claim-sig', 'claim'])
+    // Asked to stop at the creation signature.
+    expect(h2.calls.every((c) => c.until === 'create-sig')).toBe(true)
+  })
+
+  it('stops reading at the creation signature', async () => {
+    await record(1)
+    const read: string[] = []
+    const h2 = history(['a', 'b', 'c0', 'older'], (sig) => {
+      read.push(sig)
+      return null
+    })
+    // Even when the RPC ignores `until`, nothing at or before the creation is read.
+    const ignoring = {
+      ...h2.connection,
+      getSignaturesForAddress: async (k: PublicKey, o: object) =>
+        h2.connection.getSignaturesForAddress(k, { ...o, until: undefined }),
+    }
+    await watchSponsoredAtas(depsWith(ignoring))
+    expect(read).toEqual(['a', 'b'])
+  })
+
+  it('pages with before and gives up at 1,000 signatures in total, with a warning', async () => {
+    const [row] = await record(1)
+    const sigs = Array.from({ length: 2500 }, (_, i) => `s${i}`)
+    const read: string[] = []
+    const h2 = history(sigs, (sig) => {
+      read.push(sig)
+      return transfer()
+    })
+    // The RPC hands out 400 at a time here, so the walk needs several pages.
+    const paged = {
+      ...h2.connection,
+      getSignaturesForAddress: async (k: PublicKey, o: { limit?: number }) =>
+        h2.connection.getSignaturesForAddress(k, { ...o, limit: Math.min(o.limit ?? 0, 400) }),
+    }
+    const warns: Array<Record<string, unknown>> = []
+    const sent: string[] = []
+    expect(await watchSponsoredAtas(depsWith(paged, {}, sent, warns))).toEqual({
+      checked: 1,
+      closed: 1,
+      flagged: 1,
+    })
+    expect(read).toHaveLength(1000)
+    expect(h2.calls.map((c) => c.before)).toEqual([undefined, 's399', 's799'])
+    expect(h2.calls.every((c) => (c.limit ?? 0) <= 1000)).toBe(true)
+    const capWarns = warns.filter((w) => w.signatures === 1000)
+    expect(capWarns).toHaveLength(1)
+    expect(JSON.stringify(capWarns[0])).toContain(row?.ata ?? 'missing')
+    expect(sent).toHaveLength(1)
+    const [saved] = await h.db.select().from(schema.sponsoredAtas)
+    expect([saved?.closedSig, saved?.closedTo]).toEqual([null, 'unknown'])
   })
 })

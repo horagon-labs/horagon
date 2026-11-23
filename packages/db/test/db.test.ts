@@ -488,6 +488,10 @@ describe('sponsored ATAs', () => {
     await markAtaClosed(h.db, 'b', { closedSig: 's2', closedAt, closedTo: 'ELSEWHERE' })
     await markAtaClosed(h.db, 'c', { closedSig: null, closedAt, closedTo: 'unknown' })
     expect(await atasClosedAway(h.db, 'W', 'SPONSOR')).toBe(2)
+    // A claim_winnings close ('claim': pm-AMM pays its rent to the user) is not counted either.
+    await recordSponsoredAtas(h.db, [row('d')])
+    await markAtaClosed(h.db, 'd', { closedSig: 's3', closedAt, closedTo: 'claim' })
+    expect(await atasClosedAway(h.db, 'W', 'SPONSOR')).toBe(2)
     expect(await atasClosedAway(h.db, 'other', 'SPONSOR')).toBe(0)
     expect(await sponsoredAtasToCheck(h.db)).toEqual([])
   })
