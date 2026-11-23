@@ -49,6 +49,11 @@ export interface HoragonClientOptions {
   fetch?: typeof fetch
   /** Per request (default 10 s). */
   timeoutMs?: number
+  /**
+   * For `trade.submit` only (default 30 s). The sponsor waits for the RPC to take the
+   * transaction, which can pass 10 s on a cold path; giving up early would hide a send that lands.
+   */
+  submitTimeoutMs?: number
   /** Extra attempts for a GET that hit the network or a 5xx (default 2). */
   retries?: number
   /** Between GET retries (default 300 ms, doubled each time). */
@@ -61,6 +66,8 @@ interface RequestOpts {
   as?: 'json' | 'text'
   /** Upper bound for this call, below the client's own timeout. */
   timeoutMs?: number
+  /** Replaces the client's timeout for this call (may be longer). */
+  exactTimeoutMs?: number
   retries?: number
 }
 
@@ -101,6 +108,7 @@ export class HoragonClient {
   private readonly base: string
   private readonly fetchImpl: typeof fetch
   private readonly timeoutMs: number
+  private readonly submitTimeoutMs: number
   private readonly retries: number
   private readonly retryDelayMs: number
 
@@ -108,6 +116,7 @@ export class HoragonClient {
     this.base = opts.baseUrl.replace(/\/+$/, '')
     this.fetchImpl = opts.fetch ?? globalThis.fetch.bind(globalThis)
     this.timeoutMs = opts.timeoutMs ?? 10_000
+    this.submitTimeoutMs = opts.submitTimeoutMs ?? 30_000
     this.retries = opts.retries ?? 2
     this.retryDelayMs = opts.retryDelayMs ?? 300
   }
@@ -138,7 +147,10 @@ export class HoragonClient {
     /** A user-signed sponsored transaction, base64. Returns at once; poll `status`. */
     submit: async (tx: string): Promise<string> => {
       try {
-        return (await this.post('/tx/submit', { tx }, SubmitResponseSchema)).signature
+        const body = await this.post('/tx/submit', { tx }, SubmitResponseSchema, {
+          exactTimeoutMs: this.submitTimeoutMs,
+        })
+        return body.signature
       } catch (err) {
         if (isHoragonError(err) && err.code === 'NETWORK') {
           // The sponsor may have sent it before the answer was lost. Rebuilding would trade twice.
@@ -260,8 +272,9 @@ export class HoragonClient {
     path: string,
     body: unknown,
     schema: S,
+    opts: RequestOpts = {},
   ): Promise<z.infer<S>> {
-    const { data } = await this.request('POST', path, body)
+    const { data } = await this.request('POST', path, body, opts)
     return parse(schema, data, path)
   }
 
@@ -303,7 +316,9 @@ export class HoragonClient {
             ? { accept: 'application/json' }
             : { 'content-type': 'application/json' },
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-        signal: AbortSignal.timeout(Math.min(this.timeoutMs, opts.timeoutMs ?? this.timeoutMs)),
+        signal: AbortSignal.timeout(
+          opts.exactTimeoutMs ?? Math.min(this.timeoutMs, opts.timeoutMs ?? this.timeoutMs),
+        ),
       })
     } catch (cause) {
       throw new HoragonError('NETWORK', `${method} ${path}: no response`, { cause })

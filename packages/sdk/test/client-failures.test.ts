@@ -200,6 +200,41 @@ describe('query and path building', () => {
 })
 
 describe('trade.submit', () => {
+  /** A server that answers after `ms`, unless the client gave up (its abort signal) first. */
+  const slow = (ms: number) =>
+    ((_u: string, init?: RequestInit) =>
+      new Promise<Response>((res, rej) => {
+        const t = setTimeout(() => res(json({ signature: SIG })), ms)
+        init?.signal?.addEventListener('abort', () => {
+          clearTimeout(t)
+          rej(init.signal?.reason)
+        })
+      })) as typeof fetch
+
+  it('waits longer than the client timeout for a submit, and only for a submit', async () => {
+    const c = new HoragonClient({
+      baseUrl: 'https://h.test',
+      retries: 0,
+      timeoutMs: 20,
+      submitTimeoutMs: 400,
+      fetch: slow(80),
+    })
+    await expect(c.trade.submit('AAAA')).resolves.toBe(SIG)
+    await expect(c.faucet('w')).rejects.toMatchObject({ code: 'NETWORK' })
+  })
+
+  it('a submit that does time out ends as NETWORK with the do-not-rebuild hint', async () => {
+    const c = new HoragonClient({
+      baseUrl: 'https://h.test',
+      retries: 0,
+      submitTimeoutMs: 20,
+      fetch: slow(200),
+    })
+    const err = (await c.trade.submit('AAAA').catch((e: unknown) => e)) as { hint: string }
+    expect(err).toMatchObject({ code: 'NETWORK' })
+    expect(err.hint).toContain('Do not rebuild')
+  })
+
   /** The API's answer to a send whose outcome is unknown (RFC 9457 extension `signature`). */
   const unsureSend = (extra: Record<string, unknown> = { signature: SIG }) =>
     json(
