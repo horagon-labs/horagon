@@ -26,6 +26,8 @@ RestartSec=5
 # create, halt, finalize or recycle is refused on chain, but a treasury top-up can land twice
 # (accepted: play money, inside the project's own accounts).
 # A second SIGTERM exits at once.
+# The keeper also exits on a stall (nothing happened for KEEPER_STALL_SECS: a lost database
+# response); Restart=always brings it back.
 KillSignal=SIGTERM
 TimeoutStopSec=120
 MemoryMax=768M

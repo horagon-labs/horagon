@@ -244,6 +244,9 @@ proposed. A market that is not open prints `<gameId> is already <status>; nothin
 ssh "$HORAGON_VPS" systemctl --user restart horagon-keeper
 ```
 
+- The keeper exits by itself when nothing has happened for `KEEPER_STALL_SECS` (default 120 s;
+  no step, heartbeat, log line or RPC answer, as when a database response is lost), logging
+  `keeper stalled: exiting so the service restarts` at fatal; systemd restarts it after 5 s.
 - A stop (SIGTERM) ends the round after the step in progress. The unit waits up to 120 s
   (`TimeoutStopSec`): one transaction wait (90 s) plus an RPC timeout. A step that holds
   several sends can take longer and is then killed. A second SIGTERM exits at once.

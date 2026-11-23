@@ -342,6 +342,13 @@ describe('loadConfig', () => {
     expect(c.priority).toEqual({ normal: 10_000, halt: 200_000 })
     expect(c.faucetUrl).toBe('https://pm-amm-devnet.vercel.app/api/faucet')
     expect(c.logLevel).toBe('info')
+    expect(c.stallSecs).toBe(120)
+  })
+
+  it('reads KEEPER_STALL_SECS and refuses less than 30', () => {
+    expect(loadConfig(env({ KEEPER_STALL_SECS: '45' })).stallSecs).toBe(45)
+    expect(loadConfig(env({ KEEPER_STALL_SECS: '30' })).stallSecs).toBe(30)
+    expect(() => loadConfig(env({ KEEPER_STALL_SECS: '29' }))).toThrow(/KEEPER_STALL_SECS/)
   })
 
   it('resolves a relative key path from the repo root, not the working directory', () => {

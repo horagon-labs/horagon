@@ -11,9 +11,10 @@ import {
   isHoragonError,
 } from '@horagon/sdk'
 import { Connection, Keypair, PublicKey } from '@solana/web3.js'
-import pino, { type DestinationStream, type Logger } from 'pino'
+import pino, { type DestinationStream, type LogFn, type Logger } from 'pino'
 import { type ZodError, z } from 'zod'
 import { DEFAULT_SEEDS, DEFAULT_TIMINGS, type SeedPolicy, type Timings } from './planner'
+import { DEFAULT_STALL_SECS, MIN_STALL_SECS } from './stall'
 
 export { MAINNET_GENESIS_HASH } from '@horagon/sdk'
 
@@ -74,6 +75,8 @@ const EnvSchema = z.object({
     .default('https://pm-amm-devnet.vercel.app/api/faucet'),
   /** The API's sponsor (public key only): turns on recording and watching the ATAs it pays for. */
   SPONSOR_PUBKEY: z.string().optional(),
+  /** Seconds without any activity before the keeper exits so systemd restarts it. */
+  KEEPER_STALL_SECS: z.coerce.number().int().min(MIN_STALL_SECS).default(DEFAULT_STALL_SECS),
   LOG_LEVEL: z.enum(['trace', 'debug', 'info', 'warn', 'error']).default('info'),
 })
 
@@ -100,6 +103,7 @@ export interface KeeperConfig {
   priority: { normal: number; halt: number }
   faucetUrl: string
   sponsor: PublicKey | null
+  stallSecs: number
   logLevel: string
 }
 
@@ -263,11 +267,17 @@ export function rpcEndpoints(urls: readonly string[], wsList?: string): RpcEndpo
 /** Every RPC call gets this long, combined with any signal the caller passes. */
 export const RPC_TIMEOUT_MS = 15_000
 
-export function timeoutFetch(ms: number, base: typeof fetch = fetch): typeof fetch {
+/** `onActivity` runs when a call completes, answered or failed (the stall guard's clock). */
+export function timeoutFetch(
+  ms: number,
+  base: typeof fetch = fetch,
+  onActivity?: () => void,
+): typeof fetch {
   return (input, init) => {
     const timeout = AbortSignal.timeout(ms)
     const signal = init?.signal ? AbortSignal.any([init.signal, timeout]) : timeout
-    return base(input, { ...init, signal })
+    const call = base(input, { ...init, signal })
+    return onActivity ? call.finally(onActivity) : call
   }
 }
 
@@ -279,12 +289,12 @@ export function timeoutFetch(ms: number, base: typeof fetch = fetch): typeof fet
 export function makeConnection(
   url: string,
   wsUrl?: string,
-  opts: { fetchImpl?: typeof fetch; timeoutMs?: number } = {},
+  opts: { fetchImpl?: typeof fetch; timeoutMs?: number; onActivity?: () => void } = {},
 ): Connection {
   return new Connection(url, {
     commitment: 'confirmed',
     disableRetryOnRateLimit: true,
-    fetch: timeoutFetch(opts.timeoutMs ?? RPC_TIMEOUT_MS, opts.fetchImpl),
+    fetch: timeoutFetch(opts.timeoutMs ?? RPC_TIMEOUT_MS, opts.fetchImpl, opts.onActivity),
     ...(wsUrl ? { wsEndpoint: wsUrl } : {}),
   })
 }
@@ -359,20 +369,35 @@ export function loadConfig(
     priority: { normal: e.PRIORITY_MICROLAMPORTS, halt: e.HALT_PRIORITY_MICROLAMPORTS },
     faucetUrl: e.HORAGON_FAUCET_URL,
     sponsor: e.SPONSOR_PUBKEY ? publicKey('SPONSOR_PUBKEY', e.SPONSOR_PUBKEY) : null,
+    stallSecs: e.KEEPER_STALL_SECS,
     logLevel: e.LOG_LEVEL,
   }
 }
 
-/** JSON logs for journald; `destination` is for tests. */
+/**
+ * JSON logs for journald; `destination` is for tests. `onActivity` runs on every log call that
+ * is emitted (the stall guard's clock); the output itself is unchanged.
+ */
 export function createLogger(
   level: string,
   service = 'keeper',
   destination?: DestinationStream,
+  onActivity?: () => void,
 ): Logger {
   const options = {
     level,
     base: { service },
     redact: { paths: ['token', '*.token', 'secretKey', '*.secretKey'], censor: '[redacted]' },
+    ...(onActivity
+      ? {
+          hooks: {
+            logMethod(this: Logger, args: Parameters<LogFn>, method: LogFn) {
+              onActivity()
+              method.apply(this, args)
+            },
+          },
+        }
+      : {}),
   }
   return destination ? pino(options, destination) : pino(options)
 }

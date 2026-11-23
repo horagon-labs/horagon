@@ -4,6 +4,7 @@
 // indexer keeps failing.
 import { errorSummary } from '@horagon/sdk'
 import type { Logger } from 'pino'
+import type { StallGuard } from './stall'
 
 export type StepResult<T> = { ok: true; value: T } | { ok: false; error: unknown }
 
@@ -12,12 +13,16 @@ export async function runStep<T>(
   log: Logger,
   name: string,
   fn: () => Promise<T>,
+  guard?: Pick<StallGuard, 'step'>,
 ): Promise<StepResult<T>> {
+  guard?.step(name)
   try {
     return { ok: true, value: await fn() }
   } catch (error) {
     log.error({ step: name, error: errorSummary(error).message }, 'step failed')
     return { ok: false, error }
+  } finally {
+    guard?.step(null)
   }
 }
 

@@ -19,6 +19,7 @@ import type { Feed } from './feeds/types'
 import { indexOnce } from './indexer'
 import { dueEvery, FailureStreak, type RoundStep, roundSteps, runRound, runStep } from './loop'
 import { scheduleTick } from './schedule'
+import { StallGuard, watchStall } from './stall'
 import { Keeper } from './tick'
 import { treasuryTick } from './treasury'
 
@@ -38,7 +39,11 @@ async function faucetClaim(url: string, wallet: string): Promise<void> {
 
 async function main(): Promise<void> {
   const cfg = loadConfig()
-  const log = createLogger(cfg.logLevel)
+  // Any log line, finished RPC call, step or heartbeat is activity; a silence of
+  // KEEPER_STALL_SECS (a lost database response) exits the process so systemd restarts it.
+  const guard = new StallGuard(cfg.stallSecs)
+  const log = createLogger(cfg.logLevel, 'keeper', undefined, () => guard.touch())
+  watchStall(guard, log)
   const alerts: Alerter = cfg.telegram
     ? telegramAlerter({
         ...cfg.telegram,
@@ -50,7 +55,7 @@ async function main(): Promise<void> {
   // Before any other RPC or DB work: never mainnet, and the cluster configured. Only the
   // verified connections are used.
   const connections = await verifyCluster(
-    cfg.rpcs.map((r) => makeConnection(r.url, r.wsUrl)),
+    cfg.rpcs.map((r) => makeConnection(r.url, r.wsUrl, { onActivity: () => guard.touch() })),
     cfg.cluster,
     {
       log,
@@ -118,7 +123,7 @@ async function main(): Promise<void> {
   const ataWatchDue = dueEvery(ATA_WATCH_SECS)
   const tickStreak = new FailureStreak('tick')
   const indexStreak = new FailureStreak('index')
-  const step = <T>(name: string, fn: () => Promise<T>) => runStep(log, name, fn)
+  const step = <T>(name: string, fn: () => Promise<T>) => runStep(log, name, fn, guard)
 
   log.info(
     { feed: feed.name, cluster: cfg.cluster, attestor: cfg.attestor.publicKey.toBase58() },
