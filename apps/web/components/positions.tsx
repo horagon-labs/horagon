@@ -2,11 +2,18 @@
 // Positions of the wallet (all, or one game's). The Claim all run is the wallet's
 // (WalletProvider): every copy of this list shows the same run, and one run at a time.
 import Link from 'next/link'
-import { explorerTx, usdc } from '../lib/format'
+import { explorerTx, sideLabel, usdc } from '../lib/format'
 import { ErrorText } from './error-text'
 import { useWallet } from './wallet'
 
-export function Positions({ gameId }: { gameId?: string }) {
+export function Positions({
+  gameId,
+  teams,
+}: {
+  gameId?: string
+  /** The game's teams, when this list is one game's: the portfolio carries no team names. */
+  teams?: { home: string; away: string }
+}) {
   const { portfolio, startClaims, claiming, claimed, claimError } = useWallet()
 
   const rows = (portfolio?.positions ?? []).filter((p) => !gameId || p.gameId === gameId)
@@ -25,7 +32,7 @@ export function Positions({ gameId }: { gameId?: string }) {
                   href={`/game/${p.gameId}`}
                   className="font-medium underline-offset-2 hover:underline"
                 >
-                  {p.side.toUpperCase()} · {usdc(p.shares)} shares
+                  {sideLabel(p.side, teams)} · {usdc(p.shares)} shares
                 </Link>
                 <p className="text-zinc-500">
                   cost {usdc(p.costUsdc)} · value {usdc(p.valueUsdc)} · {p.marketStatus}

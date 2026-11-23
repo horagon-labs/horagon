@@ -1,7 +1,16 @@
 // Display helpers. Prices are the home team's win probability (YES); AWAY shows 1 - price.
 import type { Game, GameHistory } from '@horagon/sdk'
 
-export const CLUSTER = 'devnet'
+/**
+ * The cluster the explorer links point at. `NEXT_PUBLIC_HORAGON_CLUSTER` is HORAGON_CLUSTER, made
+ * public by next.config.ts (a cluster name is not a secret); anything but localnet is devnet.
+ */
+export type Cluster = 'devnet' | 'localnet'
+export const CLUSTER: Cluster =
+  process.env.NEXT_PUBLIC_HORAGON_CLUSTER === 'localnet' ? 'localnet' : 'devnet'
+
+/** The local validator the explorer is pointed at on localnet (surfpool default). */
+const LOCAL_RPC = 'http://127.0.0.1:8899'
 
 // Edges stay honest while a market trades: under 1 shows "<1", over 99 shows ">99".
 function whole(p: number | null | undefined, unit: string): string {
@@ -127,7 +136,15 @@ export function scoringRuns(snapshots: GameHistory['snapshots'], min = 8): RunMa
 }
 
 export const shortKey = (k: string) => `${k.slice(0, 4)}…${k.slice(-4)}`
-export const explorerTx = (sig: string) =>
-  `https://explorer.solana.com/tx/${sig}?cluster=${CLUSTER}`
-export const explorerAddress = (addr: string) =>
-  `https://explorer.solana.com/address/${addr}?cluster=${CLUSTER}`
+const explorerQuery = (cluster: Cluster) =>
+  cluster === 'localnet'
+    ? `cluster=custom&customUrl=${encodeURIComponent(LOCAL_RPC)}`
+    : `cluster=${cluster}`
+export const explorerTx = (sig: string, cluster: Cluster = CLUSTER) =>
+  `https://explorer.solana.com/tx/${sig}?${explorerQuery(cluster)}`
+export const explorerAddress = (addr: string, cluster: Cluster = CLUSTER) =>
+  `https://explorer.solana.com/address/${addr}?${explorerQuery(cluster)}`
+
+/** The team a side stands for when the game is known (`teams`); HOME or AWAY otherwise. */
+export const sideLabel = (side: 'home' | 'away', teams?: { home: string; away: string }) =>
+  teams ? teams[side] : side.toUpperCase()

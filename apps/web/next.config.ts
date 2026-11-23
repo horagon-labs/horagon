@@ -6,6 +6,8 @@ const config: NextConfig = {
   // Server-only dependencies with native or dynamic requires stay outside the bundle.
   serverExternalPackages: ['pino', 'postgres', '@electric-sql/pglite'],
   poweredByHeader: false,
+  // The cluster name (not a secret) reaches the browser, so explorer links match the cluster.
+  env: { NEXT_PUBLIC_HORAGON_CLUSTER: process.env.HORAGON_CLUSTER ?? 'devnet' },
   async headers() {
     return [
       {

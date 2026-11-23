@@ -75,7 +75,7 @@ export function GameView({ id }: { id: string }) {
       )}
       <section>
         <h2 className="mb-1 font-semibold">Your position</h2>
-        <Positions gameId={game.id} />
+        <Positions gameId={game.id} teams={{ home: game.home, away: game.away }} />
       </section>
       <details>
         <summary className="cursor-pointer font-semibold">Market rules</summary>

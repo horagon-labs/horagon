@@ -10,6 +10,7 @@ import {
   percent,
   scoringRuns,
   shortKey,
+  sideLabel,
   tonightOrder,
   usdc,
 } from '../lib/format'
@@ -85,6 +86,24 @@ describe('countdown and prices', () => {
     expect(shortKey('So11111111111111111111111111111111111111112')).toBe('So11…1112')
     expect(explorerTx('abc')).toBe('https://explorer.solana.com/tx/abc?cluster=devnet')
     expect(explorerAddress('abc')).toBe('https://explorer.solana.com/address/abc?cluster=devnet')
+  })
+
+  it('points a localnet link at the local validator (custom cluster), never at devnet', () => {
+    expect(explorerTx('abc', 'localnet')).toBe(
+      'https://explorer.solana.com/tx/abc?cluster=custom&customUrl=http%3A%2F%2F127.0.0.1%3A8899',
+    )
+    expect(explorerAddress('abc', 'localnet')).toBe(
+      'https://explorer.solana.com/address/abc?cluster=custom&customUrl=http%3A%2F%2F127.0.0.1%3A8899',
+    )
+    expect(explorerTx('abc', 'devnet')).toBe('https://explorer.solana.com/tx/abc?cluster=devnet')
+  })
+
+  it('names the team of a side, HOME or AWAY only when the game is not known', () => {
+    const teams = { home: 'MEM', away: 'LAL' }
+    expect(sideLabel('home', teams)).toBe('MEM')
+    expect(sideLabel('away', teams)).toBe('LAL')
+    expect(sideLabel('home')).toBe('HOME')
+    expect(sideLabel('away', undefined)).toBe('AWAY')
   })
 })
 
