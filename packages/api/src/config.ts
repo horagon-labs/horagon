@@ -9,6 +9,7 @@ import pino from 'pino'
 import { z } from 'zod'
 import type { ApiDeps } from './deps'
 import { pmAmmFaucet } from './faucet'
+import { RPC_TIMEOUT_MS, timeoutFetch } from './rpc-fetch'
 
 /** Base58 or a JSON byte array. A parse error never carries the value: JSON.parse quotes it. */
 export function parseSecretKey(value: string): Keypair {
@@ -111,7 +112,10 @@ export function depsFromEnv(env: Record<string, string | undefined>, db?: Db): A
       : undefined
   return {
     db: db ?? connectPostgres(need('DATABASE_URL')).db,
-    connection: new Connection(rpcUrl, 'confirmed'),
+    connection: new Connection(rpcUrl, {
+      commitment: 'confirmed',
+      fetch: timeoutFetch(RPC_TIMEOUT_MS),
+    }),
     cluster,
     program: new HoragonProgram({ collateralMint }),
     collateralMint,
