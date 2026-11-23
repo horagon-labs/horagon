@@ -28,7 +28,10 @@ describe('the API database client', () => {
 })
 
 describe('the API RPC connection', () => {
-  afterEach(() => vi.unstubAllGlobals())
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    vi.restoreAllMocks()
+  })
 
   it('times out a hung endpoint', async () => {
     const hang: typeof fetch = (_i, init) =>
@@ -45,8 +48,15 @@ describe('the API RPC connection', () => {
     await expect(pending).rejects.toThrow('caller gave up')
   })
 
-  it('is built with that timeout: every call carries an abort signal', async () => {
+  it('is built with that timeout: every call carries a 15 s abort signal', async () => {
     expect(RPC_TIMEOUT_MS).toBe(15_000)
+    // The signal is made by AbortSignal.timeout; the spy proves the value the connection uses.
+    const timeouts: number[] = []
+    const real = AbortSignal.timeout.bind(AbortSignal)
+    vi.spyOn(AbortSignal, 'timeout').mockImplementation((ms) => {
+      timeouts.push(ms)
+      return real(ms)
+    })
     let signal: AbortSignal | null | undefined
     vi.stubGlobal(
       'fetch',
@@ -59,5 +69,6 @@ describe('the API RPC connection', () => {
     void connection.getSlot().catch(() => {})
     await vi.waitFor(() => expect(signal).toBeInstanceOf(AbortSignal))
     expect(signal?.aborted).toBe(false)
+    expect(timeouts).toEqual([15_000])
   })
 })
