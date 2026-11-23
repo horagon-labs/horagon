@@ -19,8 +19,8 @@
 //     error never waits; its ProgramFailure is rethrown.
 //   - GIVE UP at the 90 s cap with an UnresolvedAttempt error ("may still land"): rebuilding
 //     there is exactly the double landing. The caller's next tick re-plans from chain state.
-// Left open: the cap counts injected sleeps, and each poll's RPC calls have no timeout of their
-// own, so the wall-clock wait can be longer (Task 20 sets a fetch timeout on the Connection).
+// Left open: the cap counts injected sleeps, and each poll's RPC calls take as long as the
+// Connection's fetch timeout (`timeoutFetch`), so the wall-clock wait can be longer than 90 s.
 import {
   errorSummary,
   failedProgramError,

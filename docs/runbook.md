@@ -245,8 +245,11 @@ ssh "$HORAGON_VPS" systemctl --user restart horagon-keeper
 ```
 
 - The keeper exits by itself when nothing has happened for `KEEPER_STALL_SECS` (default 120 s;
-  no step, heartbeat, log line or RPC answer, as when a database response is lost), logging
-  `keeper stalled: exiting so the service restarts` at fatal; systemd restarts it after 5 s.
+  no step, heartbeat, log line or RPC answer, as when a database response is lost; the check runs
+  every 15 s, so it fires 120 to 135 s after the last sign of life), logging
+  `keeper stalled: exiting so the service restarts` at fatal; systemd restarts it after 5 s. ESPN
+  fetches do not count as activity and the schedule step can be silent for about 70 s in the
+  worst case, so a value under about 90 can fire falsely on a healthy keeper.
 - A stop (SIGTERM) ends the round after the step in progress. The unit waits up to 120 s
   (`TimeoutStopSec`): one transaction wait (90 s) plus an RPC timeout. A step that holds
   several sends can take longer and is then killed. A second SIGTERM exits at once.
