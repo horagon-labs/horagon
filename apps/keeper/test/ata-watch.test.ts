@@ -407,6 +407,7 @@ describe('watchSponsoredAtas', () => {
       info: () => {},
     } as unknown as Logger,
     now: () => NOW_SECS,
+    traces: new Map(),
     ...extra,
   })
 
@@ -471,11 +472,13 @@ describe('watchSponsoredAtas', () => {
   it('records unknown when the signatures failed or their transactions are gone', async () => {
     const [row] = await record(1)
     const deps = depsWith({
-      getSignaturesForAddress: async () =>
-        [
-          { signature: 'failed', err: { InstructionError: [0, 'x'] } },
-          { signature: 'gone', err: null },
-        ] as never,
+      getSignaturesForAddress: async (_k: PublicKey, o: { before?: string }) =>
+        o.before
+          ? []
+          : ([
+              { signature: 'failed', err: { InstructionError: [0, 'x'] } },
+              { signature: 'gone', err: null },
+            ] as never),
       getTransaction: async () => null,
     })
     expect(await watchSponsoredAtas(deps)).toEqual({ checked: 1, closed: 1, flagged: 1 })
@@ -554,35 +557,108 @@ describe('watchSponsoredAtas', () => {
     expect(read).toEqual(['a', 'b'])
   })
 
-  it('pages with before and gives up at 1,000 signatures in total, with a warning', async () => {
-    const [row] = await record(1)
-    const sigs = Array.from({ length: 2500 }, (_, i) => `s${i}`)
-    const read: string[] = []
+  /** A row whose address history is `noise` cheap transactions, then the claim, then the creation. */
+  const flooded = async (noise: number) => {
+    const wallet = key()
+    const { tx: claim, outcome } = closedInside(buildClaimWinningsIx, wallet)
+    const ata = outcome[0] as PublicKey
+    await recordSponsoredAtas(h.db, [
+      {
+        ata: ata.toBase58(),
+        wallet: wallet.toBase58(),
+        mint: mint.toBase58(),
+        createdSig: 'create-sig',
+        createdAt: new Date('2026-11-24T01:00:00Z'),
+      },
+    ])
+    const sigs = [
+      ...Array.from({ length: noise }, (_, i) => `noise-${i}`),
+      'claim-sig',
+      'create-sig',
+    ]
+    let txCalls = 0
     const h2 = history(sigs, (sig) => {
-      read.push(sig)
-      return transfer()
+      txCalls++
+      return sig === 'claim-sig' ? claim : transfer()
     })
-    // The RPC hands out 400 at a time here, so the walk needs several pages.
-    const paged = {
-      ...h2.connection,
-      getSignaturesForAddress: async (k: PublicKey, o: { limit?: number }) =>
-        h2.connection.getSignaturesForAddress(k, { ...o, limit: Math.min(o.limit ?? 0, 400) }),
-    }
-    const warns: Array<Record<string, unknown>> = []
+    return { wallet, ata, h2, txCalls: () => txCalls }
+  }
+
+  it('resolves a flood larger than one pass budget to the real claim over several passes, with no flag in between', async () => {
+    const f = await flooded(450)
     const sent: string[] = []
-    expect(await watchSponsoredAtas(depsWith(paged, {}, sent, warns))).toEqual({
+    const deps = depsWith(f.h2.connection, { budget: { txCalls: 200, ms: 60_000 } }, sent)
+    const claimed = async () => atasClosedAway(h.db, f.wallet.toBase58(), sponsor.toBase58())
+    expect(await watchSponsoredAtas(deps)).toEqual({ checked: 1, closed: 0, flagged: 0 })
+    expect(f.txCalls()).toBe(200)
+    expect(await watchSponsoredAtas(deps)).toEqual({ checked: 1, closed: 0, flagged: 0 })
+    expect(f.txCalls()).toBe(400)
+    expect(sent).toEqual([])
+    expect(await claimed()).toBe(0)
+    // Each pass resumes after the oldest signature already read.
+    expect(f.h2.calls.map((c) => c.before)).toEqual([undefined, 'noise-199'])
+    // Third pass: 50 noise and the claim.
+    expect(await watchSponsoredAtas(deps)).toEqual({ checked: 1, closed: 1, flagged: 0 })
+    expect(f.h2.calls.map((c) => c.before)).toEqual([undefined, 'noise-199', 'noise-399'])
+    expect(sent).toEqual([])
+    expect(await claimed()).toBe(0)
+    const [saved] = await h.db.select().from(schema.sponsoredAtas)
+    expect([saved?.closedSig, saved?.closedTo]).toEqual(['claim-sig', 'claim'])
+  })
+
+  it('stops a pass at 200 getTransaction calls by default, leaving every row open and unflagged', async () => {
+    const f = await flooded(500)
+    await record(2)
+    const sent: string[] = []
+    const out = await watchSponsoredAtas(depsWith(f.h2.connection, {}, sent))
+    expect(out).toEqual({ checked: 3, closed: 0, flagged: 0 })
+    expect(f.txCalls()).toBe(200)
+    expect(sent).toEqual([])
+    expect(await sponsoredAtasToCheck(h.db)).toHaveLength(3)
+  })
+
+  it('stops a pass after 20 s of wall time, checked before each RPC call', async () => {
+    const f = await flooded(100)
+    let t = 0
+    const deps = depsWith(
+      {
+        ...f.h2.connection,
+        getTransaction: async (sig: string) => {
+          t += 5_000
+          return f.h2.connection.getTransaction(sig)
+        },
+      },
+      { clock: () => t },
+    )
+    expect(await watchSponsoredAtas(deps)).toEqual({ checked: 1, closed: 0, flagged: 0 })
+    expect(f.txCalls()).toBe(4)
+  })
+
+  it('flags unknown only when the walk reaches the creation without finding a close', async () => {
+    const [row] = await record(1)
+    const h2 = history(['a', 'b', 'c0'], () => transfer())
+    const sent: string[] = []
+    expect(await watchSponsoredAtas(depsWith(h2.connection, {}, sent))).toEqual({
       checked: 1,
       closed: 1,
       flagged: 1,
     })
-    expect(read).toHaveLength(1000)
-    expect(h2.calls.map((c) => c.before)).toEqual([undefined, 's399', 's799'])
-    expect(h2.calls.every((c) => (c.limit ?? 0) <= 1000)).toBe(true)
-    const capWarns = warns.filter((w) => w.signatures === 1000)
-    expect(capWarns).toHaveLength(1)
-    expect(JSON.stringify(capWarns[0])).toContain(row?.ata ?? 'missing')
+    expect(sent).toEqual([`ata-close:${row?.wallet}`])
+  })
+
+  it('raises one ata-trace alert after 6 consecutive cut-off passes, and not a flag', async () => {
+    const f = await flooded(80)
+    const sent: string[] = []
+    const warns: Array<Record<string, unknown>> = []
+    const deps = depsWith(f.h2.connection, { budget: { txCalls: 5, ms: 60_000 } }, sent, warns)
+    for (let i = 1; i <= 5; i++) await watchSponsoredAtas(deps)
+    expect(sent).toEqual([])
+    await watchSponsoredAtas(deps)
+    expect(sent).toEqual([`ata-trace:${f.ata.toBase58()}`])
+    expect(warns.filter((w) => w.ata === f.ata.toBase58() && w.passes === 6)).toHaveLength(1)
+    await watchSponsoredAtas(deps)
+    await watchSponsoredAtas(deps)
     expect(sent).toHaveLength(1)
-    const [saved] = await h.db.select().from(schema.sponsoredAtas)
-    expect([saved?.closedSig, saved?.closedTo]).toEqual([null, 'unknown'])
+    expect(await atasClosedAway(h.db, f.wallet.toBase58(), sponsor.toBase58())).toBe(0)
   })
 })

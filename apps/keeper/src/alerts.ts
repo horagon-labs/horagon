@@ -42,6 +42,7 @@ const PERSON_ALERT_KEYS = [
   'decode',
   'index-stuck',
   'index-skip',
+  'ata-trace',
   'archive',
   'tick-failing',
   'index-failing',

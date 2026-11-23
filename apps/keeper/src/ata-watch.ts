@@ -29,8 +29,26 @@ const CLOSE_ACCOUNT = 9
 /** An ATA younger than this is not closed on one empty read: a lagging node may not see it yet. */
 const MIN_AGE_SECS = 600
 const MAX_BATCH = 100
-/** Signatures of one address read per trace, in total across pages. */
-const MAX_SIGNATURES = 1000
+/** Signatures asked for per page of an address's history (the RPC maximum). */
+const PAGE = 1000
+/**
+ * What one pass may spend. Cheap transactions that name an address can bury its close under any
+ * number of signatures, so a pass is bounded by calls and by wall time, and a trace that runs out
+ * resumes on the next pass (see `TraceState`). One place to tune; tests pass their own.
+ */
+export const PASS_BUDGET = { txCalls: 200, ms: 20_000 }
+/** Consecutive passes that cut a trace off before ops is told (6 passes of 10 min: an hour). */
+export const CUT_ALERT_AFTER = 6
+
+/** Where a trace of one ATA's close stopped, kept in memory; a restart starts it over. */
+export interface TraceState {
+  /** The oldest signature already read: the next pass pages back from it. */
+  before?: string
+  /** Consecutive passes that ran out of budget on this ATA. */
+  cuts: number
+  alerted: boolean
+}
+const defaultTraces = new Map<string, TraceState>()
 const TOKEN_PROGRAMS = [TOKEN_PROGRAM_ID.toBase58(), TOKEN_2022_PROGRAM_ID.toBase58()]
 
 export interface AtaWatchDeps {
@@ -45,6 +63,12 @@ export interface AtaWatchDeps {
   now: () => number
   /** ATAs checked per pass (one getMultipleAccountsInfo call). */
   batch?: number
+  /** Per-pass spend; defaults to PASS_BUDGET. */
+  budget?: { txCalls: number; ms: number }
+  /** Wall clock in ms for the time budget; defaults to Date.now. */
+  clock?: () => number
+  /** Trace cursors per ATA creation; defaults to a module-level map. */
+  traces?: Map<string, TraceState>
 }
 
 export interface AtaClose {
@@ -112,45 +136,52 @@ export function closeOf(tx: VersionedTransactionResponse, ata: string): AtaClose
   return undefined
 }
 
+type Found = ({ sig: string | null } & AtaClose) | 'cut'
+
+/** Spent so far in this pass. */
+interface Spent {
+  txCalls: number
+  startedAt: number
+}
+
+/**
+ * Newest first, paged back with `before` until the close, the creation (nothing older can close
+ * it) or an empty page. There is no cap on how far back it reads: noise only makes it slower.
+ * When the pass budget runs out first, it returns 'cut' with its place saved in `state`.
+ */
 async function findClose(
   deps: AtaWatchDeps,
   ata: string,
   createdSig: string,
-): Promise<{ sig: string | null } & AtaClose> {
-  // Newest first, paged back with `before` until the creation (nothing older can close it) or
-  // MAX_SIGNATURES in all: a bare window of the latest few would let anyone push a real claim out
-  // of it with cheap transactions that name the address.
-  let read = 0
-  let before: string | undefined
-  while (read < MAX_SIGNATURES) {
+  state: TraceState,
+  spent: Spent,
+): Promise<Found> {
+  const budget = deps.budget ?? PASS_BUDGET
+  const clock = deps.clock ?? Date.now
+  const over = () => spent.txCalls >= budget.txCalls || clock() - spent.startedAt >= budget.ms
+  for (;;) {
+    if (over()) return 'cut'
     const sigs = await deps.connection.getSignaturesForAddress(
       new PublicKey(ata),
-      {
-        limit: MAX_SIGNATURES - read,
-        until: createdSig,
-        ...(before ? { before } : {}),
-      },
+      { limit: PAGE, until: createdSig, ...(state.before ? { before: state.before } : {}) },
       'confirmed',
     )
     if (sigs.length === 0) return { sig: null, to: 'unknown', byClaim: false }
     for (const s of sigs) {
       if (s.signature === createdSig) return { sig: null, to: 'unknown', byClaim: false }
-      read++
-      if (s.err) continue
-      const tx = await deps.connection.getTransaction(s.signature, {
-        commitment: 'confirmed',
-        maxSupportedTransactionVersion: 0,
-      })
-      const close = tx ? closeOf(tx, ata) : undefined
-      if (close) return { sig: s.signature, ...close }
+      if (!s.err) {
+        if (over()) return 'cut'
+        spent.txCalls++
+        const tx = await deps.connection.getTransaction(s.signature, {
+          commitment: 'confirmed',
+          maxSupportedTransactionVersion: 0,
+        })
+        const close = tx ? closeOf(tx, ata) : undefined
+        if (close) return { sig: s.signature, ...close }
+      }
+      state.before = s.signature
     }
-    before = sigs.at(-1)?.signature
   }
-  deps.log.warn(
-    { ata, signatures: read },
-    'sponsor-paid ATA close not found within the signature cap; recorded as unknown',
-  )
-  return { sig: null, to: 'unknown', byClaim: false }
 }
 
 /** One pass over the least recently checked open ATAs. */
@@ -167,6 +198,8 @@ export async function watchSponsoredAtas(
     rows.map((r) => new PublicKey(r.ata)),
     'confirmed',
   )
+  const traces = deps.traces ?? defaultTraces
+  const spent: Spent = { txCalls: 0, startedAt: (deps.clock ?? Date.now)() }
   const stillOpen: string[] = []
   let closed = 0
   let flagged = 0
@@ -176,14 +209,36 @@ export async function watchSponsoredAtas(
       stillOpen.push(row.ata)
       continue
     }
-    let found: { sig: string | null } & AtaClose
+    const traceKey = `${row.ata}:${row.createdSig}`
+    const state = traces.get(traceKey) ?? { cuts: 0, alerted: false }
+    traces.set(traceKey, state)
+    let found: Found
     try {
-      found = await findClose(deps, row.ata, row.createdSig)
+      found = await findClose(deps, row.ata, row.createdSig, state, spent)
     } catch (err) {
       deps.log.warn({ ata: row.ata, error: errorSummary(err).message }, 'ata close lookup failed')
       stillOpen.push(row.ata)
       continue
     }
+    if (found === 'cut') {
+      // Out of budget: not resolved, so neither closed nor flagged; the next pass resumes.
+      stillOpen.push(row.ata)
+      state.cuts++
+      if (state.cuts >= CUT_ALERT_AFTER && !state.alerted) {
+        state.alerted = true
+        deps.log.warn(
+          { wallet: row.wallet, ata: row.ata, passes: state.cuts },
+          'sponsor-paid ATA close still being traced',
+        )
+        await deps.alerts.send(
+          `ata-trace:${row.ata}`,
+          `The close of sponsor-paid ATA ${row.ata} (wallet ${row.wallet}) is still being traced after ${state.cuts} passes: heavy transaction noise on the account. The wallet is not flagged`,
+        )
+      }
+      continue
+    }
+    state.cuts = 0
+    traces.delete(traceKey)
     const { sig, to, byClaim } = found
     // A claim's close is expected: the sponsor counted this rent as spent when it opened the
     // account, so the wallet owes nothing. It is recorded as 'claim' (the rent always went to the
