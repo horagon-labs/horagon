@@ -25,12 +25,14 @@ import {
   toPoolState,
   tradeAtas,
 } from '@horagon/sdk'
+import { cdfInv, lEffective, rescaleReserves, xyFromU } from '@horagon/sdk/math'
 import {
   createAssociatedTokenAccountIdempotentInstruction,
   createMint,
   getAccount,
   getAssociatedTokenAddressSync,
   mintTo,
+  TokenAccountNotFoundError,
 } from '@solana/spl-token'
 import {
   ComputeBudgetProgram,
@@ -104,7 +106,10 @@ describe.skipIf(!RPC)('horagon program on Surfpool', () => {
 
   /** Numbers worth keeping from a run (compute units by transaction, amounts); printed last. */
   const measured: Record<string, number> = {}
-  /** The compute units a whole transaction consumed (from its meta), under the limit it set. */
+  /**
+   * The compute units a whole transaction consumed (from its meta), within 80% of the limit it
+   * set: a transaction over its limit fails anyway, so the margin is what this checks.
+   */
   async function measure(label: string, signature: string, limit: number): Promise<void> {
     const t = await conn.getTransaction(signature, {
       commitment: 'confirmed',
@@ -112,7 +117,7 @@ describe.skipIf(!RPC)('horagon program on Surfpool', () => {
     })
     const used = t?.meta?.computeUnitsConsumed
     if (used === undefined) throw new Error(`${label}: no computeUnitsConsumed in the meta`)
-    expect(used, `${label} compute units`).toBeLessThan(limit)
+    expect(used, `${label} compute units`).toBeLessThanOrEqual(0.8 * limit)
     measured[`${label} CU`] = used
   }
   afterAll(() => {
@@ -178,6 +183,12 @@ describe.skipIf(!RPC)('horagon program on Surfpool', () => {
 
   const balance = async (owner: PublicKey) =>
     (await getAccount(conn, getAssociatedTokenAddressSync(mint, owner, true), 'confirmed')).amount
+  /** A token account, or undefined when none exists there; any other failure is rethrown. */
+  const tokenAccountOrNone = (address: PublicKey) =>
+    getAccount(conn, address, 'confirmed').catch((e: unknown) => {
+      if (e instanceof TokenAccountNotFoundError) return undefined
+      throw e
+    })
   const gameMarket = async (id = marketId) => {
     const gm = await program.fetchGameMarket(conn, id)
     if (!gm) throw new Error('GameMarket missing')
@@ -332,7 +343,7 @@ describe.skipIf(!RPC)('horagon program on Surfpool', () => {
     expect(await balance(program.authority)).toBe(treasuryBefore - SEED)
   })
 
-  const swapOn = async (market: PublicKey, direction: SwapDirection) => {
+  const swapOn = async (market: PublicKey, direction: SwapDirection, amountIn = 20n * USDC) => {
     const { blockhash } = await conn.getLatestBlockhash('confirmed')
     const p = {
       user: trader.publicKey,
@@ -343,7 +354,7 @@ describe.skipIf(!RPC)('horagon program on Surfpool', () => {
     const tx = buildTradeTransaction({
       feePayer: trader.publicKey,
       recentBlockhash: blockhash,
-      swap: { ...p, direction, amountIn: 20n * USDC, minOut: 0n },
+      swap: { ...p, direction, amountIn, minOut: 0n },
       createAtas: tradeAtas(p),
     })
     return sendTx(tx, [trader])
@@ -356,12 +367,13 @@ describe.skipIf(!RPC)('horagon program on Surfpool', () => {
   it('a second market, never halted, opens and trades', async () => {
     const externalGameId = `${externalId}r`
     residualMarketId = await marketIdFor('NBA', externalGameId, 0)
-    await send(
+    const sig = await send(
       [createIx(attestor.publicKey, { marketId: residualMarketId, externalGameId })],
       attestor,
       [],
       CREATE_MARKET_COMPUTE_UNITS,
     )
+    await measure('create_game_market (never halted)', sig, CREATE_MARKET_COMPUTE_UNITS)
     const gm = await gameMarket(residualMarketId)
     expect(gm).toMatchObject({ status: 'open', endTs, externalGameId })
     await swapOn(gm.market, 'usdcToNo')
@@ -380,13 +392,13 @@ describe.skipIf(!RPC)('horagon program on Surfpool', () => {
     await expectError(swap(), { program: 'pm-amm' })
   })
 
-  const propose = (who: Keypair, id = marketId) =>
+  const propose = (who: Keypair, id = marketId, outcome: 'yes' | 'no' = 'yes') =>
     send(
       [
         program.ix.proposeResult({
           signer: who.publicKey,
           marketId: id,
-          outcome: 'yes',
+          outcome,
           evidenceHash,
           evidenceUri: `https://horagon.invalid/api/v1/evidence/nba-${externalId}/winner`,
         }),
@@ -466,20 +478,94 @@ describe.skipIf(!RPC)('horagon program on Surfpool', () => {
     const a = program.addresses(residualMarketId)
     expect(await conn.getAccountInfo(a.lpPosition, 'confirmed')).not.toBeNull()
 
-    // The Authority holds no YES or NO of this market yet, so whatever the treasury gains came
-    // out of the LpPosition through claim_lp_residuals.
+    // The Authority holds no YES or NO of this market yet (it never had the accounts), so
+    // whatever the treasury gains came out of the LpPosition through claim_lp_residuals.
+    for (const ata of [a.authorityYes, a.authorityNo]) {
+      expect(await conn.getAccountInfo(ata, 'confirmed')).toBeNull()
+    }
     const before = await balance(program.authority)
     const sig = await recycle(stranger, residualMarketId)
     await measure('recycle (never halted)', sig, HEAVY_IX_COMPUTE_UNITS)
     expect((await gameMarket(residualMarketId)).status).toBe('recycled')
+    // claim_lp_residuals leaves the LpPosition open with all its shares, so the check is on what
+    // came back: the pool drains to its LP at resolution, and the NO buy lost.
     const recovered = (await balance(program.authority)) - before
-    expect(recovered).toBeGreaterThan(0n)
+    expect(recovered).toBeGreaterThanOrEqual(SEED / 2n)
     measured['recovered (never halted), raw mUSDC'] = Number(recovered)
     // claim_winnings burned every YES and NO the Authority held, the losing side included
     // (pm-AMM closes the emptied accounts too).
     for (const ata of [a.authorityYes, a.authorityNo]) {
-      const left = await getAccount(conn, ata, 'confirmed').catch(() => undefined)
-      expect(left?.amount ?? 0n).toBe(0n)
+      expect((await tokenAccountOrNone(ata))?.amount ?? 0n).toBe(0n)
+    }
+  })
+
+  // Task 10 ruling 3(a): recycle when the Authority holds only losing-side tokens, so that
+  // claim_winnings pays nothing. withdraw_liquidity (halt) mints the Authority its pending
+  // residuals, its entry surplus and its share of both reserves, so a normal market leaves it
+  // both sides. One side comes out empty only when all it is owed on that side is under one raw
+  // unit: a 0.002 mUSDC seed at 60% (the entry surplus is then YES), two days from end_ts (the
+  // NO residuals then accrue at about 0.006 raw a second), and a NO buy that takes the YES price
+  // to 0.02% (the NO reserve falls to about 0.2 raw). Resolving NO leaves it losing YES only.
+  it('recycle when the Authority holds only losing-side tokens: claim_winnings pays nothing', async () => {
+    const externalGameId = `${externalId}l`
+    const id = await marketIdFor('NBA', externalGameId, 0)
+    const lossEnd = (await chainTime()) + 2 * 24 * 3600
+    const created = await send(
+      [
+        createIx(attestor.publicKey, {
+          marketId: id,
+          externalGameId,
+          endTs: lossEnd,
+          seedAmount: 2_000n,
+        }),
+      ],
+      attestor,
+      [],
+      CREATE_MARKET_COMPUTE_UNITS,
+    )
+    await measure('create_game_market (losing side)', created, CREATE_MARKET_COMPUTE_UNITS)
+    const gm = await gameMarket(id)
+    const marketState = async () => {
+      const info = await conn.getAccountInfo(gm.market, 'confirmed')
+      if (!info) throw new Error('market account missing')
+      return decodeMarketAccount(info)
+    }
+    // Buy NO until x, the YES reserve, reaches its value at a 0.02% YES price: above the 0.01%
+    // that pm-AMM's accrual clamps to, which would rebuild the NO reserve. The 2% fee comes off
+    // the USDC first.
+    const now = await chainTime()
+    const pool = toPoolState(await marketState())
+    const { x } = rescaleReserves(pool, now)
+    const xTarget = xyFromU(cdfInv(0.0002), lEffective(pool.lZero, pool.endTs - now)).x
+    await swapOn(gm.market, 'usdcToNo', BigInt(Math.ceil(((xTarget - x) * 10_000) / 9_800)) + 1n)
+    expect(toPoolState(await marketState()).reserveNo).toBeLessThan(1)
+
+    const halted = await send(
+      program.ix.halt({ signer: attestor.publicKey, marketId: id }, attestor.publicKey),
+      attestor,
+      [],
+      HEAVY_IX_COMPUTE_UNITS,
+    )
+    await measure('halt (losing side)', halted, HEAVY_IX_COMPUTE_UNITS)
+    const a = program.addresses(id)
+    const yes = (await getAccount(conn, a.authorityYes, 'confirmed')).amount
+    expect(yes).toBeGreaterThan(0n)
+    expect((await getAccount(conn, a.authorityNo, 'confirmed')).amount).toBe(0n)
+
+    await travelTo(lossEnd + 1)
+    await propose(attestor, id, 'no')
+    await travelTo((await gameMarket(id)).proposedAt + WINDOW_SECS + 1)
+    await finalize(stranger, id)
+    expect(await marketState()).toMatchObject({ resolved: true, winningSide: 2 })
+
+    const before = await balance(program.authority)
+    await measure('recycle (losing side only)', await recycle(stranger, id), HEAVY_IX_COMPUTE_UNITS)
+    expect((await gameMarket(id)).status).toBe('recycled')
+    expect(await balance(program.authority)).toBeGreaterThanOrEqual(before)
+    measured['losing YES burned (losing side only), raw'] = Number(yes)
+    // claim_winnings burned the losing YES and closed both accounts.
+    for (const ata of [a.authorityYes, a.authorityNo]) {
+      expect((await tokenAccountOrNone(ata))?.amount ?? 0n).toBe(0n)
     }
   })
 
@@ -490,7 +576,7 @@ describe.skipIf(!RPC)('horagon program on Surfpool', () => {
     const parityId = `${externalId}p`
     const parityMarketId = await marketIdFor('NBA', parityId, 0)
     const parityEnd = (await chainTime()) + 600
-    await send(
+    const created = await send(
       [
         program.ix.createGameMarket({
           attestor: attestor.publicKey,
@@ -517,6 +603,7 @@ describe.skipIf(!RPC)('horagon program on Surfpool', () => {
       [],
       CREATE_MARKET_COMPUTE_UNITS,
     )
+    await measure('create_game_market (parity)', created, CREATE_MARKET_COMPUTE_UNITS)
     const gm = await program.fetchGameMarket(conn, parityMarketId)
     if (!gm) throw new Error('parity GameMarket missing')
     const marketState = async () => {
@@ -525,8 +612,7 @@ describe.skipIf(!RPC)('horagon program on Surfpool', () => {
       return decodeMarketAccount(info)
     }
     const yesAta = getAssociatedTokenAddressSync((await marketState()).yesMint, trader.publicKey)
-    const yesHeld = async () =>
-      (await getAccount(conn, yesAta, 'confirmed').catch(() => undefined))?.amount ?? 0n
+    const yesHeld = async () => (await tokenAccountOrNone(yesAta))?.amount ?? 0n
     const p = {
       user: trader.publicKey,
       market: gm.market,

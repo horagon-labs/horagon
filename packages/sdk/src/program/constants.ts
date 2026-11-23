@@ -22,9 +22,16 @@ export const MAX_EXTERNAL_ID_LEN = 16
 export const MAX_EVIDENCE_URI_LEN = 128
 export const MAX_MARKET_NAME_LEN = 32
 
-/** Spec section 5.2: create = initialize_market + deposit_liquidity + Horagon (S2: ~577k CU). */
+/**
+ * Spec section 5.2: create = initialize_market + deposit_liquidity + Horagon. Measured on
+ * Surfpool, whole transaction: 718k to 773k CU.
+ */
 export const CREATE_MARKET_COMPUTE_UNITS = 1_400_000
-/** halt and recycle CPI withdraw_liquidity / claim_lp_residuals + claim_winnings (~300k each). */
+/**
+ * halt CPIs withdraw_liquidity: 457k to 473k CU, and 666k once a swap has pushed the YES price
+ * to 0.02%. recycle CPIs claim_lp_residuals + claim_winnings: 69k to 122k CU. Measured on
+ * Surfpool, whole transaction.
+ */
 export const HEAVY_IX_COMPUTE_UNITS = 1_400_000
 /** propose, challenge, finalize (S2: resolve ~22k CU). */
 export const LIGHT_IX_COMPUTE_UNITS = 200_000
