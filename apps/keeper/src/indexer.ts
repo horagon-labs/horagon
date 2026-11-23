@@ -129,6 +129,25 @@ export function wholeTxFlows(tx: VersionedTransactionResponse, user: string, ctx
   }
 }
 
+/**
+ * Whether a claim_winnings' flows add up. pm-AMM pays one collateral unit per winning share (the
+ * IDL: "pay winning side at 1 USDC each"; no rounding, so the match is exact in raw units) and
+ * burns every share the user holds, so the payout is the winning side's burn and the losing
+ * side never grows. The market's outcome names the winning side; a row synced before it is
+ * known gives the sides the flows allow: either one fits.
+ */
+export function claimAddsUp(f: Flows, outcome: string | null | undefined): boolean {
+  const fits = (won: bigint, lost: bigint) => f.usdc === -won && lost <= 0n
+  if (outcome === 'yes') return fits(f.yes, f.no)
+  if (outcome === 'no') return fits(f.no, f.yes)
+  return fits(f.yes, f.no) || fits(f.no, f.yes)
+}
+
+/** A redeem_pair burns equal YES and NO and pays the same amount of collateral. */
+export function redeemAddsUp(f: Flows): boolean {
+  return f.usdc === -f.yes && f.usdc === -f.no
+}
+
 /** One instruction's flows from its inner token CPIs; undefined when they were not recorded. */
 function instructionFlows(
   tx: VersionedTransactionResponse,
@@ -239,6 +258,16 @@ export function decodeTransaction(
         blockTime,
       })
     } else if (name === 'redeemPair' || name === 'claimWinnings') {
+      // A row is never stored from flows that cannot be right (a node that returns token balances
+      // missing accounts, say): it is skipped and alerted like an unreadable one.
+      if (!(name === 'redeemPair' ? redeemAddsUp(flows) : claimAddsUp(flows, m.outcome))) {
+        ctx.log?.warn(
+          { market: m.pubkey, sig, ixIndex, name, usdc, yes, no },
+          'token flows do not add up; row skipped',
+        )
+        ctx.onSkip?.(sig, ixIndex)
+        return
+      }
       out.claims.push({
         sig,
         ixIndex,
@@ -459,7 +488,7 @@ async function indexMarket(
       for (const k of skipped.splice(0)) {
         await deps.alerts.send(
           `index-skip:${m.pubkey}`,
-          `Indexing of ${m.gameId} (market ${m.pubkey}) skipped a row: signature ${k.sig}, instruction ${k.ixIndex} has no readable token flows`,
+          `Indexing of ${m.gameId} (market ${m.pubkey}) skipped a row: signature ${k.sig}, instruction ${k.ixIndex} has no readable, consistent token flows`,
         )
       }
       trades += d.trades.length

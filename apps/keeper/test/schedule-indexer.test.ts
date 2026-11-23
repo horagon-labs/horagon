@@ -1138,8 +1138,20 @@ describe('decodeTransaction per-instruction token flows', () => {
       build(
         [claimIx(A), claimIx(B)],
         [
-          { index: 0, ixs: [createTransferInstruction(A.vault, usdcAta, user, 1n)] },
-          { index: 1, ixs: [createTransferInstruction(B.vault, usdcAta, user, 1n)] },
+          {
+            index: 0,
+            ixs: [
+              createTransferInstruction(A.vault, usdcAta, user, 1n),
+              createBurnInstruction(yesAta(A), A.yes, user, 1n),
+            ],
+          },
+          {
+            index: 1,
+            ixs: [
+              createTransferInstruction(B.vault, usdcAta, user, 1n),
+              createBurnInstruction(yesAta(B), B.yes, user, 1n),
+            ],
+          },
         ],
         [...accountsOf(A), ...accountsOf(B)],
       )
@@ -1208,6 +1220,114 @@ describe('decodeTransaction per-instruction token flows', () => {
     ])
   })
 
+  describe('token flow invariants', () => {
+    /** One pm-AMM payout instruction with the user's balance changes `d` (raw units). */
+    const payout = (ix: TransactionInstruction, d: { usdc: bigint; yes: bigint; no: bigint }) => {
+      const tx = build([ix], undefined, accountsOf(A))
+      const keys = (tx.transaction.message as { staticAccountKeys: PublicKey[] }).staticAccountKeys
+      const at = (k: PublicKey) => keys.findIndex((x) => x.equals(k))
+      const tok = (k: PublicKey, owner: string, mint: string, n: bigint) =>
+        bal(at(k), owner, mint, n)
+      const held = 1_000_000_000n
+      if (tx.meta) {
+        tx.meta.preTokenBalances = [
+          tok(usdcAta, user.toBase58(), usdc, held),
+          tok(yesAta(A), user.toBase58(), A.yes.toBase58(), held),
+          tok(noAta(A), user.toBase58(), A.no.toBase58(), held),
+        ]
+        tx.meta.postTokenBalances = [
+          tok(usdcAta, user.toBase58(), usdc, held + d.usdc),
+          tok(yesAta(A), user.toBase58(), A.yes.toBase58(), held + d.yes),
+          tok(noAta(A), user.toBase58(), A.no.toBase58(), held + d.no),
+        ]
+      }
+      return tx
+    }
+    const run = (
+      tx: VersionedTransactionResponse,
+      outcome?: 'yes' | 'no',
+    ): {
+      claims: ReturnType<typeof decodeTransaction>['claims']
+      skips: Array<[string, number]>
+      warns: number
+    } => {
+      const warn = vi.fn()
+      const skips: Array<[string, number]> = []
+      const market = { ...A.row, ...(outcome ? { outcome } : {}) } as MarketRow
+      const d = decodeTransaction('sig', tx, {
+        ...ctx(A, { warn } as unknown as Logger),
+        market,
+        onSkip: (sg, i) => skips.push([sg, i]),
+      })
+      return { claims: d.claims, skips, warns: warn.mock.calls.length }
+    }
+    const claim = () => claimIx(A)
+    const redeem = () =>
+      buildRedeemPairIx({ user, market: A.market, collateralMint: DEVNET_MUSDC_MINT, amount: 1n })
+
+    it('records a claim whose payout is the burn of the winning side', () => {
+      // YES won: 5 pays out 5 and the losing NO is burned too.
+      const yesWon = payout(claim(), { usdc: 5_000_000n, yes: -5_000_000n, no: -2_000_000n })
+      expect(run(yesWon, 'yes').claims).toHaveLength(1)
+      expect(run(yesWon).claims).toHaveLength(1)
+      // NO won, the user held only the winning side.
+      const noWon = payout(claim(), { usdc: 7_000_000n, yes: 0n, no: -7_000_000n })
+      expect(run(noWon, 'no').claims).toHaveLength(1)
+      expect(run(noWon).claims).toHaveLength(1)
+      // Only the losing side held: nothing is paid, the loser is burned.
+      const loser = payout(claim(), { usdc: 0n, yes: -4_000_000n, no: 0n })
+      expect(run(loser, 'no').claims).toHaveLength(1)
+      expect(run(loser).claims).toHaveLength(1)
+      // Both sides burned in equal amounts: the larger burn is the payout.
+      const both = payout(claim(), { usdc: 3_000_000n, yes: -3_000_000n, no: -3_000_000n })
+      expect(run(both).claims).toHaveLength(1)
+    })
+
+    it('skips the claim of the local run: a payout the winning side does not account for', () => {
+      // Surfpool returned preTokenBalances without two accounts that existed: the whole-transaction
+      // deltas read +520.76 mUSDC and no burn of the winning NO, only YES -7.87.
+      const bad = payout(claim(), { usdc: 520_764_198n, yes: -7_870_556n, no: 0n })
+      for (const outcome of ['no', undefined] as const) {
+        const r = run(bad, outcome)
+        expect(r.claims).toEqual([])
+        expect(r.skips).toEqual([['sig', 0]])
+        expect(r.warns).toBe(1)
+      }
+    })
+
+    it('skips a claim whose losing side gained, or whose payout needs a side that did not burn', () => {
+      expect(
+        run(payout(claim(), { usdc: 5_000_000n, yes: -5_000_000n, no: 1n }), 'yes').claims,
+      ).toEqual([])
+      // The market says NO won, the flows pay a YES burn.
+      expect(
+        run(payout(claim(), { usdc: 5_000_000n, yes: -5_000_000n, no: 0n }), 'no').claims,
+      ).toEqual([])
+      // Both sides burned, neither equal to the payout.
+      expect(
+        run(payout(claim(), { usdc: 4_000_000n, yes: -5_000_000n, no: -3_000_000n })).claims,
+      ).toEqual([])
+      // Paid more than anything burned.
+      expect(run(payout(claim(), { usdc: 1n, yes: 0n, no: 0n })).claims).toEqual([])
+    })
+
+    it('records a redeem of equal YES, NO and collateral, and skips one that is not', () => {
+      const ok = run(payout(redeem(), { usdc: 3_000_000n, yes: -3_000_000n, no: -3_000_000n }))
+      expect(ok.claims).toHaveLength(1)
+      expect(ok.skips).toEqual([])
+      for (const d of [
+        { usdc: 3_000_000n, yes: -3_000_000n, no: -2_000_000n },
+        { usdc: 3_000_001n, yes: -3_000_000n, no: -3_000_000n },
+        { usdc: 3_000_000n, yes: 3_000_000n, no: -3_000_000n },
+      ]) {
+        const r = run(payout(redeem(), d))
+        expect(r.claims).toEqual([])
+        expect(r.skips).toEqual([['sig', 0]])
+        expect(r.warns).toBe(1)
+      }
+    })
+  })
+
   it('skips the row and warns when several instructions have no recorded CPIs', () => {
     const warn = vi.fn()
     const log = { warn } as unknown as Logger
@@ -1216,7 +1336,15 @@ describe('decodeTransaction per-instruction token flows', () => {
     // Recorded for the other instruction only.
     const partial = build(
       [claimIx(A), claimIx(B)],
-      [{ index: 1, ixs: [createTransferInstruction(B.vault, usdcAta, user, 1n)] }],
+      [
+        {
+          index: 1,
+          ixs: [
+            createTransferInstruction(B.vault, usdcAta, user, 1n),
+            createBurnInstruction(yesAta(B), B.yes, user, 1n),
+          ],
+        },
+      ],
       [...accountsOf(A), ...accountsOf(B)],
     )
     expect(decodeTransaction('y', partial, ctx(A, log)).claims).toEqual([])
