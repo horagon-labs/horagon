@@ -1,6 +1,13 @@
 import type { PositionsResponse } from '@horagon/sdk'
 import { describe, expect, it, vi } from 'vitest'
-import { awaitFill, exactFill, fillLine, type Holding, holding } from '../lib/fill'
+import {
+  awaitFill,
+  createFillTracker,
+  exactFill,
+  fillLine,
+  type Holding,
+  holding,
+} from '../lib/fill'
 
 const W = 'W'.repeat(32)
 const M = 'M'.repeat(32)
@@ -26,13 +33,13 @@ describe('holding', () => {
 })
 
 describe('exactFill', () => {
-  it('buy: the shares gained', () => {
+  const buy = { action: 'buy' as const, spent: 10_000_000n, ...quote }
+  it('buy: the shares gained, when the mUSDC spent is this trade', () => {
     expect(
       exactFill({
-        action: 'buy',
-        before: h(10_000_000n, 90n),
-        after: h(47_010_000n, 0n),
-        ...quote,
+        ...buy,
+        before: h(10_000_000n, 100_000_000n),
+        after: h(47_010_000n, 90_000_000n),
       }),
     ).toBe(37_010_000n)
   })
@@ -40,6 +47,7 @@ describe('exactFill', () => {
     expect(
       exactFill({
         action: 'sell',
+        spent: 0n,
         before: h(50_000_000n, 10_000_000n),
         after: h(13_000_000n, 46_950_000n),
         ...quote,
@@ -48,22 +56,49 @@ describe('exactFill', () => {
   })
   it('is unknown until the number moved', () => {
     expect(
-      exactFill({ action: 'buy', before: h(10n, null), after: h(10n, null), ...quote }),
+      exactFill({ ...buy, before: h(10n, 100_000_000n), after: h(10n, 90_000_000n) }),
     ).toBeNull()
   })
-  it('is unknown for a change no single fill of this quote can explain (a second trade)', () => {
+  it('is unknown for a change no single fill of this quote can explain', () => {
     expect(
-      exactFill({ action: 'buy', before: h(0n, null), after: h(90_000_000n, null), ...quote }),
+      exactFill({ ...buy, before: h(0n, 100_000_000n), after: h(90_000_000n, 90_000_000n) }),
     ).toBeNull()
     expect(
-      exactFill({ action: 'buy', before: h(0n, null), after: h(1_000_000n, null), ...quote }),
+      exactFill({ ...buy, before: h(0n, 100_000_000n), after: h(1_000_000n, 90_000_000n) }),
     ).toBeNull()
+  })
+  it('buy: is unknown when the mUSDC spent is not this trade (an earlier buy of the same size)', () => {
+    // The first buy's shares are not indexed at click time; its spend already left the balance.
+    // The second buy has not landed in the balance yet when the first fill's shares show up.
+    expect(
+      exactFill({ ...buy, before: h(0n, 100_000_000n), after: h(37_010_000n, 100_000_000n) }),
+    ).toBeNull()
+    expect(
+      exactFill({ ...buy, before: h(0n, 100_000_000n), after: h(37_010_000n, 80_000_000n) }),
+    ).toBeNull()
+    expect(exactFill({ ...buy, before: h(0n, null), after: h(37_010_000n, null) })).toBeNull()
   })
   it('is unknown without a before or after, or a balance', () => {
-    expect(exactFill({ action: 'buy', before: undefined, after: h(1n, 1n), ...quote })).toBeNull()
+    expect(exactFill({ ...buy, before: undefined, after: h(1n, 1n) })).toBeNull()
     expect(
-      exactFill({ action: 'sell', before: h(1n, null), after: h(1n, 5n), ...quote }),
+      exactFill({ action: 'sell', spent: 0n, before: h(1n, null), after: h(1n, 5n), ...quote }),
     ).toBeNull()
+  })
+})
+
+describe('fillTracker', () => {
+  it('is busy for a market side from begin until its end, and per side', () => {
+    const t = createFillTracker()
+    expect(t.busy('m:home')).toBe(false)
+    const end1 = t.begin('m:home')
+    const end2 = t.begin('m:home')
+    expect(t.busy('m:home')).toBe(true)
+    expect(t.busy('m:away')).toBe(false)
+    end1()
+    end1()
+    expect(t.busy('m:home')).toBe(true)
+    end2()
+    expect(t.busy('m:home')).toBe(false)
   })
 })
 
@@ -90,9 +125,14 @@ describe('fillLine', () => {
 })
 
 describe('awaitFill', () => {
-  const input = { action: 'buy' as const, before: h(0n, 100n), ...quote }
+  const input = {
+    action: 'buy' as const,
+    spent: 10_000_000n,
+    before: h(0n, 100_000_000n),
+    ...quote,
+  }
   it('polls until the position moves, then returns the fill', async () => {
-    const loads = [h(0n, 0n), h(0n, 0n), h(37_010_000n, 0n)]
+    const loads = [h(0n, 90_000_000n), h(0n, 90_000_000n), h(37_010_000n, 90_000_000n)]
     const load = vi.fn(async () => loads.shift())
     const sleep = vi.fn(async () => {})
     expect(await awaitFill({ ...input, load, sleep, tries: 5, everyMs: 10 })).toBe(37_010_000n)
@@ -101,7 +141,7 @@ describe('awaitFill', () => {
   })
   it('gives up after the tries, and on load errors', async () => {
     const sleep = async () => {}
-    const load = vi.fn(async () => h(0n, 0n))
+    const load = vi.fn(async () => h(0n, 90_000_000n))
     expect(await awaitFill({ ...input, load, sleep, tries: 3, everyMs: 1 })).toBeNull()
     expect(load).toHaveBeenCalledTimes(3)
     const boom = async (): Promise<Holding> => {
@@ -110,7 +150,7 @@ describe('awaitFill', () => {
     expect(await awaitFill({ ...input, load: boom, sleep, tries: 2, everyMs: 1 })).toBeNull()
   })
   it('stops when told to', async () => {
-    const load = vi.fn(async () => h(0n, 0n))
+    const load = vi.fn(async () => h(0n, 90_000_000n))
     let stop = false
     const sleep = async () => {
       stop = true

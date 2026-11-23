@@ -16,7 +16,7 @@ import {
 import type { Keypair } from '@solana/web3.js'
 import { useEffect, useRef, useState } from 'react'
 import { api } from '../lib/api'
-import { awaitFill, fillLine, holding } from '../lib/fill'
+import { awaitFill, createFillTracker, fillLine, holding } from '../lib/fill'
 import { cents, explorerTx, usdc } from '../lib/format'
 import { DEFAULT_SLIPPAGE_BPS, executeTrade, type TradeStage } from '../lib/trade'
 import { checkTrade, tradeReady } from '../lib/trade-form'
@@ -58,17 +58,25 @@ export function TradePanel({ game, market }: { game: GameDetail; market: MarketS
   const [action, setAction] = useState<TradeAction>('buy')
   const [amount, setAmount] = useState('10')
   const [stage, setStage] = useState<TradeStage | null>(null)
+  const alive = useRef(true)
+  const fills = useRef(createFillTracker())
+  // The faucet note goes away once a trade starts; a new faucet request brings it back.
+  const [fundNoteHidden, setFundNoteHidden] = useState(false)
+  useEffect(() => {
+    if (funding) setFundNoteHidden(false)
+  }, [funding])
   const [error, setError] = useState<unknown>()
   const [done, setDone] = useState<{ signature: string; text: string } | null>(null)
   const busy = useRef(false)
   // The signature whose success line is on screen: a newer trade or a left page ends the wait.
   const shown = useRef<string | null>(null)
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    alive.current = true
+    return () => {
       shown.current = null
-    },
-    [],
-  )
+      alive.current = false
+    }
+  }, [])
 
   const team = side === 'home' ? game.home : game.away
   const ready = tradeReady(address, portfolio)
@@ -103,6 +111,7 @@ export function TradePanel({ game, market }: { game: GameDetail; market: MarketS
     setError(undefined)
     setDone(null)
     shown.current = null
+    setFundNoteHidden(true)
     const before = holding(portfolio, keypair.publicKey.toBase58(), market.pubkey, side)
     try {
       const r = await executeTrade(
@@ -124,18 +133,26 @@ export function TradePanel({ game, market }: { game: GameDetail; market: MarketS
       // The line says "about" until the portfolio shows what the fill really was.
       if (r.quote) {
         const wallet = keypair.publicKey.toBase58()
+        const key = `${market.pubkey}:${side}`
+        // An earlier fill on this side may still be unindexed: its shares would pass for this
+        // trade's, so this line stays "about". It still waits, so the next trade knows too.
+        const refuse = fills.current.busy(key)
+        const end = fills.current.begin(key)
         void awaitFill({
           action,
           before,
+          spent: action === 'buy' ? parseAmount(amount.trim()) : 0n,
           quotedOut: parseAmount(r.quote.amountOut),
           minOut: parseAmount(r.quote.minOut),
           load: async () => holding(await api.portfolio(wallet), wallet, market.pubkey, side),
-          cancelled: () => shown.current !== r.signature,
-        }).then((exact) => {
-          if (exact !== null && shown.current === r.signature) {
-            setDone({ signature: r.signature, text: line(exact) })
-          }
+          cancelled: () => !alive.current,
         })
+          .then((exact) => {
+            if (!refuse && exact !== null && shown.current === r.signature) {
+              setDone({ signature: r.signature, text: line(exact) })
+            }
+          })
+          .finally(end)
       }
     } catch (err) {
       // Shown with its transaction, if it names one (ErrorText); never sent again from here.
@@ -252,7 +269,7 @@ export function TradePanel({ game, market }: { game: GameDetail; market: MarketS
           )}
         </p>
       )}
-      {fundNote && <p className="text-sm text-emerald-600">{fundNote}</p>}
+      {fundNote && !fundNoteHidden && <p className="text-sm text-emerald-600">{fundNote}</p>}
       <button
         type="button"
         disabled={ready === 'loading' || (ready === 'ready' && (!check.ok || stage !== null))}

@@ -40,6 +40,8 @@ export interface FillInput {
   after: Holding | undefined
   quotedOut: bigint
   minOut: bigint
+  /** Buy: the raw mUSDC this trade spends. The balance must have dropped by exactly this. */
+  spent: bigint
 }
 
 /**
@@ -51,6 +53,11 @@ export function exactFill(i: FillInput): bigint | null {
   if (i.before === undefined || i.after === undefined) return null
   let delta: bigint
   if (i.action === 'buy') {
+    // The shares come from the indexer, a few seconds late; the balance is read live. Only a
+    // balance that fell by exactly this trade's amount shows the shares are not an earlier
+    // trade's.
+    if (i.before.usdc === null || i.after.usdc === null) return null
+    if (i.before.usdc - i.after.usdc !== i.spent) return null
     delta = i.after.shares - i.before.shares
   } else {
     if (i.before.usdc === null || i.after.usdc === null) return null
@@ -75,6 +82,27 @@ export function fillLine(
         : `about ${usdc(n.quoted)}`
   const mid = amount === '' ? '' : ` ${amount}`
   return action === 'buy' ? `Bought${mid} ${team} shares.` : `Sold for${mid} mUSDC.`
+}
+
+/**
+ * The fills still being waited for, per market side. A new trade on a side that has one cannot
+ * tell its shares from the earlier trade's (the indexer is late), so it keeps the "about" line.
+ */
+export function createFillTracker() {
+  const open = new Map<string, number>()
+  return {
+    busy: (key: string): boolean => (open.get(key) ?? 0) > 0,
+    /** Marks a fill as awaited; the returned function ends it (once). */
+    begin(key: string): () => void {
+      open.set(key, (open.get(key) ?? 0) + 1)
+      let ended = false
+      return () => {
+        if (ended) return
+        ended = true
+        open.set(key, (open.get(key) ?? 1) - 1)
+      }
+    },
+  }
 }
 
 export interface AwaitFillInput extends Omit<FillInput, 'after'> {
