@@ -1,13 +1,15 @@
 // Watches the token accounts whose rent the sponsor paid (spec 9, Tier 0 final review). The user
 // owns each one and can close it to any address, so the rent is spend, not float. A close whose
 // rent went anywhere but the sponsor is recorded and alerted, and the API then opens no more
-// accounts for that wallet (`atasClosedAway`).
+// accounts for that wallet (`atasClosedAway`). One close is expected: pm-AMM's claim_winnings
+// closes the user's YES and NO itself, rent to the user, once the market is resolved.
 import { type Db, markAtaClosed, markAtasChecked, sponsoredAtasToCheck } from '@horagon/db'
-import { errorSummary } from '@horagon/sdk'
+import { errorSummary, PM_AMM_PROGRAM_ID, pmAmmInstructionName } from '@horagon/sdk'
 import { TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID } from '@solana/spl-token'
 import { type Connection, PublicKey, type VersionedTransactionResponse } from '@solana/web3.js'
 import type { Logger } from 'pino'
 import type { Alerter } from './alerts'
+import { base58Decode } from './indexer'
 
 /** SPL Token `CloseAccount`: accounts [account, destination, owner]. */
 const CLOSE_ACCOUNT = 9
@@ -30,20 +32,46 @@ export interface AtaWatchDeps {
   batch?: number
 }
 
-/** Where `tx` sent the rent of `ata` when it closed it; undefined when it did not close it. */
-export function closeDestination(
-  tx: VersionedTransactionResponse,
-  ata: string,
-): string | undefined {
+export interface AtaClose {
+  /** Who received the rent. */
+  to: string
+  /**
+   * Closed by pm-AMM inside a top-level claim_winnings. pm-AMM runs it only on a resolved market
+   * and then closes the user's YES and NO accounts, rent to the user: the end of a market the
+   * user traded, not a rent grab.
+   */
+  byClaim: boolean
+}
+
+/**
+ * How `tx` closed `ata`: a top-level CloseAccount, or one inside another instruction (pm-AMM's
+ * claim_winnings closes YES and NO that way). Undefined when it did not close it.
+ */
+export function closeOf(tx: VersionedTransactionResponse, ata: string): AtaClose | undefined {
   const msg = tx.transaction.message
   const keys = msg.getAccountKeys({
     ...(tx.meta?.loadedAddresses ? { accountKeysFromLookups: tx.meta.loadedAddresses } : {}),
   })
+  const destination = (programIndex: number, accounts: readonly number[], data: Uint8Array) => {
+    const program = keys.get(programIndex)?.toBase58()
+    if (!program || !TOKEN_PROGRAMS.includes(program) || data[0] !== CLOSE_ACCOUNT) return
+    const [account, to] = accounts.map((i) => keys.get(i)?.toBase58())
+    return account === ata ? to : undefined
+  }
   for (const ix of msg.compiledInstructions) {
-    const program = keys.get(ix.programIdIndex)?.toBase58()
-    if (!program || !TOKEN_PROGRAMS.includes(program) || ix.data[0] !== CLOSE_ACCOUNT) continue
-    const [account, destination] = ix.accountKeyIndexes.map((i) => keys.get(i)?.toBase58())
-    if (account === ata && destination) return destination
+    const to = destination(ix.programIdIndex, ix.accountKeyIndexes, ix.data)
+    if (to) return { to, byClaim: false }
+  }
+  for (const inner of tx.meta?.innerInstructions ?? []) {
+    const parent = msg.compiledInstructions[inner.index]
+    const byClaim =
+      parent !== undefined &&
+      keys.get(parent.programIdIndex)?.equals(PM_AMM_PROGRAM_ID) === true &&
+      pmAmmInstructionName(parent.data) === 'claimWinnings'
+    for (const ix of inner.instructions) {
+      const to = destination(ix.programIdIndex, ix.accounts, base58Decode(ix.data))
+      if (to) return { to, byClaim }
+    }
   }
   return undefined
 }
@@ -51,7 +79,7 @@ export function closeDestination(
 async function findClose(
   deps: AtaWatchDeps,
   ata: string,
-): Promise<{ sig: string | null; to: string }> {
+): Promise<{ sig: string | null } & AtaClose> {
   const sigs = await deps.connection.getSignaturesForAddress(
     new PublicKey(ata),
     { limit: 10 },
@@ -63,11 +91,11 @@ async function findClose(
       commitment: 'confirmed',
       maxSupportedTransactionVersion: 0,
     })
-    const to = tx ? closeDestination(tx, ata) : undefined
-    if (to) return { sig: s.signature, to }
+    const close = tx ? closeOf(tx, ata) : undefined
+    if (close) return { sig: s.signature, ...close }
   }
-  // Closed by an instruction inside another program, or older than the last 10 signatures.
-  return { sig: null, to: 'unknown' }
+  // Closed by a transaction older than the last 10 signatures, or not readable.
+  return { sig: null, to: 'unknown', byClaim: false }
 }
 
 /** One pass over the least recently checked open ATAs. */
@@ -79,6 +107,7 @@ export async function watchSponsoredAtas(
   if (rows.length === 0) return { checked: 0, closed: 0, flagged: 0 }
   const nowSecs = deps.now()
   const now = new Date(nowSecs * 1000)
+  const sponsor = deps.sponsor.toBase58()
   const infos = await deps.connection.getMultipleAccountsInfo(
     rows.map((r) => new PublicKey(r.ata)),
     'confirmed',
@@ -92,7 +121,7 @@ export async function watchSponsoredAtas(
       stillOpen.push(row.ata)
       continue
     }
-    let found: { sig: string | null; to: string }
+    let found: { sig: string | null } & AtaClose
     try {
       found = await findClose(deps, row.ata)
     } catch (err) {
@@ -100,16 +129,27 @@ export async function watchSponsoredAtas(
       stillOpen.push(row.ata)
       continue
     }
-    const { sig, to } = found
+    const { sig, to, byClaim } = found
+    // A claim's close is expected: the sponsor counted this rent as spent when it opened the
+    // account, so the wallet owes nothing. `atasClosedAway` counts every `closed_to` but the
+    // sponsor's, so the claim is recorded under the sponsor's key; `closed_sig` names the claim
+    // and the log line where the rent went.
     // Guarded by the creation we traced: a newer creation of this address stays open.
     await markAtaClosed(deps.db, row.ata, {
       closedSig: sig,
       closedAt: now,
-      closedTo: to,
+      closedTo: byClaim ? sponsor : to,
       createdSig: row.createdSig,
     })
     closed++
-    if (to === deps.sponsor.toBase58()) continue
+    if (byClaim) {
+      deps.log.info(
+        { wallet: row.wallet, ata: row.ata, to, sig },
+        'sponsor-paid ATA closed by a claim',
+      )
+      continue
+    }
+    if (to === sponsor) continue
     flagged++
     deps.log.warn({ wallet: row.wallet, ata: row.ata, to }, 'sponsor-paid ATA closed elsewhere')
     await deps.alerts.send(

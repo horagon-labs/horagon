@@ -2,10 +2,22 @@ import {
   atasClosedAway,
   type DbHandle,
   recordSponsoredAtas,
+  schema,
   sponsoredAtasToCheck,
 } from '@horagon/db'
 import { createTestDb } from '@horagon/db/testing'
-import { createCloseAccountInstruction, createTransferCheckedInstruction } from '@solana/spl-token'
+import {
+  ataAddress,
+  buildClaimWinningsIx,
+  buildRedeemPairIx,
+  deriveNoMint,
+  deriveYesMint,
+} from '@horagon/sdk'
+import {
+  createCloseAccountInstruction,
+  createTransferCheckedInstruction,
+  TOKEN_PROGRAM_ID,
+} from '@solana/spl-token'
 import {
   Keypair,
   type PublicKey,
@@ -17,14 +29,18 @@ import {
 import pino, { type Logger } from 'pino'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { Alerter } from '../src/alerts'
-import { type AtaWatchDeps, closeDestination, watchSponsoredAtas } from '../src/ata-watch'
+import { type AtaWatchDeps, closeOf, watchSponsoredAtas } from '../src/ata-watch'
 
 const sponsor = Keypair.generate().publicKey
 const mint = Keypair.generate().publicKey
 const key = () => Keypair.generate().publicKey
+/** SPL Token CloseAccount data ([9]) in base58, as a transaction response gives inner data. */
+const CLOSE_DATA_B58 = 'A'
+
+type Inner = NonNullable<NonNullable<VersionedTransactionResponse['meta']>['innerInstructions']>
 
 /** A confirmed transaction holding `ixs`, as getTransaction returns it. */
-function confirmed(payer: PublicKey, ixs: TransactionInstruction[]) {
+function confirmed(payer: PublicKey, ixs: TransactionInstruction[], inner?: Inner) {
   const message = new TransactionMessage({
     payerKey: payer,
     recentBlockhash: 'EkSnNWid2cvwEVnVx9aBqawnmiCNiDgp3gUdkDPTKN1N',
@@ -34,11 +50,43 @@ function confirmed(payer: PublicKey, ixs: TransactionInstruction[]) {
     slot: 1,
     blockTime: 1,
     transaction: new VersionedTransaction(message),
-    meta: { err: null },
+    meta: { err: null, ...(inner ? { innerInstructions: inner } : {}) },
   } as unknown as VersionedTransactionResponse
 }
 
-describe('closeDestination', () => {
+/**
+ * A sponsored transaction whose top-level instruction `parent` (on `market`, signed by `user`)
+ * closed the user's YES and NO accounts through Token CPIs, rent to the user: what pm-AMM's
+ * claim_winnings does ("Settled: ... accounts closed").
+ */
+function closedInside(
+  parent: (p: {
+    user: PublicKey
+    market: PublicKey
+    collateralMint: PublicKey
+  }) => TransactionInstruction,
+  user: PublicKey,
+  market = key(),
+) {
+  const outcome = [deriveYesMint(market), deriveNoMint(market)].map((m) =>
+    ataAddress({ owner: user, mint: m }),
+  ) as [PublicKey, PublicKey]
+  const ix = parent({ user, market, collateralMint: mint })
+  const keys = new TransactionMessage({
+    payerKey: sponsor,
+    recentBlockhash: 'EkSnNWid2cvwEVnVx9aBqawnmiCNiDgp3gUdkDPTKN1N',
+    instructions: [ix],
+  }).compileToV0Message().staticAccountKeys
+  const at = (k: PublicKey) => keys.findIndex((x) => x.equals(k))
+  const instructions = outcome.map((a) => ({
+    programIdIndex: at(TOKEN_PROGRAM_ID),
+    accounts: [at(a), at(user), at(user)],
+    data: CLOSE_DATA_B58,
+  }))
+  return { tx: confirmed(sponsor, [ix], [{ index: 0, instructions }]), outcome }
+}
+
+describe('closeOf', () => {
   it('finds where a CloseAccount of this ATA sent the rent', () => {
     const owner = key()
     const ata = key()
@@ -47,8 +95,23 @@ describe('closeDestination', () => {
       createTransferCheckedInstruction(ata, mint, key(), owner, 1n, 6),
       createCloseAccountInstruction(ata, to, owner),
     ])
-    expect(closeDestination(tx, ata.toBase58())).toBe(to.toBase58())
-    expect(closeDestination(tx, key().toBase58())).toBeUndefined()
+    expect(closeOf(tx, ata.toBase58())).toEqual({ to: to.toBase58(), byClaim: false })
+    expect(closeOf(tx, key().toBase58())).toBeUndefined()
+  })
+
+  it('finds the closes claim_winnings makes inside itself, and marks them as a claim', () => {
+    const user = key()
+    const { tx, outcome } = closedInside(buildClaimWinningsIx, user)
+    for (const ata of outcome) {
+      expect(closeOf(tx, ata.toBase58())).toEqual({ to: user.toBase58(), byClaim: true })
+    }
+    expect(closeOf(tx, ataAddress({ owner: user, mint }).toBase58())).toBeUndefined()
+  })
+
+  it('does not take a close inside any other instruction for a claim', () => {
+    const user = key()
+    const { tx, outcome } = closedInside((p) => buildRedeemPairIx({ ...p, amount: 1n }), user)
+    expect(closeOf(tx, outcome[0].toBase58())).toEqual({ to: user.toBase58(), byClaim: false })
   })
 })
 
@@ -126,6 +189,56 @@ describe('watchSponsoredAtas', () => {
 
     // Closed ATAs are done; the open one is checked again on the next pass.
     expect(await watchSponsoredAtas(deps)).toEqual({ checked: 1, closed: 0, flagged: 0 })
+  })
+
+  // Task 24 e2e: claim_winnings closes YES and NO itself and pays their rent to the user. That
+  // is how every claim on a resolved market ends, not a rent grab: no alert, no block.
+  it('expects the closes of a claim: no alert, and the wallet keeps its sponsored accounts', async () => {
+    const wallet = key()
+    const { tx: claim, outcome } = closedInside(buildClaimWinningsIx, wallet)
+    await recordSponsoredAtas(
+      h.db,
+      outcome.map((ata, i) => ({
+        ata: ata.toBase58(),
+        wallet: wallet.toBase58(),
+        mint: mint.toBase58(),
+        createdSig: `create-${i}`,
+        createdAt: new Date('2026-11-24T01:00:00Z'),
+      })),
+    )
+    const connection = {
+      getMultipleAccountsInfo: async (keys: PublicKey[]) => keys.map(() => null),
+      // Newest first: the claim, then the trade that created the account.
+      getSignaturesForAddress: async () => [
+        { signature: 'claim-sig', err: null },
+        { signature: 'trade-sig', err: null },
+      ],
+      getTransaction: async (sig: string) =>
+        sig === 'claim-sig'
+          ? claim
+          : confirmed(sponsor, [
+              createTransferCheckedInstruction(key(), mint, key(), wallet, 1n, 6),
+            ]),
+    } as unknown as AtaWatchDeps['connection']
+    const sent: string[] = []
+    const deps: AtaWatchDeps = {
+      db: h.db,
+      connection,
+      sponsor,
+      alerts: {
+        send: async (k) => {
+          sent.push(k)
+        },
+      },
+      log: pino({ level: 'silent' }),
+      now: () => Date.parse('2026-11-24T02:00:00Z') / 1000,
+    }
+    expect(await watchSponsoredAtas(deps)).toEqual({ checked: 2, closed: 2, flagged: 0 })
+    expect(sent).toEqual([])
+    expect(await atasClosedAway(h.db, wallet.toBase58(), sponsor.toBase58())).toBe(0)
+    const rows = await h.db.select().from(schema.sponsoredAtas)
+    expect(rows.map((r) => r.closedSig)).toEqual(['claim-sig', 'claim-sig'])
+    expect(await sponsoredAtasToCheck(h.db)).toEqual([])
   })
 
   it('does not let a close found for an old creation land on a newer one recorded meanwhile', async () => {

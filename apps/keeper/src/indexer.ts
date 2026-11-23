@@ -63,7 +63,8 @@ interface Ctx {
 const TOKEN_PROGRAMS = new Set([TOKEN_PROGRAM_ID.toBase58(), TOKEN_2022_PROGRAM_ID.toBase58()])
 const B58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
 
-function base58Decode(text: string): Uint8Array {
+/** Base58 text to bytes: a transaction response gives inner instruction data in base58. */
+export function base58Decode(text: string): Uint8Array {
   const bytes: number[] = []
   for (const ch of text) {
     let carry = B58.indexOf(ch)

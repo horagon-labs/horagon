@@ -38,7 +38,7 @@ client.
 | Threat                | Measure                                                                                                                                                                                         |
 | --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Sponsor farming       | Allow list per instruction; 30 tx/h per wallet and per IP hash; daily SOL cap; every user signature checked locally before any RPC call                                                         |
-| Sponsor rent farming  | ATA rent counted as spend at creation; 26 new ATAs a day per wallet, 78 per IP hash; none for a wallet that closed one away                                                                     |
+| Sponsor rent farming  | ATA rent counted as spend at creation; 26 new ATAs a day per wallet, 78 per IP hash; none for a wallet that closed one away outside a claim                                                     |
 | Malicious API input   | zod on every input, unknown fields refused, 64 KB body limit (4 KB for `POST /api/v1/tx/submit`), problem+json errors without RPC URLs or stacks                                                |
 | Wrong result          | Two-step resolution (propose, a challenge window, finalize); the keeper never proposes: a guardian confirms every result against a public box score                                             |
 | Feed failure          | No proposal without a guardian; a feed silent 2 min in Q4/OT, or in the last 30 min before the close, alerts the guardian; 10 min in Q4/OT halts the market                                     |
@@ -50,11 +50,14 @@ client.
 The user owns every token account the sponsor creates for them and may close it to any address,
 so the rent the sponsor paid comes back only from cooperative users. Horagon never counts it as
 float: the daily SOL cap charges it at creation (`getMinimumBalanceForRentExemption(165)` per
-create, read once from the RPC), and the sponsor budget assumes none of it returns. The keeper
-records each sponsor-paid ATA, checks every 10 minutes whether it still exists, and alerts
-`ata-close:<wallet>` when one closed to an address other than the sponsor (or to one it cannot
-trace); the API then opens no more accounts for that wallet. A first trade on a market costs
-the sponsor the fee plus two ATAs (YES and NO), about 0.003 SOL on devnet (Tier 0, S3a).
+create, read once from the RPC), and the sponsor budget assumes none of it returns. A claim
+never returns it: pm-AMM's `claim_winnings` burns both sides, pays the winning one, and closes
+the player's YES and NO accounts itself, rent to the player, so the claim transaction carries
+no close of its own. The keeper records each sponsor-paid ATA, checks every 10 minutes whether
+it still exists, and alerts `ata-close:<wallet>` when one closed to an address other than the
+sponsor (or to one it cannot trace), unless pm-AMM closed it inside a `claim_winnings`; the API
+then opens no more accounts for that wallet. A first trade on a market costs the sponsor the
+fee plus two ATAs (YES and NO), about 0.003 SOL on devnet (Tier 0, S3a).
 
 ## GitHub Actions
 

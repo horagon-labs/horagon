@@ -384,8 +384,9 @@ refuses a transaction that differs from the allowlist in any point:
   same transaction trades.
 - **pm-AMM.** Only `swap`, `redeem_pair` and `claim_winnings`, signed by the player, on a market
   listed as Horagon's.
-- **The sponsor's role.** It appears only as fee payer, rent payer, or the destination of a
-  closed account.
+- **The sponsor's role.** It appears only as fee payer and rent payer. No instruction closes
+  an account back to it: `claim_winnings` closes the player's YES and NO accounts itself and
+  pays their rent to the player.
 
 The verdict reports how many token accounts the sponsor pays for, so the daily SOL cap can count
 rent when it is spent.
@@ -445,10 +446,12 @@ interfaces it uses are tested.
   URL. ESPN scores can also go down within a game (stat corrections): three of the 12 recorded
   games have such a frame.
 - **Sponsor rent can be farmed.** A user owns the token accounts the sponsor paid for, and can
-  close them to their own wallet. The validator ties outcome-token accounts to the traded market
-  and caps them at 5 per transaction. The API opens at most 26 new token accounts a day per
-  wallet and 78 per IP hash. The keeper watches every account the sponsor paid for, and once a
-  wallet closes one to another address, the sponsor opens no more for that wallet
+  close them to their own wallet. A claim always does: pm-AMM's `claim_winnings` closes the YES
+  and NO accounts and pays their rent to the player. The validator ties outcome-token accounts
+  to the traded market and caps them at 5 per transaction. The API opens at most 26 new token
+  accounts a day per wallet and 78 per IP hash, and counts their rent as spent when it opens
+  them. The keeper watches every account the sponsor paid for, and once a wallet closes one to
+  another address outside a claim, the sponsor opens no more for that wallet
   ([`docs/security.md`](docs/security.md#sponsor-rent-is-spend)).
 - **S2 is not proven on devnet.** The PDA authority passed on Surfpool. The devnet test needs
   about 3 devnet SOL and comes with the Tier 1 deploy. If it fails, the attestor key becomes the
