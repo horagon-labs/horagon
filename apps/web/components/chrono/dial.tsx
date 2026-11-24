@@ -6,7 +6,7 @@ import { useEffect, useId, useRef, useState } from 'react'
 import { useMotionReduced } from '../../lib/chrono/feel'
 import { arcPath, polar, priceToAngle } from '../../lib/chrono/geometry'
 import type { DialState } from '../../lib/chrono/state'
-import { needleClass, priceDigits, RING, rimClass } from './dial-look'
+import { isBeat, needleClass, priceDigits, RING, rimClass } from './dial-look'
 import { Needle } from './needle'
 import { RollingNumber } from './rolling-number'
 
@@ -41,15 +41,15 @@ export interface DialProps {
   className?: string
 }
 
-/** Counts changes of `key` after the first render, so no beat plays on page load. */
-function useBeat(key: string | null | undefined): number {
-  const seen = useRef(key)
+/** Counts beats (see `isBeat`): `armed` is false while the dial is loading. */
+function useBeat(key: string | null | undefined, armed: boolean): number {
+  const prev = useRef({ key, armed })
   const [count, setCount] = useState(0)
   useEffect(() => {
-    if (key === seen.current) return
-    seen.current = key
-    setCount((n) => n + 1)
-  }, [key])
+    const beat = isBeat(prev.current, key)
+    prev.current = { key, armed }
+    if (beat) setCount((n) => n + 1)
+  }, [key, armed])
   return count
 }
 
@@ -60,8 +60,8 @@ function pts(...points: { x: number; y: number }[]): string {
 export function Dial(p: DialProps) {
   const id = useId()
   const reduced = useMotionReduced()
-  const flash = useBeat(p.runKey)
-  const settle = useBeat(p.state === 'resolved' ? 'resolved' : null)
+  const flash = useBeat(p.runKey, !p.loading)
+  const settle = useBeat(p.state === 'resolved' ? 'resolved' : null, !p.loading)
   const price = p.state === 'void' ? null : p.price
   const ghost = p.loading ? null : (p.ghostPrice ?? null)
   const blink = p.state === 'closing' ? 'animate-blink' : ''

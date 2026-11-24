@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import { Dial, type DialProps } from '../components/chrono/dial'
-import { priceDigits, RING, stateLine } from '../components/chrono/dial-look'
+import { isBeat, priceDigits, RING, stateLine } from '../components/chrono/dial-look'
 import { MiniDial } from '../components/chrono/mini-dial'
 import { at, game, NOW } from '../lib/chrono/fixtures'
 import { DIAL_STATES } from '../lib/chrono/state'
@@ -96,6 +96,15 @@ describe('Dial (spec 3.2, 4.3)', () => {
   it('plays no beat on the first render', () => {
     const html = dial({ state: 'resolved', price: 1, runKey: 'run-1' })
     expect(html).not.toContain('data-beat')
+  })
+
+  it('plays a beat only for a new event on a dial that already had data (spec 2.4)', () => {
+    expect(isBeat({ key: undefined, armed: false }, 'run-1')).toBe(false)
+    expect(isBeat({ key: null, armed: false }, 'resolved')).toBe(false)
+    expect(isBeat({ key: null, armed: true }, 'run-1')).toBe(true)
+    expect(isBeat({ key: null, armed: true }, 'resolved')).toBe(true)
+    expect(isBeat({ key: 'run-1', armed: true }, 'run-1')).toBe(false)
+    expect(isBeat({ key: 'run-1', armed: true }, null)).toBe(false)
   })
 })
 

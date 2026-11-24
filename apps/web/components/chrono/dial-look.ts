@@ -28,6 +28,18 @@ export const needleClass = (state: DialState): string =>
 export const priceDigits = (price: number | null): string =>
   price === null || !Number.isFinite(price) ? '—' : cents(price).replace('¢', '')
 
+/**
+ * A beat (the run flash or the settle) plays only for a new, non-null key on a dial that
+ * already had data at the previous key: never on page load, on the first fetch, or when a run
+ * ends (spec 2.4).
+ */
+export function isBeat(
+  prev: { key: string | null | undefined; armed: boolean },
+  key: string | null | undefined,
+): boolean {
+  return prev.armed && key !== prev.key && key != null
+}
+
 type LineGame = Pick<Game, 'status' | 'period' | 'clockSecs' | 'scheduledTipoff'>
 
 /** The one line under the number (spec 4.3 "Cách hien"); void reuses gameClock's own words. */
