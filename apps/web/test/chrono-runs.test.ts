@@ -87,6 +87,34 @@ describe('findRuns (spec 3.1)', () => {
     )
     expect(run).toMatchObject({ priceFrom: null, priceTo: null })
   })
+
+  it('takes no price from a quote that comes only after the run', () => {
+    const [run] = findRuns(
+      made(
+        [
+          [0, 0, 0],
+          [60, 8, 0],
+        ],
+        [[100, 0.5]],
+      ),
+      MKT,
+    )
+    expect(run).toMatchObject({ priceFrom: null, priceTo: null })
+    expect(runLine(run as Run, TEAMS)).toBe('CLE on an 8–0 run')
+  })
+
+  it('does not join baskets 181 seconds apart into one run', () => {
+    expect(
+      findRuns(
+        made([
+          [0, 0, 0],
+          [100, 4, 0],
+          [281, 8, 0],
+        ]),
+        MKT,
+      ),
+    ).toEqual([])
+  })
 })
 
 describe('runLine (spec 3.2)', () => {
@@ -104,6 +132,14 @@ describe('runLine (spec 3.2)', () => {
   it('picks the article and drops the price without one', () => {
     expect(runLine({ ...run, points: 12, priceTo: null }, TEAMS)).toBe('CLE on a 12–0 run')
     expect(runLine({ ...run, points: 11, priceFrom: null }, TEAMS)).toBe('CLE on an 11–0 run')
+  })
+
+  it('prints the edges as <1 and >99 instead of certainty', () => {
+    const edge: Run = { ...run, priceFrom: 0.004, priceTo: 0.996 }
+    expect(runLine(edge, TEAMS)).toBe('CLE on an 8–0 run · price <1 → >99 in 2 min')
+    expect(runLine({ ...edge, team: 'away' }, TEAMS)).toBe(
+      'MEM on an 8–0 run · price >99 → <1 in 2 min',
+    )
   })
 
   it('takes the newest run', () => {

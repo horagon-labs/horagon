@@ -2,6 +2,7 @@
 // real time. One run per streak, the best 3-minute stretch of it, with the market's price at
 // its start and end from history.prices.
 import type { GameHistory } from '@horagon/sdk'
+import { whole } from '../format'
 
 export const RUN_POINTS = 8
 export const RUN_SECS = 180
@@ -22,11 +23,11 @@ interface Basket {
   points: number
 }
 
-/** The last price at or before `ts`, else the first one after it, else null. */
+/** The last price at or before `ts`, or null. */
 function priceAt(prices: readonly { ts: number; price: number }[], ts: number): number | null {
   let best: { ts: number; price: number } | undefined
   for (const p of prices) if (p.ts <= ts && (!best || p.ts >= best.ts)) best = p
-  return (best ?? prices[0])?.price ?? null
+  return best?.price ?? null
 }
 
 /** The stretch of a streak with the most points inside RUN_SECS, earliest on a tie. */
@@ -81,8 +82,9 @@ export function findRuns(history: GameHistory, market: string): Run[] {
 
 /** "CLE on an 8–0 run · price 74 → 77 in 2 min" (spec 3.2), prices on the running side. */
 export function runLine(run: Run, teams: { home: string; away: string }): string {
+  // The running side's price in whole cents, "<1" and ">99" at the edges (see format.ts).
   const side = (p: number | null) =>
-    p === null ? null : Math.round((run.team === 'home' ? p : 1 - p) * 100)
+    p === null ? null : whole(run.team === 'home' ? p : 1 - p, '')
   const mins = Math.max(1, Math.round((run.to - run.from) / 60))
   const from = side(run.priceFrom)
   const to = side(run.priceTo)

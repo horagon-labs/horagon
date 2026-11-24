@@ -13,7 +13,7 @@ export const CLUSTER: Cluster =
 const LOCAL_RPC = 'http://127.0.0.1:8899'
 
 // Edges stay honest while a market trades: under 1 shows "<1", over 99 shows ">99".
-function whole(p: number | null | undefined, unit: string): string {
+export function whole(p: number | null | undefined, unit: string): string {
   if (p === null || p === undefined) return '–'
   const r = Math.round(p * 100)
   if (p > 0 && r < 1) return `<1${unit}`
