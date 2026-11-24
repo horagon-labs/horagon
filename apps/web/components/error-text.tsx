@@ -22,10 +22,7 @@ export function ErrorText({ error }: { error: unknown }) {
   const signature = failedSignature(error)
   return (
     // A signature is one 88-character token: let it break anywhere so a phone never scrolls.
-    <div
-      role="alert"
-      className="space-y-1 text-sm text-red-600 [overflow-wrap:anywhere] dark:text-red-400"
-    >
+    <div role="alert" className="space-y-1 text-13 text-red-400 [overflow-wrap:anywhere]">
       <p>{errorText(error)}</p>
       {signature && (
         <p>

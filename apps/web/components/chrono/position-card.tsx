@@ -1,0 +1,93 @@
+'use client'
+// Your position in this game (spec 3.2): paid, worth now and what it pays if that team wins,
+// with Sell. Claim all is a HoldButton running the wallet's own startClaims, so a claim is
+// still the whole wallet's (one run at a time, every copy shows it).
+import { type PositionsResponse, parseAmount, type Side } from '@horagon/sdk'
+import { explorerTx, usdc } from '../../lib/format'
+import { ErrorText } from '../error-text'
+import { HoldButton } from './hold-button'
+
+export interface PositionCardProps {
+  gameId: string
+  teams: { home: string; away: string }
+  portfolio: PositionsResponse | undefined
+  /** The market still trades: Sell opens the crown in sell mode for that side. */
+  canSell: boolean
+  onSell: (side: Side) => void
+  claiming: boolean
+  claimed: string[]
+  claimError: unknown
+  onClaim: () => void
+}
+
+export function PositionCard(p: PositionCardProps) {
+  const rows = (p.portfolio?.positions ?? []).filter(
+    (x) => x.gameId === p.gameId && parseAmount(x.shares) > 0n,
+  )
+  const claimable = rows.some((x) => x.claimable)
+  return (
+    <section className="space-y-3 rounded-card border border-brass-500/15 p-4">
+      <h2 className="text-11 uppercase tracking-[0.3em] text-brass-500">Your position</h2>
+      {rows.length === 0 ? (
+        <p className="text-13 text-ash-400">No positions yet.</p>
+      ) : (
+        <ul className="divide-y divide-line">
+          {rows.map((x) => {
+            const team = p.teams[x.side]
+            const down = x.pnlUsdc.startsWith('-')
+            return (
+              <li key={`${x.market}-${x.side}`} className="flex items-center gap-3 py-2">
+                <span aria-hidden="true" className="text-lume-300">
+                  ◆
+                </span>
+                <div className="min-w-0 flex-1 font-mono text-13 tabular-nums">
+                  <p className="font-sans text-15 text-ivory-100">
+                    {team} · {usdc(x.shares)} shares
+                  </p>
+                  <p className="text-ash-400">
+                    paid {usdc(x.costUsdc)} · worth {usdc(x.valueUsdc)}{' '}
+                    <span className={down ? 'text-red-400' : 'text-lume-300'}>
+                      ({down ? '' : '+'}
+                      {usdc(x.pnlUsdc)})
+                    </span>
+                  </p>
+                  <p className="text-ash-400">
+                    pays {usdc(x.shares)} mUSDC if {team} wins
+                  </p>
+                </div>
+                {p.canSell && (
+                  <button
+                    type="button"
+                    onClick={() => p.onSell(x.side)}
+                    className="min-h-11 rounded-card border border-line px-4 text-13 text-ivory-100"
+                  >
+                    Sell
+                  </button>
+                )}
+              </li>
+            )
+          })}
+        </ul>
+      )}
+      {(claimable || p.claiming) && (
+        <HoldButton
+          label={p.claiming ? 'Claiming…' : 'Claim all'}
+          pending={p.claiming}
+          onConfirm={p.onClaim}
+        />
+      )}
+      {p.claimed.map((sig) => (
+        <a
+          key={sig}
+          href={explorerTx(sig)}
+          target="_blank"
+          rel="noreferrer"
+          className="block text-11 text-brass-400 underline"
+        >
+          Claimed: view transaction
+        </a>
+      ))}
+      <ErrorText error={p.claimError} />
+    </section>
+  )
+}
