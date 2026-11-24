@@ -65,7 +65,10 @@ export interface Trade {
   quote: Poll<Quote>
   /** The newest quote for this side and direction, kept while the next one loads. */
   lastQuote: Quote | undefined
-  /** The quote for the amount on screen has not arrived yet: the ghost dims (spec 5.5). */
+  /**
+   * The quote for the amount on screen has not arrived yet, still debouncing or still loading:
+   * the ghost dims (spec 5.5).
+   */
   quotePending: boolean
   stage: TradeStage | null
   done: { signature: string; text: string } | null
@@ -222,7 +225,7 @@ export function useTrade(game: GameDetail, market: MarketSummary, opts: TradeOpt
     check,
     quote,
     lastQuote,
-    quotePending: check.quote && fresh === undefined,
+    quotePending: check.quote && (fresh === undefined || quoted !== amount.trim()),
     stage,
     done,
     error,
