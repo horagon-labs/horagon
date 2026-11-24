@@ -90,9 +90,13 @@ describe('buzz', () => {
 })
 
 describe('playTick', () => {
-  function fakeAudio() {
+  function fakeAudio(state = 'running') {
     const calls: string[] = []
     const audio: TickAudio = {
+      state,
+      resume: async () => {
+        calls.push('resume')
+      },
       currentTime: 2,
       destination: 'speakers',
       createOscillator: () => ({
@@ -129,6 +133,20 @@ describe('playTick', () => {
       'start',
       'stop@2.03',
     ])
+  })
+
+  it('resumes a context the browser left suspended, then ticks (M14)', () => {
+    const { audio, calls } = fakeAudio('suspended')
+    expect(playTick({ ...DEFAULT_FEEL, sound: true }, () => audio)).toBe(true)
+    expect(calls[0]).toBe('resume')
+    expect(calls).toContain('start')
+  })
+
+  it('survives a resume the browser refuses', async () => {
+    const { audio } = fakeAudio('suspended')
+    const refused = { ...audio, resume: () => Promise.reject(new Error('NotAllowedError')) }
+    expect(playTick({ ...DEFAULT_FEEL, sound: true }, () => refused)).toBe(true)
+    await Promise.resolve()
   })
 
   it('does nothing without audio support, and survives an audio error', () => {

@@ -1,6 +1,22 @@
 // What each HoragonError code does on the dial besides its words (spec 6.1). The words stay
 // errorText's; a non-HoragonError only ever shows "Something went wrong. Try again.".
 import { isHoragonError } from '@horagon/sdk'
+import { pollHealth } from './health'
+
+/**
+ * The quote poll's error for ErrorText (spec 4.4): an answer from the API, such as an amount
+ * too large, shows at once; a network failure (NETWORK, or no HoragonError at all) only after
+ * ERROR_AFTER failed polls in a row, like every other poll.
+ */
+export function quoteError(poll: {
+  error: Error | undefined
+  failures: number
+}): Error | undefined {
+  const e = poll.error
+  if (e === undefined) return undefined
+  if (isHoragonError(e) && e.code !== 'NETWORK') return e
+  return pollHealth(poll).error
+}
 
 /**
  * refresh: reload, the dial turns closed or halted. requote: the ghost shakes, "Get a new

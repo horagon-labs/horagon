@@ -139,6 +139,7 @@ describe('MarketBlock (spec 3.2, 4.2)', () => {
           market={market()}
           dial={gameDial(g, market(), NOW - 3_730, null, NOW)}
           now={NOW}
+          stale={false}
           onMarketStale={() => {}}
         />
       </WalletProvider>,

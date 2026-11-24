@@ -2,7 +2,7 @@
 // The crown's content (spec 3.2, 5.5): the bezel around a dial whose ghost needle follows the
 // newest quote, the numbers, presets and the amount field, and the HoldButton. It only draws a
 // Trade from useTrade; the same panel is the mobile sheet and the desktop right column.
-import type { GameDetail, MarketSummary } from '@horagon/sdk'
+import { type GameDetail, type MarketSummary, parseAmount } from '@horagon/sdk'
 import { buySteps, percentOf, sellSteps, stepIndex } from '../../lib/chrono/bezel'
 import { errorEffect, retryLeft } from '../../lib/chrono/errors'
 import type { DialState } from '../../lib/chrono/state'
@@ -13,6 +13,7 @@ import type { Trade } from '../../lib/use-trade'
 import { ErrorText } from '../error-text'
 import { Bezel } from './bezel'
 import { Dial } from './dial'
+import { Reconnecting } from './game-screen'
 import { HoldButton } from './hold-button'
 
 const BUY_PRESETS = ['10', '25', '50', '100'] as const
@@ -29,6 +30,11 @@ export interface CrownPanelProps {
   funding: boolean
   fundNote: string | undefined
   onFaucet: () => void
+  /**
+   * The game poll is failing (spec 4.4): the crown's own dial shows it too, since the sheet
+   * covers the big one on a phone.
+   */
+  stale?: boolean
 }
 
 export function CrownPanel(p: CrownPanelProps) {
@@ -37,15 +43,20 @@ export function CrownPanel(p: CrownPanelProps) {
   const steps = buying ? buySteps(t.balance) : sellSteps(t.held?.shares)
   const q = t.quote.data ?? t.lastQuote
   const effect = errorEffect(t.error)
+  // SLIPPAGE_EXCEEDED: until a quote newer than the error has come.
+  const requote = effect === 'requote' && !(q !== undefined && q.now > t.errorAt)
   const wait = effect === 'countdown' ? retryLeft(t.error, t.errorAt, p.now) : 0
   const label = wait > 0 ? `Try again in ${wait} s` : sendText(t.ready, t.stage, t.action, t.team)
   const ghost = q && t.check.quote ? q.priceAfter : null
+  const spendable = t.balance ? parseAmount(t.balance) > 0n : false
+  const tone = t.side === 'home' ? 'lume' : 'brass'
   const spoken = (x: number) => cents(x).replace('¢', ' cents')
   const now = p.market.price === null ? 'no price yet' : spoken(p.market.price)
   const chip =
     'min-h-11 flex-1 rounded-card border border-line font-mono text-13 aria-pressed:border-lume-300 aria-pressed:text-lume-300 disabled:opacity-40'
   return (
     <div className="space-y-4">
+      <Reconnecting stale={p.stale ?? false} />
       <fieldset className="flex gap-2">
         <legend className="sr-only">Buy or sell</legend>
         <button
@@ -85,7 +96,8 @@ export function CrownPanel(p: CrownPanelProps) {
           team={p.game.home}
           ghostPrice={ghost}
           ghostPending={t.quotePending}
-          ghostShake={effect === 'requote'}
+          ghostShake={requote}
+          stale={p.stale}
           detail={buying ? `${t.amount} mUSDC` : `${t.amount} shares`}
           label={`${p.game.home} wins, ${now}${ghost === null ? '' : `, after this trade ${spoken(ghost)}`}`}
         />
@@ -128,7 +140,7 @@ export function CrownPanel(p: CrownPanelProps) {
             ))}
             <button
               type="button"
-              disabled={!t.balance}
+              disabled={!spendable}
               onClick={() => t.balance && t.setAmount(t.balance)}
               className={chip}
             >
@@ -183,14 +195,27 @@ export function CrownPanel(p: CrownPanelProps) {
         </p>
       )}
       {p.fundNote && !t.fundNoteHidden && <p className="text-13 text-lume-300">{p.fundNote}</p>}
-      <HoldButton
-        label={label}
-        tone={t.side === 'home' ? 'lume' : 'brass'}
-        disabled={wait > 0 || sendDisabled(t.ready, t.check.ok, t.stage)}
-        pending={t.stage !== null}
-        onConfirm={t.send}
-      />
-      {effect === 'requote' && (
+      {t.ready === 'no-wallet' ? (
+        // Opening the 18+ gate sends nothing, so it takes one tap, not a hold.
+        <button
+          type="button"
+          onClick={t.send}
+          className={`min-h-11 w-full rounded-card px-4 text-15 font-semibold text-enamel-950 ${
+            tone === 'brass' ? 'bg-brass-500' : 'bg-lume-300'
+          }`}
+        >
+          {label}
+        </button>
+      ) : (
+        <HoldButton
+          label={label}
+          tone={tone}
+          disabled={wait > 0 || sendDisabled(t.ready, t.check.ok, t.stage)}
+          pending={t.stage !== null}
+          onConfirm={t.send}
+        />
+      )}
+      {requote && (
         <button
           type="button"
           onClick={t.quote.refresh}
@@ -212,7 +237,8 @@ export function CrownPanel(p: CrownPanelProps) {
           </a>
         </p>
       )}
-      <ErrorText error={t.shownError} />
+      {/* A RATE_LIMITED wait counts down on the HoldButton: the line leaves the seconds to it. */}
+      <ErrorText error={t.shownError} countdown={effect === 'countdown'} />
     </div>
   )
 }

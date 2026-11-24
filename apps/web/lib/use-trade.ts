@@ -18,7 +18,7 @@ import type { Keypair } from '@solana/web3.js'
 import { useEffect, useRef, useState } from 'react'
 import { useWallet } from '../components/wallet'
 import { api } from './api'
-import { errorEffect } from './chrono/errors'
+import { errorEffect, quoteError } from './chrono/errors'
 import { awaitFill, createFillTracker, fillLine, holding } from './fill'
 import { DEFAULT_SLIPPAGE_BPS, executeTrade, type TradeStage } from './trade'
 import { checkTrade, type TradeCheck, tradeReady } from './trade-form'
@@ -253,7 +253,8 @@ export function useTrade(game: GameDetail, market: MarketSummary, opts: TradeOpt
     error,
     errorAt,
     failedAction,
-    shownError: error ?? fundError ?? (check.quote ? quote.error : undefined),
+    // A quote that fails on the network shows only after three polls in a row (spec 4.4).
+    shownError: error ?? fundError ?? (check.quote ? quoteError(quote) : undefined),
     fundNoteHidden,
     send: () => {
       if (ready === 'no-wallet') return openGate()

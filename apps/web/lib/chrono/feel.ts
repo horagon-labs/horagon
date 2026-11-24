@@ -66,6 +66,9 @@ export function buzz(feel: Feel, ms: number, nav: Vibrator | undefined = globalT
 
 /** The part of an AudioContext the tick uses. */
 export interface TickAudio {
+  /** "suspended" until the page has had a user gesture the browser counts. */
+  readonly state: string
+  resume(): Promise<unknown>
   readonly currentTime: number
   readonly destination: unknown
   createOscillator(): {
@@ -96,6 +99,9 @@ export function playTick(feel: Feel, getAudio: () => TickAudio | null = browserA
   try {
     const ctx = getAudio()
     if (!ctx) return false
+    // A context first made on a touch's pointermove (not a gesture the browser counts) starts
+    // suspended and would stay silent; a refused resume only means this tick is not heard.
+    if (ctx.state === 'suspended') void ctx.resume().catch(() => {})
     const t = ctx.currentTime
     const osc = ctx.createOscillator()
     const gain = ctx.createGain()

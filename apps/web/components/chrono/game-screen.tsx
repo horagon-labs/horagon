@@ -26,8 +26,8 @@ export interface GameScreenProps {
   right: ReactNode
 }
 
-/** The failing-poll line (spec 4.4), on the screen and on the loading face. */
-function Reconnecting({ stale }: { stale: boolean }) {
+/** The failing-poll line (spec 4.4), on the screen, the loading face and the crown. */
+export function Reconnecting({ stale }: { stale: boolean }) {
   return stale ? (
     <p role="status" className="text-center font-mono text-11 text-red-400">
       Reconnecting…

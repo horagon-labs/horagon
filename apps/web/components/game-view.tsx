@@ -68,6 +68,7 @@ export function GameView({ id }: { id: string }) {
               market={winner}
               dial={dial}
               now={now}
+              stale={health.stale}
               onMarketStale={detail.refresh}
             />
           ) : (

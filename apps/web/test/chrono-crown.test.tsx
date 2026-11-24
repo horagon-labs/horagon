@@ -173,6 +173,38 @@ describe('CrownPanel (spec 3.2, 5.5)', () => {
     const html = panel({ error, shownError: error, errorAt: NOW }, { now: NOW + 1 })
     expect(html).toContain('Try again in 4 s')
     expect(html).toMatch(/<button type="button" disabled=""/)
+    // One number only: the error line leaves the seconds to the live countdown (M6).
+    expect(html).toContain('Too many requests.')
+    expect(html).not.toContain('Try again in 5 s')
+  })
+
+  it('stops the shake and the new-quote button once a newer quote has come (M6)', () => {
+    const error = new HoragonError('SLIPPAGE_EXCEEDED', 'price moved')
+    const newer = { data: quote({ now: NOW + 3 }), error: undefined, failures: 0, refresh: noop }
+    const html = panel({ error, shownError: error, errorAt: NOW, quote: newer })
+    expect(html).not.toContain('animate-shake')
+    expect(html).not.toContain('Get a new quote')
+  })
+
+  it('shows the stale line and Reconnecting on the crown’s own dial (M4)', () => {
+    expect(panel()).not.toContain('Reconnecting…')
+    const html = panel({}, { stale: true })
+    expect(html).toContain('Reconnecting…')
+    expect(html).toContain('data-stale')
+  })
+
+  it('sets up a wallet with a plain button, not a hold (M12)', () => {
+    const html = panel({ ready: 'no-wallet', balance: undefined })
+    expect(html).toMatch(
+      /<button type="button" class="min-h-11[^"]*">Set up wallet to trade<\/button>/,
+    )
+    expect(html).not.toContain('hold-safe')
+  })
+
+  it('turns Max off for a balance of zero as well as an unknown one (M15)', () => {
+    expect(panel({ balance: '0' })).toMatch(/disabled=""[^>]*>Max<\/button>/)
+    expect(panel({ balance: undefined })).toMatch(/disabled=""[^>]*>Max<\/button>/)
+    expect(panel()).not.toMatch(/disabled=""[^>]*>Max<\/button>/)
   })
 })
 

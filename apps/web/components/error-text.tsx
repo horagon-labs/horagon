@@ -2,10 +2,19 @@ import { isHoragonError } from '@horagon/sdk'
 import { explorerTx, shortKey } from '../lib/format'
 import { failedSignature } from '../lib/trade'
 
-/** The API's message and its "what to do now" hint; never a stack or an RPC URL. */
-export function errorText(err: unknown): string {
+/** How the words are shown: `countdown`, a live countdown of a RATE_LIMITED wait is on screen. */
+export interface ErrorTextOptions {
+  countdown?: boolean
+}
+
+/**
+ * The API's message and its "what to do now" hint; never a stack or an RPC URL. With a live
+ * countdown beside it (the crown's HoldButton), a RATE_LIMITED wait leaves the seconds to it.
+ */
+export function errorText(err: unknown, opts: ErrorTextOptions = {}): string {
   if (isHoragonError(err)) {
     if (err.code === 'RATE_LIMITED' && err.retryAfterSecs !== undefined) {
+      if (opts.countdown) return 'Too many requests.'
       return `Too many requests. Try again in ${Math.ceil(err.retryAfterSecs)} s.`
     }
     return err.hint ? `${err.message} ${err.hint}` : err.message
@@ -17,13 +26,13 @@ export function errorText(err: unknown): string {
  * An error, and when it names a transaction (`failedSignature`, read through the SDK only),
  * that transaction: it may still land, so nothing here offers to send again (R2).
  */
-export function ErrorText({ error }: { error: unknown }) {
+export function ErrorText({ error, countdown }: { error: unknown } & ErrorTextOptions) {
   if (error === undefined || error === null) return null
   const signature = failedSignature(error)
   return (
     // A signature is one 88-character token: let it break anywhere so a phone never scrolls.
     <div role="alert" className="space-y-1 text-13 text-red-400 [overflow-wrap:anywhere]">
-      <p>{errorText(error)}</p>
+      <p>{errorText(error, { countdown })}</p>
       {signature && (
         <p>
           This transaction may still land:{' '}
