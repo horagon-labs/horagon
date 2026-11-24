@@ -143,6 +143,9 @@ export function Tape(props: {
         secondsVisible: false,
         borderColor: COLORS.line,
         rightOffsetPixels: RIGHT_OFFSET_PX,
+        // The one fit holds across a resize (a rotated phone, a wider window), and so does a
+        // range the user panned or zoomed to.
+        lockVisibleTimeRangeOnResize: true,
         tickMarkFormatter: (t: Time) => etClock(tapeTime(t)),
       },
       rightPriceScale: { borderColor: COLORS.line, scaleMargins: { top: 0.05, bottom: 0.05 } },
