@@ -1,6 +1,13 @@
 // Sample games for the tests and the dev-only state gallery (app/dev/chrono): one evening at
 // 9:08 PM ET with a game minutes from its close, two live games and two not open yet.
-import type { Game, GameDetail, MarketSummary, Position, PositionsResponse } from '@horagon/sdk'
+import type {
+  Game,
+  GameDetail,
+  GameHistory,
+  MarketSummary,
+  Position,
+  PositionsResponse,
+} from '@horagon/sdk'
 
 export const at = (iso: string): number => Math.floor(Date.parse(iso) / 1000)
 
@@ -143,4 +150,38 @@ export function evening(): Game[] {
       markets: [],
     }),
   ]
+}
+
+/**
+ * CLE's history from late in Q2: both teams score into Q3 (no run), then CLE goes on an 8-0
+ * run in 2 minutes while the price moves 74 -> 77, then MEM answers.
+ */
+export function history(): GameHistory {
+  const t = NOW - 900
+  const snap = (dt: number, homeScore: number, awayScore: number, period = 3) => ({
+    ts: t + dt,
+    homeScore,
+    awayScore,
+    period,
+    clockSecs: 300,
+    modelProb: 0.7,
+  })
+  const pubkey = market().pubkey
+  return {
+    gameId: 'nba-401810001',
+    snapshots: [
+      snap(0, 74, 76, 2),
+      snap(60, 76, 78),
+      snap(120, 78, 78),
+      snap(180, 81, 78),
+      snap(240, 84, 78),
+      snap(300, 84, 78),
+      snap(400, 84, 80),
+    ],
+    prices: [
+      { market: pubkey, ts: t + 100, price: 0.74 },
+      { market: pubkey, ts: t + 240, price: 0.77 },
+      { market: 'Other111111111111111111111111111111111111111', ts: t + 240, price: 0.1 },
+    ],
+  }
 }
