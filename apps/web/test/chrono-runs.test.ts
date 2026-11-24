@@ -1,5 +1,6 @@
 import type { GameHistory } from '@horagon/sdk'
 import { describe, expect, it } from 'vitest'
+import { runKeyOf } from '../components/chrono/dial-look'
 import { history, market, NOW } from '../lib/chrono/fixtures'
 import { findRuns, latestRun, type Run, runLine } from '../lib/chrono/runs'
 
@@ -26,7 +27,15 @@ describe('findRuns (spec 3.1)', () => {
   it('finds 8 unanswered points in 2 minutes with the prices at both ends', () => {
     const t = NOW - 900
     expect(findRuns(history(), MKT)).toEqual([
-      { team: 'home', from: t + 120, to: t + 240, points: 8, priceFrom: 0.74, priceTo: 0.77 },
+      {
+        team: 'home',
+        start: t + 120,
+        from: t + 120,
+        to: t + 240,
+        points: 8,
+        priceFrom: 0.74,
+        priceTo: 0.77,
+      },
     ])
   })
 
@@ -117,8 +126,52 @@ describe('findRuns (spec 3.1)', () => {
   })
 })
 
+describe('the run flash key (spec 2.4: once per run, M7)', () => {
+  const keyOf = (h: GameHistory) => runKeyOf(h, latestRun(findRuns(h, MKT)))
+  // CLE's streak, one basket of 4 at a time, whose best 3-minute stretch slides forward.
+  const streak: [number, number, number][] = [
+    [0, 0, 0],
+    [10, 4, 0],
+    [100, 8, 0],
+  ]
+
+  it('keeps one key while a streak grows from 8–0 to 10–0 to 12–0', () => {
+    const eight = made(streak)
+    const ten = made([...streak, [150, 10, 0]])
+    const twelve = made([...streak, [150, 10, 0], [190, 12, 0]])
+    const runs = [eight, ten, twelve].map((h) => findRuns(h, MKT))
+    expect(runs.map((r) => r.map((x) => x.points))).toEqual([[8], [10], [12]])
+    expect(keyOf(ten)).toBe(keyOf(eight))
+    expect(keyOf(twelve)).toBe(keyOf(eight))
+  })
+
+  it('keeps the key when the best 3-minute stretch slides on within the streak', () => {
+    const eight = made(streak)
+    const slid = made([...streak, [200, 12, 0], [250, 16, 0]])
+    expect(findRuns(slid, MKT)).toMatchObject([{ points: 12, from: NOW + 100, start: NOW + 10 }])
+    expect(keyOf(slid)).toBe(keyOf(eight))
+  })
+
+  it('gives a new streak by either team a new key', () => {
+    const eight = made(streak)
+    const answered = made([...streak, [130, 8, 4], [160, 8, 8]])
+    const again = made([...streak, [130, 8, 4], [160, 8, 8], [190, 12, 8], [220, 16, 8]])
+    expect(keyOf(answered)).not.toBe(keyOf(eight))
+    expect(keyOf(again)).not.toBe(keyOf(answered))
+    expect(keyOf(again)).not.toBe(keyOf(eight))
+  })
+})
+
 describe('runLine (spec 3.2)', () => {
-  const run: Run = { team: 'home', from: 0, to: 120, points: 8, priceFrom: 0.74, priceTo: 0.77 }
+  const run: Run = {
+    team: 'home',
+    start: 0,
+    from: 0,
+    to: 120,
+    points: 8,
+    priceFrom: 0.74,
+    priceTo: 0.77,
+  }
 
   it('says the team, the run and the price move', () => {
     expect(runLine(run, TEAMS)).toBe('CLE on an 8–0 run · price 74 → 77 in 2 min')

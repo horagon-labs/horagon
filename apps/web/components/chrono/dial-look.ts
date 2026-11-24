@@ -43,12 +43,14 @@ export function isBeat(
 
 /**
  * The run flash's key: `undefined` until history has loaded (not known yet), `null` for history
- * with no run, otherwise the newest run's. The dial absorbs the first key (see `beatArmed`).
+ * with no run, otherwise the newest run's streak, by its first basket: it stays the same while
+ * the run grows (8–0, 10–0, 12–0), so the rim flashes once per run (spec 2.4). The dial absorbs
+ * the first key (see `beatArmed`).
  */
 export const runKeyOf = (
   history: GameHistory | undefined,
   run: Run | null,
-): string | null | undefined => (history ? (run ? `${run.team}:${run.to}` : null) : undefined)
+): string | null | undefined => (history ? (run ? `${run.team}:${run.start}` : null) : undefined)
 
 /** The flash is armed once the dial has loaded and its key is known. */
 export const beatArmed = (loading: boolean | undefined, key: string | null | undefined): boolean =>

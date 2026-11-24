@@ -9,6 +9,11 @@ export const RUN_SECS = 180
 
 export interface Run {
   team: 'home' | 'away'
+  /**
+   * Unix seconds of the streak's first basket. Unlike `from`, it never moves while the streak
+   * grows, so it names the run (the Dial flashes once per run, spec 2.4).
+   */
+  start: number
   /** Unix seconds of the first and last basket of the stretch. */
   from: number
   to: number
@@ -54,10 +59,17 @@ export function findRuns(history: GameHistory, market: string): Run[] {
   let team: Run['team'] | null = null
   let streak: Basket[] = []
   const close = () => {
-    if (team === null || streak.length === 0) return
+    const first = streak[0]
+    if (team === null || first === undefined) return
     const s = bestStretch(streak)
     if (s.points >= RUN_POINTS) {
-      runs.push({ team, ...s, priceFrom: priceAt(prices, s.from), priceTo: priceAt(prices, s.to) })
+      runs.push({
+        team,
+        start: first.ts,
+        ...s,
+        priceFrom: priceAt(prices, s.from),
+        priceTo: priceAt(prices, s.to),
+      })
     }
   }
   for (let i = 1; i < snaps.length; i++) {
