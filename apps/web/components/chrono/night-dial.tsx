@@ -18,6 +18,8 @@ import { cents } from '../../lib/format'
 import { stateLine } from './dial-look'
 
 const C = 100
+// The readout's hub, inside ring 7 (r = 37, whose lit stroke edge is 34.5).
+const HUB = 33
 const HOURS = Array.from({ length: 12 }, (_, h) => h)
 
 /** Your games glow lume; amber near the close; brass while open; ash once trading stopped. */
@@ -56,7 +58,9 @@ export function NightDial(p: {
   const ids = labelIds(tracks, { selectedId: p.selectedId, hoverId: hover, now: p.now })
   const spots = labelSpots(tracks, ids, p.now)
   const focus = tracks.find((t) => t.item.id === ids[0])?.item
-  const hand = polar(C, C, 92, etClockAngle(p.now))
+  const angle = etClockAngle(p.now)
+  const hand = polar(C, C, 92, angle)
+  const hub = polar(C, C, HUB, angle)
 
   function onKeyDown(e: KeyboardEvent<HTMLDivElement>) {
     const current = order[index]
@@ -163,9 +167,18 @@ export function NightDial(p: {
             {tracks.find((t) => t.item.id === s.id)?.item.game.home}
           </text>
         ))}
+        <circle
+          cx={C}
+          cy={C}
+          r={HUB}
+          fill="none"
+          strokeWidth={0.75}
+          className="stroke-line"
+          data-hub
+        />
         <line
-          x1={C}
-          y1={C}
+          x1={hub.x}
+          y1={hub.y}
           x2={hand.x}
           y2={hand.y}
           strokeWidth={1.5}
@@ -173,7 +186,6 @@ export function NightDial(p: {
           className="stroke-ivory-100"
           data-now
         />
-        <circle cx={C} cy={C} r={3} className="fill-ivory-100" />
         {overflow.length > 0 && (
           <text
             x={C}
@@ -190,21 +202,23 @@ export function NightDial(p: {
         aria-hidden="true"
         className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-0.5 text-center"
       >
-        {focus ? (
-          <>
-            <span className="text-11 uppercase tracking-[0.2em] text-brass-500">
-              {focus.game.away} @ {focus.game.home}
-            </span>
-            <span className="font-mono text-24 text-ivory-100 tabular-nums">
-              {focus.price === null ? '—' : cents(focus.price)}
-            </span>
-            <span className="font-mono text-11 text-ash-400">
-              {stateLine(focus.state, focus.game, focus.secsLeft, p.now)}
-            </span>
-          </>
-        ) : (
-          <span className="max-w-[60%] text-13 text-ash-400">{p.emptyText}</span>
-        )}
+        <div className="flex max-w-[32%] flex-col items-center gap-0.5 text-center">
+          {focus ? (
+            <>
+              <span className="text-11 uppercase tracking-[0.2em] text-brass-500">
+                {focus.game.away} @ {focus.game.home}
+              </span>
+              <span className="font-mono text-24 text-ivory-100 tabular-nums">
+                {focus.price === null ? '—' : cents(focus.price)}
+              </span>
+              <span className="font-mono text-11 text-ash-400">
+                {stateLine(focus.state, focus.game, focus.secsLeft, p.now)}
+              </span>
+            </>
+          ) : (
+            <span className="text-13 text-ash-400">{p.emptyText}</span>
+          )}
+        </div>
       </div>
       {order.map((t, i) => (
         <div

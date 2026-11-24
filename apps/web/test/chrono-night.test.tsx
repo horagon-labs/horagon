@@ -125,6 +125,16 @@ describe('NightDial (spec 3.2, 4.1)', () => {
     for (const t of visible) expect(t).toContain('pointer-events="none"')
   })
 
+  it('keeps the now hand off the centre readout', () => {
+    const html = night()
+    const line = html.match(/<line [^>]*data-now[^>]*>/)?.[0] ?? ''
+    const num = (a: string) => Number(line.match(new RegExp(`${a}="([^"]+)"`))?.[1])
+    expect(Math.hypot(num('x1') - 100, num('y1') - 100)).toBeCloseTo(33, 2)
+    expect(html).not.toMatch(/<circle [^>]*r="3"/)
+    expect(html).toMatch(/<circle [^>]*r="33"[^>]*data-hub|<circle [^>]*data-hub[^>]*r="33"/)
+    expect(html).toContain('max-w-[32%]')
+  })
+
   it('shows the empty line and no options without games (spec 4.4)', () => {
     const html = night({ items: [] })
     expect(html).toContain('No NBA games in the next 24 hours.')
