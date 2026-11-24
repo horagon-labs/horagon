@@ -276,7 +276,7 @@ export function TradePanel({ game, market }: { game: GameDetail; market: MarketS
         onClick={() =>
           ready === 'no-wallet' ? openGate() : withAge((kp) => void submit(kp), 'trade')
         }
-        className={`w-full rounded-lg py-3 font-bold text-white disabled:opacity-50 ${side === 'home' ? 'bg-home' : 'bg-away'}`}
+        className={`w-full rounded-lg py-3 font-bold text-enamel-950 disabled:opacity-50 ${side === 'home' ? 'bg-home' : 'bg-away'}`}
       >
         {ready === 'no-wallet'
           ? 'Set up wallet to trade'

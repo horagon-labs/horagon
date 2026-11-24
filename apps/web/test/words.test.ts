@@ -3,8 +3,8 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 const WEB = join(import.meta.dirname, '..')
-/** Every folder whose sources can put words on screen (R3: components and app too). */
-const SOURCES = ['lib', 'components', 'app']
+/** Folders whose sources can put words on screen (R3), Chronometer ones by name (spec 2.7). */
+const SOURCES = ['lib', 'components', 'app', 'lib/chrono']
 
 const FORBIDDEN = ['bet', 'bets', 'betting', 'betslip', 'odds']
 const FORBIDDEN_PREFIX = ['gambl', 'wager']

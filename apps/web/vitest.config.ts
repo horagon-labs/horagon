@@ -1,8 +1,10 @@
 import { defineConfig } from 'vitest/config'
 
 export default defineConfig({
+  // tsconfig keeps JSX for Next ("preserve"); the .tsx tests need React's automatic runtime.
+  oxc: { jsx: { runtime: 'automatic', importSource: 'react' } },
   test: {
-    include: ['test/**/*.test.ts'],
+    include: ['test/**/*.test.{ts,tsx}'],
     environment: 'node',
     coverage: {
       provider: 'v8',
