@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import { Bezel } from '../components/chrono/bezel'
 import { CrownPanel, type CrownPanelProps } from '../components/chrono/crown-panel'
-import { CrownSheet } from '../components/chrono/crown-sheet'
+import { backdropHit, CrownSheet } from '../components/chrono/crown-sheet'
 import { PLAY_MONEY } from '../components/play-money-banner'
 import { buySteps, onRing, sellSteps, startsDrag } from '../lib/chrono/bezel'
 import { detail, market, NOW, position, quote } from '../lib/chrono/fixtures'
@@ -274,5 +274,31 @@ describe('CrownSheet (spec 3.2)', () => {
     expect(PLAY_MONEY).toBe('Play-money on devnet. No real value. No prizes.')
     expect(html).toContain(PLAY_MONEY)
     expect(html.indexOf(PLAY_MONEY)).toBeGreaterThan(html.indexOf('<p>inside</p>'))
+  })
+
+  it('keeps its title and Close at the top while the content scrolls', () => {
+    const html = renderToStaticMarkup(
+      <CrownSheet open={false} onClose={noop} title="Buy CLE">
+        <p>inside</p>
+      </CrownSheet>,
+    )
+    // The header row sits in the scrolling area, sticky and opaque, before the content.
+    expect(html).toMatch(/<div class="[^"]*\bsticky top-0\b[^"]*\bbg-enamel-900\b[^"]*"><h2/)
+    expect(html.indexOf('aria-label="Close"')).toBeLessThan(html.indexOf('<p>inside</p>'))
+  })
+})
+
+describe('backdropHit (CrownSheet)', () => {
+  const sheet = {}
+  const box = { left: 0, top: 300, right: 390, bottom: 844 }
+
+  it('is a press on the dialog itself, outside the panel', () => {
+    expect(backdropHit(sheet, sheet, { x: 200, y: 120 }, box)).toBe(true)
+  })
+
+  it('is not a press inside the panel, nor one on any element in it', () => {
+    expect(backdropHit(sheet, sheet, { x: 200, y: 600 }, box)).toBe(false)
+    expect(backdropHit({}, sheet, { x: 200, y: 120 }, box)).toBe(false)
+    expect(backdropHit({}, sheet, { x: 200, y: 600 }, box)).toBe(false)
   })
 })
