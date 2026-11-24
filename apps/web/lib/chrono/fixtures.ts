@@ -7,6 +7,7 @@ import type {
   MarketSummary,
   Position,
   PositionsResponse,
+  Quote,
 } from '@horagon/sdk'
 
 export const at = (iso: string): number => Math.floor(Date.parse(iso) / 1000)
@@ -183,5 +184,22 @@ export function history(): GameHistory {
       { market: pubkey, ts: t + 240, price: 0.77 },
       { market: 'Other111111111111111111111111111111111111111', ts: t + 240, price: 0.1 },
     ],
+  }
+}
+
+/** A buy of 25 mUSDC of CLE that moves the price from 77 to 79. */
+export function quote(over: Partial<Quote> = {}): Quote {
+  return {
+    direction: 'usdcToYes',
+    amountIn: '25',
+    amountOut: '31.5',
+    minOut: '30.87',
+    feeUsdc: '0.5',
+    avgPrice: 0.7778,
+    priceBefore: 0.77,
+    priceAfter: 0.79,
+    priceImpactBps: 120,
+    now: NOW,
+    ...over,
   }
 }

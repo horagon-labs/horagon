@@ -1,0 +1,166 @@
+import { HoragonError } from '@horagon/sdk'
+import { renderToStaticMarkup } from 'react-dom/server'
+import { describe, expect, it } from 'vitest'
+import { Bezel } from '../components/chrono/bezel'
+import { CrownPanel, type CrownPanelProps } from '../components/chrono/crown-panel'
+import { CrownSheet } from '../components/chrono/crown-sheet'
+import { buySteps, sellSteps } from '../lib/chrono/bezel'
+import { detail, market, NOW, position, quote } from '../lib/chrono/fixtures'
+import type { Trade } from '../lib/use-trade'
+
+const noop = () => {}
+
+/** A Trade as useTrade returns it: a ready wallet with 37.5 mUSDC buying 25 of CLE. */
+function trade(over: Partial<Trade> = {}): Trade {
+  return {
+    side: 'home',
+    setSide: noop,
+    action: 'buy',
+    setAction: noop,
+    amount: '25',
+    setAmount: noop,
+    team: 'CLE',
+    ready: 'ready',
+    held: undefined,
+    balance: '37.5',
+    check: { ok: true, quote: true },
+    quote: { data: quote(), error: undefined, failures: 0, refresh: noop },
+    lastQuote: undefined,
+    quotePending: false,
+    stage: null,
+    done: null,
+    error: undefined,
+    errorAt: NOW,
+    shownError: undefined,
+    fundNoteHidden: false,
+    send: noop,
+    ...over,
+  }
+}
+
+const panel = (over: Partial<Trade> = {}, props: Partial<CrownPanelProps> = {}) =>
+  renderToStaticMarkup(
+    <CrownPanel
+      trade={trade(over)}
+      game={detail()}
+      market={market()}
+      state="live"
+      timeLeft={0.33}
+      now={NOW}
+      funding={false}
+      fundNote={undefined}
+      onFaucet={noop}
+      {...props}
+    />,
+  )
+
+const bezel = (steps: ReturnType<typeof buySteps>, index: number) =>
+  renderToStaticMarkup(
+    <Bezel steps={steps} index={index} onChange={noop} label="mUSDC to spend">
+      <span />
+    </Bezel>,
+  )
+
+describe('Bezel (spec 2.6, 3.2)', () => {
+  it('is a slider whose last step is the balance', () => {
+    const html = bezel(buySteps('37.5'), 4)
+    expect(html).toContain('role="slider"')
+    expect(html).toContain('aria-valuemin="1"')
+    expect(html).toContain('aria-valuemax="37.5"')
+    expect(html).toContain('aria-valuenow="25"')
+    expect(html).toContain('aria-valuetext="25 mUSDC"')
+    expect(html).toContain('data-crown')
+  })
+
+  it('has one step for a balance under the smallest step (Review Focus 2)', () => {
+    const html = bezel(buySteps('0.5'), 0)
+    expect(html).toContain('aria-valuemin="0.5"')
+    expect(html).toContain('aria-valuemax="0.5"')
+    expect(html).toContain('aria-valuenow="0.5"')
+  })
+
+  it('says so when there is nothing to choose', () => {
+    const html = bezel([], 0)
+    expect(html).toContain('aria-valuetext="No amount"')
+    expect(html).toContain('aria-disabled="true"')
+    expect(html).not.toContain('data-bezel-arc')
+  })
+
+  it('reads a sell step as a share of the position', () => {
+    expect(bezel(sellSteps('14.1'), 2)).toContain('aria-valuetext="50% · 7.05 shares"')
+  })
+})
+
+describe('CrownPanel (spec 3.2, 5.5)', () => {
+  it('keeps the dial beside the slider, so screen readers reach its label (spec 2.6)', () => {
+    const html = panel()
+    const start = html.indexOf('role="slider"')
+    const end = html.indexOf('</div>', start)
+    expect(start).toBeGreaterThanOrEqual(0)
+    expect(html.slice(start, end)).not.toContain('role="img"')
+    expect(html.slice(end)).toContain('role="img"')
+  })
+
+  it('points the ghost needle at the quote’s price after the trade', () => {
+    const html = panel()
+    expect(html).toMatch(/<g transform="rotate\(78.3 100 100\)"[^>]*data-needle="ghost"/)
+    expect(html).toContain('data-impact')
+    expect(html).toContain('aria-label="CLE wins, 77 cents, after this trade 79 cents"')
+  })
+
+  it('shows the numbers, the presets and the hold button', () => {
+    const html = panel()
+    for (const words of ['Shares received', 'Average price', 'If CLE wins', 'Price impact']) {
+      expect(html).toContain(words)
+    }
+    expect(html).toContain('31.50')
+    expect(html).toContain('1.20%')
+    expect(html).toContain('>Buy CLE</button>')
+    expect(html).toContain('hold-safe')
+    expect(html).toContain('aria-valuenow="25"')
+  })
+
+  it('dims the ghost while the next quote loads', () => {
+    expect(panel({ quotePending: true })).toContain('opacity-30')
+  })
+
+  it('sells a share of the position with percentage presets', () => {
+    const held = position()
+    const html = panel({ action: 'sell', held, amount: '7.05' })
+    expect(html).toContain('aria-label="Shares to sell"')
+    expect(html).toContain('aria-valuetext="50% · 7.05 shares"')
+    expect(html).toMatch(/aria-pressed="true"[^>]*>50%<\/button>/)
+    expect(html).not.toContain('If CLE wins')
+  })
+
+  it('cannot switch to Sell without shares', () => {
+    expect(panel()).toMatch(/aria-pressed="false" disabled=""[^>]*>Sell CLE<\/button>/)
+  })
+
+  it('shakes the ghost and offers a new quote after SLIPPAGE_EXCEEDED (spec 6.1)', () => {
+    const error = new HoragonError('SLIPPAGE_EXCEEDED', 'price moved')
+    const html = panel({ error, shownError: error })
+    expect(html).toContain('animate-shake')
+    expect(html).toContain('Get a new quote')
+  })
+
+  it('counts down a RATE_LIMITED send before it can go again (spec 6.1)', () => {
+    const error = new HoragonError('RATE_LIMITED', 'slow down', { retryAfterSecs: 4.2 })
+    const html = panel({ error, shownError: error, errorAt: NOW }, { now: NOW + 1 })
+    expect(html).toContain('Try again in 4 s')
+    expect(html).toMatch(/<button type="button" disabled=""/)
+  })
+})
+
+describe('CrownSheet (spec 3.2)', () => {
+  it('is a native dialog named for the trade, with a close button', () => {
+    const html = renderToStaticMarkup(
+      <CrownSheet open={false} onClose={noop} title="Buy CLE">
+        <p>inside</p>
+      </CrownSheet>,
+    )
+    expect(html).toContain('<dialog aria-label="Buy CLE"')
+    expect(html).toContain('aria-label="Close"')
+    expect(html).toContain('<p>inside</p>')
+  })
+})
