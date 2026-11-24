@@ -1,11 +1,13 @@
 'use client'
 // Header wallet: balance and address; the sheet has test funds, positions, Export and Import.
 // The sheet opens by itself when the 18+ gate has just created a wallet: it starts empty, so
-// the faucet comes first.
+// the faucet comes first. The YourHour chip opens it at the positions (Chronometer spec 3.2).
 import { useEffect, useRef, useState } from 'react'
 import { shortKey, usdc } from '../lib/format'
 import { readyHint, replacePrompt } from '../lib/wallet-copy'
 import { AgeCheckbox } from './age-dialog'
+import { FeelToggles } from './chrono/feel-toggles'
+import { YourHour } from './chrono/your-hour'
 import { ErrorText } from './error-text'
 import { Positions } from './positions'
 import { useWallet } from './wallet'
@@ -33,6 +35,7 @@ export function WalletButton() {
   const [importError, setImportError] = useState<string>()
   const [note, setNote] = useState<string>()
   const seenCreated = useRef(walletsCreated)
+  const positions = useRef<HTMLElement>(null)
 
   useEffect(() => {
     if (walletsCreated === seenCreated.current) return
@@ -41,13 +44,13 @@ export function WalletButton() {
     if (d && !d.open) d.showModal()
   }, [walletsCreated])
 
-  if (!loaded) return <span className="text-sm text-zinc-500">Wallet…</span>
+  if (!loaded) return <span className="text-13 text-ash-400">Wallet…</span>
   if (!address) {
     return (
       <button
         type="button"
         onClick={openGate}
-        className="rounded-full border border-zinc-300 px-3 py-1 text-sm dark:border-zinc-700"
+        className="min-h-11 rounded-full border border-brass-500/40 px-4 text-13 text-brass-400"
       >
         Set up wallet
       </button>
@@ -72,12 +75,21 @@ export function WalletButton() {
   const balance = portfolio?.usdcBalance
   // The faucet hint for a wallet created in this tab, until it holds mUSDC.
   const hint = readyHint(walletsCreated > 0, portfolio?.wallet === address ? balance : undefined)
+  function openAtPositions() {
+    dialog.current?.showModal()
+    positions.current?.scrollIntoView({ block: 'start' })
+  }
+
   return (
-    <>
+    <div className="flex items-center gap-2">
+      <YourHour
+        portfolio={portfolio?.wallet === address ? portfolio : undefined}
+        onOpen={openAtPositions}
+      />
       <button
         type="button"
         onClick={() => dialog.current?.showModal()}
-        className="rounded-full border border-zinc-300 px-3 py-1 text-sm dark:border-zinc-700"
+        className="min-h-11 rounded-full border border-line px-3 font-mono text-13 text-ivory-100 tabular-nums"
       >
         {balance === undefined || balance === null ? '–' : usdc(balance)} mUSDC ·{' '}
         {shortKey(address)}
@@ -85,48 +97,54 @@ export function WalletButton() {
       <dialog
         ref={dialog}
         aria-label="Burner wallet"
-        className="m-auto w-[min(32rem,calc(100%-2rem))] rounded-xl bg-white p-4 text-zinc-900 backdrop:bg-black/50 dark:bg-zinc-900 dark:text-zinc-100"
+        className="m-auto w-[min(32rem,calc(100%-2rem))] rounded-face border border-brass-500/20 bg-enamel-900 p-5 text-ivory-100 backdrop:bg-black/70"
       >
         <div className="space-y-4">
           <div className="flex items-center justify-between">
-            <h2 className="font-semibold">Burner wallet (devnet)</h2>
-            <button type="button" onClick={() => dialog.current?.close()} aria-label="Close">
+            <h2 className="text-15 font-semibold">Burner wallet (devnet)</h2>
+            <button
+              type="button"
+              onClick={() => dialog.current?.close()}
+              aria-label="Close"
+              className="grid size-11 place-items-center"
+            >
               ✕
             </button>
           </div>
-          <p className="break-all font-mono text-xs">{address}</p>
+          <p className="break-all font-mono text-11 text-ash-400">{address}</p>
           {ephemeral && (
-            <p className="text-sm text-amber-600">
+            <p className="text-13 text-amber-400">
               This browser blocks storage: the wallet disappears when you close the tab. Export it
               to keep it.
             </p>
           )}
-          {hint && <p className="text-sm font-medium">{hint}</p>}
+          {hint && <p className="text-13 font-medium">{hint}</p>}
           <button
             type="button"
             disabled={funding}
             onClick={requestFaucet}
-            className="w-full rounded-lg bg-zinc-900 py-2 font-semibold text-white disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900"
+            className="min-h-11 w-full rounded-card bg-lume-300 py-2 font-semibold text-enamel-950 disabled:opacity-50"
           >
             {funding ? 'Requesting…' : 'Get test mUSDC'}
           </button>
-          {note && <p className="text-sm text-emerald-600">{note}</p>}
-          {fundNote && <p className="text-sm text-emerald-600">{fundNote}</p>}
+          {note && <p className="text-13 text-lume-300">{note}</p>}
+          {fundNote && <p className="text-13 text-lume-300">{fundNote}</p>}
           <ErrorText error={fundError} />
-          <section>
-            <h3 className="mb-1 text-sm font-semibold">Positions</h3>
+          <section ref={positions} className="scroll-mt-4">
+            <h3 className="mb-1 text-13 font-semibold">Positions</h3>
             <Positions />
           </section>
+          <FeelToggles />
           <details>
-            <summary className="cursor-pointer text-sm font-semibold">Export / Import</summary>
-            <div className="mt-2 space-y-2 text-sm">
-              <p className="text-zinc-500">
+            <summary className="min-h-11 cursor-pointer text-13 font-semibold">
+              Export / Import
+            </summary>
+            <div className="mt-2 space-y-2 text-13">
+              <p className="text-ash-400">
                 The secret key controls this wallet. Anyone with it can trade as you.
               </p>
               {shown ? (
-                <p className="break-all rounded bg-zinc-100 p-2 font-mono text-xs dark:bg-zinc-800">
-                  {shown}
-                </p>
+                <p className="break-all rounded bg-enamel-800 p-2 font-mono text-11">{shown}</p>
               ) : (
                 <button type="button" className="underline" onClick={() => setShown(exportKey())}>
                   Show secret key (base58)
@@ -137,7 +155,7 @@ export function WalletButton() {
                 onChange={(e) => setImportText(e.target.value)}
                 placeholder="Paste a base58 secret key or a JSON byte array"
                 aria-label="Secret key to import"
-                className="h-20 w-full rounded border border-zinc-300 bg-transparent p-2 font-mono text-xs dark:border-zinc-700"
+                className="h-20 w-full rounded border border-line bg-transparent p-2 font-mono text-11"
               />
               {ageNeeded && <AgeCheckbox checked={importAge} onChange={setImportAge} />}
               <button
@@ -149,7 +167,7 @@ export function WalletButton() {
                 Import
               </button>
               {importError && (
-                <p role="alert" className="text-red-600 dark:text-red-400">
+                <p role="alert" className="text-red-400">
                   {importError}
                 </p>
               )}
@@ -157,6 +175,6 @@ export function WalletButton() {
           </details>
         </div>
       </dialog>
-    </>
+    </div>
   )
 }

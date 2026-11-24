@@ -2,6 +2,8 @@ import type { Metadata, Viewport } from 'next'
 import { JetBrains_Mono, Space_Grotesk } from 'next/font/google'
 import Link from 'next/link'
 import type { ReactNode } from 'react'
+import { ChronoMotion } from '../components/chrono/motion'
+import { Wordmark } from '../components/chrono/wordmark'
 import { PlayMoneyBanner } from '../components/play-money-banner'
 import { WalletProvider } from '../components/wallet'
 import { WalletButton } from '../components/wallet-button'
@@ -27,16 +29,22 @@ export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en" className={`dark ${grotesk.variable} ${mono.variable}`}>
       <body className="min-h-dvh pb-14">
-        <WalletProvider>
-          <header className="sticky top-0 z-10 flex items-center justify-between border-b border-zinc-200 bg-zinc-50/90 px-4 py-3 backdrop-blur dark:border-zinc-800 dark:bg-zinc-950/90">
-            <Link href="/" className="text-lg font-bold">
-              Horagon
-            </Link>
-            <WalletButton />
-          </header>
-          <main className="mx-auto max-w-2xl px-4 py-4">{children}</main>
-          <PlayMoneyBanner />
-        </WalletProvider>
+        <ChronoMotion>
+          <WalletProvider>
+            <header className="sticky top-0 z-10 flex min-h-14 items-center justify-between gap-3 border-b border-brass-500/15 bg-enamel-950/90 px-4 py-1.5 backdrop-blur">
+              <Link
+                href="/"
+                aria-label="Horagon, tonight's games"
+                className="flex min-h-11 items-center"
+              >
+                <Wordmark />
+              </Link>
+              <WalletButton />
+            </header>
+            <main className="mx-auto max-w-6xl px-4 py-4">{children}</main>
+            <PlayMoneyBanner />
+          </WalletProvider>
+        </ChronoMotion>
       </body>
     </html>
   )

@@ -22,23 +22,25 @@ export function Positions({
   return (
     <div className="space-y-2">
       {rows.length === 0 ? (
-        <p className="text-sm text-zinc-500">No positions yet.</p>
+        <p className="text-13 text-ash-400">No positions yet.</p>
       ) : (
-        <ul className="divide-y divide-zinc-200 text-sm dark:divide-zinc-800">
+        <ul className="divide-y divide-line text-13">
           {rows.map((p) => (
             <li key={`${p.market}-${p.side}`} className="flex items-center justify-between py-2">
               <div>
                 <Link
                   href={`/game/${p.gameId}`}
-                  className="font-medium underline-offset-2 hover:underline"
+                  className="font-medium text-ivory-100 underline-offset-2 hover:underline"
                 >
                   {sideLabel(p.side, teams)} · {usdc(p.shares)} shares
                 </Link>
-                <p className="text-zinc-500">
+                <p className="font-mono text-ash-400 tabular-nums">
                   cost {usdc(p.costUsdc)} · value {usdc(p.valueUsdc)} · {p.marketStatus}
                 </p>
               </div>
-              <span className={p.pnlUsdc.startsWith('-') ? 'text-red-600' : 'text-emerald-600'}>
+              <span
+                className={`font-mono tabular-nums ${p.pnlUsdc.startsWith('-') ? 'text-red-400' : 'text-lume-300'}`}
+              >
                 {p.pnlUsdc.startsWith('-') ? '' : '+'}
                 {usdc(p.pnlUsdc)}
               </span>
@@ -51,7 +53,7 @@ export function Positions({
           type="button"
           disabled={claiming}
           onClick={startClaims}
-          className="w-full rounded-lg bg-emerald-600 py-2 font-semibold text-white disabled:opacity-50"
+          className="min-h-11 w-full rounded-card bg-lume-300 py-2 font-semibold text-enamel-950 disabled:opacity-50"
         >
           {claiming ? 'Claiming…' : 'Claim all'}
         </button>
@@ -62,7 +64,7 @@ export function Positions({
           href={explorerTx(sig)}
           target="_blank"
           rel="noreferrer"
-          className="block text-xs underline"
+          className="block text-11 text-brass-400 underline"
         >
           Claimed: view transaction
         </a>
