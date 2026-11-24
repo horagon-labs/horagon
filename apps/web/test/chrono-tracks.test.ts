@@ -248,4 +248,14 @@ describe('yourHour (spec 3.2)', () => {
     expect(yourHour(undefined)).toBeNull()
     expect(yourHour(portfolio([]))).toEqual({ count: 0, value: '0.00' })
   })
+
+  it('stops counting a losing position once there is a result, but keeps one to claim (M16)', () => {
+    const result = { marketStatus: 'finalized', outcome: 'no' } as const
+    const p = portfolio([
+      position({ ...result, valueUsdc: '0' }),
+      position({ ...result, side: 'away', shares: '5', valueUsdc: '5', claimable: true }),
+      position({ market: 'Mkt2', valueUsdc: '2.5' }),
+    ])
+    expect(yourHour(p)).toEqual({ count: 2, value: '7.50' })
+  })
 })

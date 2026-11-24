@@ -105,6 +105,20 @@ describe('PositionCard (spec 3.2)', () => {
     expect(html).toContain('>Sell</button>')
   })
 
+  it('says won or lost once the market has a result (M16)', () => {
+    const result = { marketStatus: 'finalized', outcome: 'no' } as const
+    const html = card({
+      canSell: false,
+      portfolio: portfolio([
+        position({ ...result, valueUsdc: '0' }),
+        position({ ...result, side: 'away', market: 'Mkt2', claimable: true }),
+      ]),
+    })
+    expect(html).toContain('CLE lost')
+    expect(html).toContain('MEM won')
+    expect(html).not.toContain('pays')
+  })
+
   it('lists the winner market only, with a lume diamond for home and brass for away', () => {
     const html = card({
       portfolio: portfolio([

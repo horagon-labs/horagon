@@ -82,12 +82,17 @@ export function listOrder(a: BoardItem, b: BoardItem): number {
   return a.interval.tip - b.interval.tip
 }
 
-/** The YourHour chip (spec 3.2): open positions and what they are worth now. */
+/**
+ * The YourHour chip (spec 3.2): open positions and what they are worth now. A position stays
+ * open while its market has no result, or while it still has something to claim (M16).
+ */
 export function yourHour(
   portfolio: PositionsResponse | undefined,
 ): { count: number; value: string } | null {
   if (!portfolio) return null
-  const open = portfolio.positions.filter((p) => parseAmount(p.shares) > 0n)
+  const open = portfolio.positions.filter(
+    (p) => parseAmount(p.shares) > 0n && (p.outcome === null || p.claimable),
+  )
   const value = open.reduce((sum, p) => sum + parseAmount(p.valueUsdc), 0n)
   return { count: open.length, value: usdc(formatAmount(value)) }
 }

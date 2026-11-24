@@ -55,7 +55,9 @@ export function PositionCard(p: PositionCardProps) {
                     </span>
                   </p>
                   <p className="text-ash-400">
-                    pays {usdc(x.shares)} mUSDC if {team} wins
+                    {x.outcome === null
+                      ? `pays ${usdc(x.shares)} mUSDC if ${team} wins`
+                      : `${team} ${(x.side === 'home') === (x.outcome === 'yes') ? 'won' : 'lost'}`}
                   </p>
                 </div>
                 {p.canSell && (
