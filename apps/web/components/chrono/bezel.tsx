@@ -6,8 +6,10 @@ import { type PointerEvent, type ReactNode, useRef } from 'react'
 import {
   angleToStep,
   dragAngle,
+  onRing,
   pointerAngle,
   type Step,
+  startsDrag,
   stepAngle,
   stepCrossed,
   wheelStep,
@@ -36,8 +38,13 @@ export function Bezel(p: {
   const angle = useRef(stepAngle(index, n))
   const dragging = useRef(false)
 
+  // The last step emitted, so pointermoves before a re-render do not fire the same step again.
+  const emitted = useRef(index)
+  emitted.current = index
+
   function go(next: number) {
-    if (n === 0 || !stepCrossed(index, next)) return
+    if (n === 0 || !stepCrossed(emitted.current, next)) return
+    emitted.current = next
     buzz(feel, STEP_BUZZ_MS)
     playTick(feel)
     p.onChange(next)
@@ -77,7 +84,11 @@ export function Bezel(p: {
           go(next)
         }}
         onPointerDown={(e) => {
-          if (n === 0) return
+          if (n === 0 || !startsDrag(e.button, e.pointerType)) return
+          const box = e.currentTarget.getBoundingClientRect()
+          const dx = e.clientX - (box.left + box.width / 2)
+          const dy = e.clientY - (box.top + box.height / 2)
+          if (!onRing(dx, dy, box.width / 2)) return
           dragging.current = true
           angle.current = stepAngle(index, n)
           e.currentTarget.setPointerCapture(e.pointerId)
@@ -88,9 +99,19 @@ export function Bezel(p: {
         }}
         onPointerUp={(e) => {
           dragging.current = false
-          e.currentTarget.releasePointerCapture(e.pointerId)
+          if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+            e.currentTarget.releasePointerCapture(e.pointerId)
+          }
+        }}
+        onPointerCancel={() => {
+          dragging.current = false
+        }}
+        onLostPointerCapture={() => {
+          dragging.current = false
         }}
         onWheel={(e) => {
+          // Only while focused: a scroll over the dial must scroll the page, not change the trade.
+          if (document.activeElement !== e.currentTarget) return
           const d = wheelStep(e.deltaY)
           if (d !== 0) go(Math.min(n - 1, Math.max(0, index + d)))
         }}

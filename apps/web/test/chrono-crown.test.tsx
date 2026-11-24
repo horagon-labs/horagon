@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest'
 import { Bezel } from '../components/chrono/bezel'
 import { CrownPanel, type CrownPanelProps } from '../components/chrono/crown-panel'
 import { CrownSheet } from '../components/chrono/crown-sheet'
-import { buySteps, sellSteps } from '../lib/chrono/bezel'
+import { buySteps, onRing, sellSteps, startsDrag } from '../lib/chrono/bezel'
 import { detail, market, NOW, position, quote } from '../lib/chrono/fixtures'
 import type { Trade } from '../lib/use-trade'
 
@@ -88,6 +88,23 @@ describe('Bezel (spec 2.6, 3.2)', () => {
 
   it('reads a sell step as a share of the position', () => {
     expect(bezel(sellSteps('14.1'), 2)).toContain('aria-valuetext="50% · 7.05 shares"')
+  })
+})
+
+describe('Bezel input decisions', () => {
+  it('starts a drag only for the primary button, a finger or a pen', () => {
+    expect(startsDrag(0, 'mouse')).toBe(true)
+    expect(startsDrag(-1, 'touch')).toBe(true)
+    expect(startsDrag(-1, 'pen')).toBe(true)
+    expect(startsDrag(2, 'mouse')).toBe(false)
+    expect(startsDrag(1, 'mouse')).toBe(false)
+  })
+
+  it('takes the pointer on the ring only, not near the centre (spec 2.6)', () => {
+    expect(onRing(0, 0, 100)).toBe(false)
+    expect(onRing(30, 40, 100)).toBe(false)
+    expect(onRing(62, 0, 100)).toBe(true)
+    expect(onRing(-60, -60, 100)).toBe(true)
   })
 })
 

@@ -94,6 +94,14 @@ export function dragAngle(prev: number, raw: number): number {
   return raw + Math.round((prev - raw) / 360) * 360
 }
 
+/** Only a primary mouse button, a finger or a pen starts a drag; a right or middle click does not. */
+export const startsDrag = (button: number, pointerType: string): boolean =>
+  button === 0 || pointerType === 'touch' || pointerType === 'pen'
+
+/** The pointer is on the ring, not the dial's middle, where the angle is meaningless (spec 2.6). */
+export const onRing = (dx: number, dy: number, radius: number): boolean =>
+  Math.hypot(dx, dy) >= radius * 0.62
+
 /** A step changed: the moment to buzz and tick (spec 2.5). */
 export const stepCrossed = (prev: number, next: number): boolean => prev !== next
 

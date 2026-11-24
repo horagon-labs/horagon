@@ -173,7 +173,7 @@ export function CrownPanel(p: CrownPanelProps) {
                 type="button"
                 disabled={p.funding}
                 onClick={p.onFaucet}
-                className="font-semibold underline disabled:opacity-50"
+                className="min-h-11 font-semibold underline disabled:opacity-50"
               >
                 {p.funding ? 'Requesting…' : 'Get test mUSDC'}
               </button>
