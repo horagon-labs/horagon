@@ -7,7 +7,7 @@ import type { GameDetail, MarketSummary, Side } from '@horagon/sdk'
 import { useState } from 'react'
 import { errorEffect } from '../../lib/chrono/errors'
 import { useMedia, WIDE } from '../../lib/chrono/feel'
-import { canTrade, type GameDial } from '../../lib/chrono/game'
+import { canTrade, crownShown, type GameDial } from '../../lib/chrono/game'
 import { pusherMode } from '../../lib/chrono/pusher'
 import { useTrade } from '../../lib/use-trade'
 import { useWallet } from '../wallet'
@@ -52,11 +52,14 @@ export function MarketBlock(p: {
   const wide = useMedia(WIDE)
   const [open, setOpen] = useState(false)
   const trading = canTrade(p.dial.state)
+  // A send in flight, or its result, keeps the crown when the market closes or halts under it.
+  const shown = crownShown(p.dial.state, t)
   const mode = pusherMode({
     state: p.dial.state,
     ready: t.ready,
     balance: t.balance,
     effect: errorEffect(t.error),
+    failedAction: t.failedAction,
     secsLeft: p.dial.secsLeft,
   })
   // setDirection sets the amount too: a sell's share count never becomes a buy amount in mUSDC.
@@ -94,11 +97,11 @@ export function MarketBlock(p: {
           funding={funding}
           onFaucet={requestFaucet}
         />
-        {wide && trading && crown}
+        {wide && shown && crown}
       </section>
       {!wide && (
         <CrownSheet
-          open={open && trading}
+          open={open && shown}
           onClose={() => setOpen(false)}
           title={`${t.action === 'buy' ? 'Buy' : 'Sell'} ${t.team}`}
         >

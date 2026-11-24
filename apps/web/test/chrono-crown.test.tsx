@@ -6,6 +6,7 @@ import { CrownPanel, type CrownPanelProps } from '../components/chrono/crown-pan
 import { CrownSheet } from '../components/chrono/crown-sheet'
 import { buySteps, onRing, sellSteps, startsDrag } from '../lib/chrono/bezel'
 import { detail, market, NOW, position, quote } from '../lib/chrono/fixtures'
+import { crownShown } from '../lib/chrono/game'
 import type { Trade } from '../lib/use-trade'
 
 const noop = () => {}
@@ -30,6 +31,7 @@ function trade(over: Partial<Trade> = {}): Trade {
     done: null,
     error: undefined,
     errorAt: NOW,
+    failedAction: 'buy',
     shownError: undefined,
     fundNoteHidden: false,
     send: noop,
@@ -170,6 +172,24 @@ describe('CrownPanel (spec 3.2, 5.5)', () => {
     const html = panel({ error, shownError: error, errorAt: NOW }, { now: NOW + 1 })
     expect(html).toContain('Try again in 4 s')
     expect(html).toMatch(/<button type="button" disabled=""/)
+  })
+})
+
+describe('crownShown (I4)', () => {
+  const idle = { stage: null, done: null, error: undefined }
+  const done = { signature: '5'.repeat(88), text: 'Bought about 31.50 CLE shares.' }
+
+  it('shows the crown while the market trades', () => {
+    expect(crownShown('live', idle)).toBe(true)
+    expect(crownShown('closed', idle)).toBe(false)
+    expect(crownShown('halted', idle)).toBe(false)
+  })
+
+  it('keeps the crown on a closed market while a send or its result is on screen', () => {
+    expect(crownShown('closed', { ...idle, done })).toBe(true)
+    expect(crownShown('closed', { ...idle, stage: 'confirming' })).toBe(true)
+    const error = new HoragonError('MARKET_CLOSED', 'closed')
+    expect(crownShown('halted', { ...idle, error })).toBe(true)
   })
 })
 

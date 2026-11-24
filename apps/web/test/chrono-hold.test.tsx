@@ -109,6 +109,7 @@ describe('pusherMode (spec 3.2, 4.3, 6.1)', () => {
     ready: 'ready',
     balance: '493.74',
     effect: null,
+    failedAction: 'buy',
     secsLeft: 3_730,
   }
   const mode = (over: Partial<PusherInput>) => pusherMode({ ...base, ...over })
@@ -123,13 +124,26 @@ describe('pusherMode (spec 3.2, 4.3, 6.1)', () => {
     expect(mode({ state: 'halted' })).toEqual({ kind: 'buy', locked: true, note: null })
   })
 
-  it('turns into the faucet for no wallet, an empty wallet or INSUFFICIENT_FUNDS', () => {
+  it('turns into the faucet for no wallet, an empty wallet or a buy without the funds', () => {
     expect(mode({ ready: 'no-wallet', balance: undefined })).toEqual({ kind: 'faucet' })
     expect(mode({ balance: '0' })).toEqual({ kind: 'faucet' })
-    expect(mode({ balance: null })).toEqual({ kind: 'faucet' })
     const poor = errorEffect(new HoragonError('INSUFFICIENT_FUNDS', 'poor'))
-    expect(mode({ effect: poor })).toEqual({ kind: 'faucet' })
+    expect(mode({ effect: poor, failedAction: 'buy' })).toEqual({ kind: 'faucet' })
     expect(mode({ ready: 'loading', balance: undefined }).kind).toBe('buy')
+  })
+
+  it('keeps the buy buttons when a sell fails for funds, and once the error is cleared (I3)', () => {
+    const poor = errorEffect(new HoragonError('INSUFFICIENT_FUNDS', 'poor'))
+    expect(mode({ effect: poor, failedAction: 'sell' })).toEqual(mode({}))
+    expect(mode({ effect: null, failedAction: 'buy' })).toEqual({
+      kind: 'buy',
+      locked: false,
+      note: null,
+    })
+  })
+
+  it('reads an unknown balance (RPC down) as not known, not as an empty wallet (M1)', () => {
+    expect(mode({ balance: null })).toEqual({ kind: 'buy', locked: false, note: null })
   })
 
   it('says one line once trading is over, and nothing once there is a result', () => {

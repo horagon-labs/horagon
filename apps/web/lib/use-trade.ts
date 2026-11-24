@@ -84,6 +84,8 @@ export interface Trade {
   error: unknown
   /** Unix seconds when `error` was set, for the RATE_LIMITED countdown (spec 6.1). */
   errorAt: number
+  /** The direction of the send that failed with `error`; the faucet answers only a buy's. */
+  failedAction: TradeAction
   /** What ErrorText shows: the send's error, else the faucet's, else the quote's. */
   shownError: unknown
   /** The faucet note goes away once a trade starts; a new faucet request brings it back. */
@@ -102,11 +104,17 @@ export function useTrade(game: GameDetail, market: MarketSummary, opts: TradeOpt
   const alive = useRef(true)
   const fills = useRef(createFillTracker())
   const [fundNoteHidden, setFundNoteHidden] = useState(false)
-  useEffect(() => {
-    if (funding) setFundNoteHidden(false)
-  }, [funding])
   const [error, setError] = useState<unknown>()
   const [errorAt, setErrorAt] = useState(0)
+  const [failedAction, setFailedAction] = useState<TradeAction>('buy')
+  // A faucet request answers the send's error (INSUFFICIENT_FUNDS): the Pusher's buy buttons
+  // come back, so a phone is not left with the faucet until a reload.
+  useEffect(() => {
+    if (funding) {
+      setFundNoteHidden(false)
+      setError(undefined)
+    }
+  }, [funding])
   const [done, setDone] = useState<{ signature: string; text: string } | null>(null)
   const busy = useRef(false)
   // The signature whose success line is on screen: a newer trade or a left page ends the wait.
@@ -212,6 +220,7 @@ export function useTrade(game: GameDetail, market: MarketSummary, opts: TradeOpt
       // Shown with its transaction, if it names one (ErrorText); never sent again from here.
       setError(err)
       setErrorAt(Date.now() / 1000)
+      setFailedAction(action)
       if (errorEffect(err) === 'refresh') onStale.current?.()
     } finally {
       busy.current = false
@@ -243,6 +252,7 @@ export function useTrade(game: GameDetail, market: MarketSummary, opts: TradeOpt
     done,
     error,
     errorAt,
+    failedAction,
     shownError: error ?? fundError ?? (check.quote ? quote.error : undefined),
     fundNoteHidden,
     send: () => {

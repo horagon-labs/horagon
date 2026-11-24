@@ -52,3 +52,18 @@ export function gameDial(
 /** The crown trades in these states; Sell on the PositionCard shows only then. */
 export const canTrade = (state: DialState): boolean =>
   state === 'live' || state === 'closing' || state === 'pre'
+
+/**
+ * The crown, inline or as the sheet, stays while the market trades, and also while a send is in
+ * flight or its result is on screen: a market that closes or halts mid-send must not take the
+ * success line, or the R2 link to a transaction that may still land, with it. Sending stays off
+ * then (checkTrade says why).
+ */
+export const crownShown = (
+  state: DialState,
+  t: { stage: unknown; done: unknown; error: unknown },
+): boolean =>
+  canTrade(state) ||
+  t.stage !== null ||
+  t.done !== null ||
+  (t.error !== undefined && t.error !== null)

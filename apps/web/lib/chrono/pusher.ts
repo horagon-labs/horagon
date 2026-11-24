@@ -1,6 +1,6 @@
 // What the Pusher shows (spec 3.2, 4.3, 6.1): the two buy buttons, the faucet button for a new
 // or empty wallet, or one line once trading is over.
-import { parseAmount } from '@horagon/sdk'
+import { parseAmount, type TradeAction } from '@horagon/sdk'
 import { countdown } from '../format'
 import type { Ready } from '../trade-view'
 import type { ErrorEffect } from './errors'
@@ -15,17 +15,19 @@ export type PusherMode =
 export interface PusherInput {
   state: DialState
   ready: Ready
-  /** The wallet's mUSDC: null for no token account yet, undefined while unknown. */
+  /** The wallet's mUSDC: null while the RPC is down (not known), undefined while not loaded. */
   balance: string | null | undefined
+  /** What the send's error does (errorEffect). */
   effect: ErrorEffect | null
+  /** The direction of the send that failed with that error. */
+  failedAction: TradeAction
   /** Seconds of trading left; null without a market. */
   secsLeft: number | null
 }
 
-/** A ready wallet with nothing to spend: null means no mUSDC account yet. */
+/** A ready wallet known to hold nothing to spend; an unknown balance is not an empty one. */
 function empty(i: PusherInput): boolean {
-  if (i.ready !== 'ready' || i.balance === undefined) return false
-  if (i.balance === null) return true
+  if (i.ready !== 'ready' || i.balance === undefined || i.balance === null) return false
   try {
     return parseAmount(i.balance) === 0n
   } catch {
@@ -48,7 +50,9 @@ export function pusherMode(i: PusherInput): PusherMode {
       break
   }
   if (i.secsLeft === null) return { kind: 'line', text: 'market opens 60 min before tip-off' }
-  if (i.ready === 'no-wallet' || i.effect === 'faucet' || empty(i)) return { kind: 'faucet' }
+  // Only a buy short of mUSDC is cured by the faucet; a sell short of shares or SOL is not.
+  const poorBuy = i.effect === 'faucet' && i.failedAction === 'buy'
+  if (i.ready === 'no-wallet' || poorBuy || empty(i)) return { kind: 'faucet' }
   const note = i.state === 'closing' ? `closes in ${countdown(i.secsLeft, 0)}` : null
   return { kind: 'buy', locked: false, note }
 }
