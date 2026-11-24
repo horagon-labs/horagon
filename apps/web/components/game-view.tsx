@@ -15,7 +15,7 @@ import { GameLoading, GameScreen, NoGame } from './chrono/game-screen'
 import { GamePositions, MarketBlock } from './chrono/market-block'
 import { ErrorText } from './error-text'
 
-const MARKET_STATE_MS = 60_000
+const SLOW_POLL_MS = 60_000
 
 export function GameView({ id }: { id: string }) {
   const detail = usePoll(`game:${id}`, () => api.games.get(id))
@@ -26,12 +26,12 @@ export function GameView({ id }: { id: string }) {
   const marketState = usePoll(
     pubkey ? `market:${pubkey}` : null,
     () => api.markets.get(pubkey),
-    MARKET_STATE_MS,
+    SLOW_POLL_MS,
   )
   const evidence = usePoll(
     winner?.status === 'proposed' ? `evidence:${id}` : null,
     () => api.evidence(id, 'winner'),
-    MARKET_STATE_MS,
+    SLOW_POLL_MS,
   )
   const now = useNow()
   const health = pollHealth(detail)

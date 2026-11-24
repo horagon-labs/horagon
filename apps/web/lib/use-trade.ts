@@ -43,6 +43,9 @@ function useDebounced<T>(value: T, ms: number): T {
   return v
 }
 
+/** The buy amount (mUSDC) a fresh crown starts at, and a buy returns to after a sell. */
+export const BUY_AMOUNT = '10'
+
 export interface TradeOptions {
   /** MARKET_CLOSED or MARKET_HALTED: reload the game so the dial changes state (spec 6.1). */
   onMarketStale?: () => void
@@ -89,7 +92,7 @@ export function useTrade(game: GameDetail, market: MarketSummary, opts: TradeOpt
     useWallet()
   const [side, setSide] = useState<Side>('home')
   const [action, setAction] = useState<TradeAction>('buy')
-  const [amount, setAmount] = useState('10')
+  const [amount, setAmount] = useState(BUY_AMOUNT)
   const [stage, setStage] = useState<TradeStage | null>(null)
   const alive = useRef(true)
   const fills = useRef(createFillTracker())

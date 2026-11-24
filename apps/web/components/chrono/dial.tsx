@@ -6,7 +6,7 @@ import { useEffect, useId, useRef, useState } from 'react'
 import { useMotionReduced } from '../../lib/chrono/feel'
 import { arcPath, polar, priceToAngle } from '../../lib/chrono/geometry'
 import type { DialState } from '../../lib/chrono/state'
-import { isBeat, needleClass, priceDigits, RING, rimClass } from './dial-look'
+import { beatArmed, isBeat, needleClass, priceDigits, RING, rimClass } from './dial-look'
 import { Needle } from './needle'
 import { RollingNumber } from './rolling-number'
 
@@ -63,7 +63,7 @@ function pts(...points: { x: number; y: number }[]): string {
 export function Dial(p: DialProps) {
   const id = useId()
   const reduced = useMotionReduced()
-  const flash = useBeat(p.runKey, !p.loading && p.runKey !== undefined)
+  const flash = useBeat(p.runKey, beatArmed(p.loading, p.runKey))
   const settle = useBeat(p.state === 'resolved' ? 'resolved' : null, !p.loading)
   const price = p.state === 'void' ? null : p.price
   const ghost = p.loading ? null : (p.ghostPrice ?? null)

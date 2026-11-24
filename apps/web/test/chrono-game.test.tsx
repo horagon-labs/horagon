@@ -3,13 +3,14 @@ import { join } from 'node:path'
 import type { Resolution } from '@horagon/sdk'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
-import { isBeat } from '../components/chrono/dial-look'
+import { beatArmed, isBeat, runKeyOf } from '../components/chrono/dial-look'
 import { Gallery } from '../components/chrono/gallery'
 import { GameLoading, GameScreen, NoGame } from '../components/chrono/game-screen'
 import { MarketBlock } from '../components/chrono/market-block'
 import { WalletProvider } from '../components/wallet'
 import { detail, game, history, market, NOW } from '../lib/chrono/fixtures'
 import { canTrade, gameDial } from '../lib/chrono/game'
+import { findRuns, latestRun } from '../lib/chrono/runs'
 import { DIAL_STATES } from '../lib/chrono/state'
 
 const needle = (html: string) => html.match(/<g transform="([^"]+)"[^>]*data-needle="price"/)?.[1]
@@ -184,13 +185,31 @@ describe('wave 2 cleanup (spec 2.1)', () => {
   })
 })
 
-describe('the run flash on page open', () => {
-  it('absorbs the first run key once history arrives, then flashes for a new run', () => {
-    // GameScreen passes undefined until history loads, so the dial is not armed on that first key.
-    const open = { key: undefined, armed: false }
-    expect(isBeat(open, 'CLE:8')).toBe(false)
-    const known = { key: 'CLE:8', armed: true }
-    expect(isBeat(known, 'CLE:8')).toBe(false)
-    expect(isBeat(known, 'MEM:9')).toBe(true)
+describe('the run flash on page open (spec 2.4)', () => {
+  const MKT = market().pubkey
+  const keyOf = (h: ReturnType<typeof history> | undefined) =>
+    runKeyOf(h, h ? latestRun(findRuns(h, MKT)) : null)
+
+  it('has no key until history loads, and null for history with no run', () => {
+    expect(keyOf(undefined)).toBeUndefined()
+    expect(runKeyOf(history(), null)).toBeNull()
+  })
+
+  it('does not flash the old run on the first history load, then flashes for a new one', () => {
+    const k0 = keyOf(undefined)
+    const first = keyOf(history())
+    expect(first).toEqual(expect.any(String))
+    expect(isBeat({ key: k0, armed: beatArmed(false, k0) }, first)).toBe(false)
+    expect(beatArmed(false, undefined)).toBe(false)
+    expect(beatArmed(true, first)).toBe(false)
+    expect(beatArmed(false, null)).toBe(true)
+    expect(isBeat({ key: first, armed: beatArmed(false, first) }, 'MEM:99')).toBe(true)
+  })
+})
+
+describe('GameLoading reconnecting (spec 4.4)', () => {
+  it('says Reconnecting only while the poll is failing', () => {
+    expect(renderToStaticMarkup(<GameLoading stale={false} />)).not.toContain('Reconnecting…')
+    expect(renderToStaticMarkup(<GameLoading stale />)).toContain('Reconnecting…')
   })
 })

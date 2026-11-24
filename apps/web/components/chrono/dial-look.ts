@@ -1,5 +1,6 @@
 // How each DialState colors a dial (spec 4.3): the time ring, and the face's rim.
-import type { Game } from '@horagon/sdk'
+import type { Game, GameHistory } from '@horagon/sdk'
+import type { Run } from '../../lib/chrono/runs'
 import type { DialState } from '../../lib/chrono/state'
 import { cents, countdown, gameClock } from '../../lib/format'
 
@@ -39,6 +40,19 @@ export function isBeat(
 ): boolean {
   return prev.armed && key !== prev.key && key != null
 }
+
+/**
+ * The run flash's key: `undefined` until history has loaded (not known yet), `null` for history
+ * with no run, otherwise the newest run's. The dial absorbs the first key (see `beatArmed`).
+ */
+export const runKeyOf = (
+  history: GameHistory | undefined,
+  run: Run | null,
+): string | null | undefined => (history ? (run ? `${run.team}:${run.to}` : null) : undefined)
+
+/** The flash is armed once the dial has loaded and its key is known. */
+export const beatArmed = (loading: boolean | undefined, key: string | null | undefined): boolean =>
+  !loading && key !== undefined
 
 type LineGame = Pick<Game, 'status' | 'period' | 'clockSecs' | 'scheduledTipoff'>
 

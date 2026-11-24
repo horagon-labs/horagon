@@ -105,6 +105,19 @@ describe('PositionCard (spec 3.2)', () => {
     expect(html).toContain('>Sell</button>')
   })
 
+  it('lists the winner market only, with a lume diamond for home and brass for away', () => {
+    const html = card({
+      portfolio: portfolio([
+        position(),
+        position({ kind: 'second-half', shares: '7' }),
+        position({ side: 'away', market: 'Mkt2' }),
+      ]),
+    })
+    expect(html).not.toContain('7.00 shares')
+    expect(html.match(/<li /g)).toHaveLength(2)
+    expect(html).toMatch(/text-lume-300"[^>]*>\s*◆[\s\S]*text-brass-500"[^>]*>\s*◆/)
+  })
+
   it('hides Sell once the market stopped trading, and says when there is nothing', () => {
     expect(card({ canSell: false })).not.toContain('>Sell</button>')
     expect(card({ portfolio: portfolio([]) })).toContain('No positions yet.')

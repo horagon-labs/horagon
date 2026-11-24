@@ -9,7 +9,7 @@ import { errorEffect } from '../../lib/chrono/errors'
 import { useMedia, WIDE } from '../../lib/chrono/feel'
 import { canTrade, type GameDial } from '../../lib/chrono/game'
 import { pusherMode } from '../../lib/chrono/pusher'
-import { useTrade } from '../../lib/use-trade'
+import { BUY_AMOUNT, useTrade } from '../../lib/use-trade'
 import { useWallet } from '../wallet'
 import { CrownPanel } from './crown-panel'
 import { CrownSheet } from './crown-sheet'
@@ -61,6 +61,8 @@ export function MarketBlock(p: {
   })
   const pick = (side: Side) => {
     t.setSide(side)
+    // A sell's share count must never become a buy amount in mUSDC.
+    if (t.action === 'sell') t.setAmount(BUY_AMOUNT)
     t.setAction('buy')
     if (!wide) setOpen(true)
   }
@@ -69,7 +71,7 @@ export function MarketBlock(p: {
     const held = mine?.positions.find((x) => x.market === p.market.pubkey && x.side === side)
     t.setSide(side)
     t.setAction('sell')
-    if (held) t.setAmount(held.shares)
+    t.setAmount(held?.shares ?? '')
     if (!wide) setOpen(true)
   }
   const crown = (

@@ -22,7 +22,7 @@ export interface PositionCardProps {
 
 export function PositionCard(p: PositionCardProps) {
   const rows = (p.portfolio?.positions ?? []).filter(
-    (x) => x.gameId === p.gameId && parseAmount(x.shares) > 0n,
+    (x) => x.gameId === p.gameId && x.kind === 'winner' && parseAmount(x.shares) > 0n,
   )
   const claimable = rows.some((x) => x.claimable)
   return (
@@ -37,7 +37,10 @@ export function PositionCard(p: PositionCardProps) {
             const down = x.pnlUsdc.startsWith('-')
             return (
               <li key={`${x.market}-${x.side}`} className="flex items-center gap-3 py-2">
-                <span aria-hidden="true" className="text-lume-300">
+                <span
+                  aria-hidden="true"
+                  className={x.side === 'home' ? 'text-lume-300' : 'text-brass-500'}
+                >
                   ◆
                 </span>
                 <div className="min-w-0 flex-1 font-mono text-13 tabular-nums">

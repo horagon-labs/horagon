@@ -9,7 +9,7 @@ import { winnerOf } from '../../lib/chrono/board'
 import type { GameDial } from '../../lib/chrono/game'
 import { findRuns, latestRun } from '../../lib/chrono/runs'
 import { Dial } from './dial'
-import { stateLine } from './dial-look'
+import { runKeyOf, stateLine } from './dial-look'
 import { ResolutionCard } from './resolution-card'
 import { Scorebug } from './scorebug'
 import { Tape } from './tape'
@@ -26,17 +26,22 @@ export interface GameScreenProps {
   right: ReactNode
 }
 
+/** The failing-poll line (spec 4.4), on the screen and on the loading face. */
+function Reconnecting({ stale }: { stale: boolean }) {
+  return stale ? (
+    <p role="status" className="text-center font-mono text-11 text-red-400">
+      Reconnecting…
+    </p>
+  ) : null
+}
+
 export function GameScreen(p: GameScreenProps) {
   const { game, dial } = p
   const winner = winnerOf(game)
   const run = p.history && winner ? latestRun(findRuns(p.history, winner.pubkey)) : null
   return (
     <div className="space-y-6">
-      {p.stale && (
-        <p role="status" className="text-center font-mono text-11 text-red-400">
-          Reconnecting…
-        </p>
-      )}
+      <Reconnecting stale={p.stale} />
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_24rem] lg:items-start">
         <div className="space-y-6" data-column="left">
           <Scorebug game={game} run={run} />
@@ -50,7 +55,7 @@ export function GameScreen(p: GameScreenProps) {
             detail={stateLine(dial.state, game, dial.secsLeft, p.now)}
             liveDot={game.status === 'live'}
             stale={p.stale}
-            runKey={p.history ? (run ? `${run.team}:${run.to}` : null) : undefined}
+            runKey={runKeyOf(p.history, run)}
             className="mx-auto max-w-md"
           />
           {winner && (
@@ -79,17 +84,20 @@ export function GameScreen(p: GameScreenProps) {
 /** First load: the dial frame at full size with the needle at 12 o'clock (spec 4.4). */
 export function GameLoading({ stale }: { stale: boolean }) {
   return (
-    <Dial
-      loading
-      stale={stale}
-      price={null}
-      modelProb={null}
-      timeLeft={1}
-      state="pre"
-      team=""
-      label="Loading game"
-      className="mx-auto max-w-md"
-    />
+    <div className="space-y-3">
+      <Reconnecting stale={stale} />
+      <Dial
+        loading
+        stale={stale}
+        price={null}
+        modelProb={null}
+        timeLeft={1}
+        state="pre"
+        team=""
+        label="Loading game"
+        className="mx-auto max-w-md"
+      />
+    </div>
   )
 }
 
