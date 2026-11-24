@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest'
 
 const WEB = join(import.meta.dirname, '..')
 /** Folders whose sources can put words on screen (R3), Chronometer ones by name (spec 2.7). */
-const SOURCES = ['lib', 'components', 'app', 'lib/chrono']
+const SOURCES = ['lib', 'components', 'app', 'lib/chrono', 'components/chrono']
 
 const FORBIDDEN = ['bet', 'bets', 'betting', 'betslip', 'odds']
 const FORBIDDEN_PREFIX = ['gambl', 'wager']
