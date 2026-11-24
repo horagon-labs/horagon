@@ -15,7 +15,7 @@ const plural = (n: number, unit: string) => `${n} ${unit}${n === 1 ? '' : 's'}`
 
 /** "1 hour 2 minutes", "4 minutes", "45 seconds": for aria labels (spec 2.6). */
 export function spokenDuration(secs: number): string {
-  const s = Math.max(0, Math.floor(secs))
+  const s = Number.isFinite(secs) ? Math.max(0, Math.floor(secs)) : 0
   if (s < 60) return plural(s, 'second')
   const h = Math.floor(s / 3600)
   const m = Math.floor((s % 3600) / 60)

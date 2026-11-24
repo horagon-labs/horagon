@@ -113,5 +113,6 @@ describe('ET times', () => {
     expect(spokenDuration(45)).toBe('45 seconds')
     expect(spokenDuration(1)).toBe('1 second')
     expect(spokenDuration(-5)).toBe('0 seconds')
+    expect(spokenDuration(Number.NaN)).toBe('0 seconds')
   })
 })
