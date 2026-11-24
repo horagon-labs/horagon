@@ -14,9 +14,8 @@ const noop = () => {}
 function trade(over: Partial<Trade> = {}): Trade {
   return {
     side: 'home',
-    setSide: noop,
     action: 'buy',
-    setAction: noop,
+    setDirection: noop,
     amount: '25',
     setAmount: noop,
     team: 'CLE',
@@ -152,6 +151,11 @@ describe('CrownPanel (spec 3.2, 5.5)', () => {
 
   it('cannot switch to Sell without shares', () => {
     expect(panel()).toMatch(/aria-pressed="false" disabled=""[^>]*>Sell CLE<\/button>/)
+  })
+
+  it('turns Sell off and unpressed once a full sell leaves nothing held (M11)', () => {
+    const html = panel({ action: 'sell', held: undefined, amount: '' })
+    expect(html).toMatch(/aria-pressed="false" disabled=""[^>]*>Sell CLE<\/button>/)
   })
 
   it('shakes the ghost and offers a new quote after SLIPPAGE_EXCEEDED (spec 6.1)', () => {

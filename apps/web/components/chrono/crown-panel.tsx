@@ -51,16 +51,17 @@ export function CrownPanel(p: CrownPanelProps) {
         <button
           type="button"
           aria-pressed={buying}
-          onClick={() => t.setAction('buy')}
+          onClick={() => t.setDirection('buy')}
           className={chip}
         >
           Buy {t.team}
         </button>
         <button
           type="button"
-          aria-pressed={!buying}
+          // After a full sell nothing is held: off, and no longer pressed.
+          aria-pressed={!buying && t.held !== undefined}
           disabled={!t.held}
-          onClick={() => t.setAction('sell')}
+          onClick={() => t.setDirection('sell')}
           className={chip}
         >
           Sell {t.team}

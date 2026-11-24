@@ -23,7 +23,9 @@ import { awaitFill, createFillTracker, fillLine, holding } from './fill'
 import { DEFAULT_SLIPPAGE_BPS, executeTrade, type TradeStage } from './trade'
 import { checkTrade, type TradeCheck, tradeReady } from './trade-form'
 import {
+  BUY_AMOUNT,
   freshQuote,
+  heldOn,
   type KeptQuote,
   keepQuote,
   QUOTE_DEBOUNCE_MS,
@@ -31,8 +33,11 @@ import {
   quoteKey,
   type Ready,
   sendDisabled,
+  startAmount,
 } from './trade-view'
 import { type Poll, usePoll } from './use-poll'
+
+export { BUY_AMOUNT }
 
 function useDebounced<T>(value: T, ms: number): T {
   const [v, setV] = useState(value)
@@ -43,9 +48,6 @@ function useDebounced<T>(value: T, ms: number): T {
   return v
 }
 
-/** The buy amount (mUSDC) a fresh crown starts at, and a buy returns to after a sell. */
-export const BUY_AMOUNT = '10'
-
 export interface TradeOptions {
   /** MARKET_CLOSED or MARKET_HALTED: reload the game so the dial changes state (spec 6.1). */
   onMarketStale?: () => void
@@ -53,15 +55,18 @@ export interface TradeOptions {
 
 export interface Trade {
   side: Side
-  setSide: (side: Side) => void
   action: TradeAction
-  setAction: (action: TradeAction) => void
+  /**
+   * Turns the crown to `action` on `side` (default: the side on screen), with the amount that
+   * direction starts from (`startAmount`). The only way to change the side or the direction.
+   */
+  setDirection: (action: TradeAction, side?: Side) => void
   amount: string
   setAmount: (amount: string) => void
   /** The chosen side's team. */
   team: string
   ready: Ready
-  /** The wallet's position on the chosen side of this market. */
+  /** The wallet's position on the chosen side of this market, while it holds shares there. */
   held: Position | undefined
   balance: string | null | undefined
   check: TradeCheck
@@ -118,7 +123,8 @@ export function useTrade(game: GameDetail, market: MarketSummary, opts: TradeOpt
 
   const team = side === 'home' ? game.home : game.away
   const ready = tradeReady(address, portfolio)
-  const held = portfolio?.positions.find((p) => p.market === market.pubkey && p.side === side)
+  const positionOn = (s: Side) => heldOn(portfolio?.positions, market.pubkey, s)
+  const held = positionOn(side)
   const check = checkTrade({
     action,
     amount,
@@ -216,9 +222,13 @@ export function useTrade(game: GameDetail, market: MarketSummary, opts: TradeOpt
 
   return {
     side,
-    setSide,
     action,
-    setAction,
+    setDirection: (next, nextSide = side) => {
+      const to = { action: next, side: nextSide }
+      setAmount(startAmount(to, { action, side, amount }, positionOn(nextSide)?.shares))
+      setSide(nextSide)
+      setAction(next)
+    },
     amount,
     setAmount,
     team,

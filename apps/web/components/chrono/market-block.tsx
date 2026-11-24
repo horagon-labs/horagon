@@ -9,7 +9,7 @@ import { errorEffect } from '../../lib/chrono/errors'
 import { useMedia, WIDE } from '../../lib/chrono/feel'
 import { canTrade, type GameDial } from '../../lib/chrono/game'
 import { pusherMode } from '../../lib/chrono/pusher'
-import { BUY_AMOUNT, useTrade } from '../../lib/use-trade'
+import { useTrade } from '../../lib/use-trade'
 import { useWallet } from '../wallet'
 import { CrownPanel } from './crown-panel'
 import { CrownSheet } from './crown-sheet'
@@ -48,7 +48,7 @@ export function MarketBlock(p: {
   onMarketStale: () => void
 }) {
   const t = useTrade(p.game, p.market, { onMarketStale: p.onMarketStale })
-  const { address, portfolio, requestFaucet, funding, fundNote } = useWallet()
+  const { requestFaucet, funding, fundNote } = useWallet()
   const wide = useMedia(WIDE)
   const [open, setOpen] = useState(false)
   const trading = canTrade(p.dial.state)
@@ -59,19 +59,13 @@ export function MarketBlock(p: {
     effect: errorEffect(t.error),
     secsLeft: p.dial.secsLeft,
   })
+  // setDirection sets the amount too: a sell's share count never becomes a buy amount in mUSDC.
   const pick = (side: Side) => {
-    t.setSide(side)
-    // A sell's share count must never become a buy amount in mUSDC.
-    if (t.action === 'sell') t.setAmount(BUY_AMOUNT)
-    t.setAction('buy')
+    t.setDirection('buy', side)
     if (!wide) setOpen(true)
   }
   const sell = (side: Side) => {
-    const mine = portfolio?.wallet === address ? portfolio : undefined
-    const held = mine?.positions.find((x) => x.market === p.market.pubkey && x.side === side)
-    t.setSide(side)
-    t.setAction('sell')
-    t.setAmount(held?.shares ?? '')
+    t.setDirection('sell', side)
     if (!wide) setOpen(true)
   }
   const crown = (

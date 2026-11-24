@@ -1,10 +1,37 @@
-// The trade controls' words and small rules, shared by the old panel and the crown (Chronometer
-// spec 3.3): lifted out of trade-panel.tsx without a change.
-import type { Quote, Side, TradeAction } from '@horagon/sdk'
+// The crown's words and small rules (Chronometer spec 3.3), first lifted out of the old
+// trade-panel.tsx: the send button, the quote's key, and which amount a direction starts from.
+import { type Position, parseAmount, type Quote, type Side, type TradeAction } from '@horagon/sdk'
 import type { TradeStage } from './trade'
 
 export const QUOTE_DEBOUNCE_MS = 300
 export const QUOTE_POLL_MS = 5_000
+
+/** The buy amount (mUSDC) a fresh crown starts at, and a buy returns to after a sell. */
+export const BUY_AMOUNT = '10'
+
+/** The wallet's position on one side of a market, only while it still holds shares there. */
+export const heldOn = (
+  positions: readonly Position[] | undefined,
+  market: string,
+  side: Side,
+): Position | undefined =>
+  positions?.find((p) => p.market === market && p.side === side && parseAmount(p.shares) > 0n)
+
+/**
+ * The amount after the crown turns to `to` (Task 18 ruling): the one rule for both crown chips,
+ * the Pusher and the PositionCard's Sell, so a share count never becomes an mUSDC buy and an
+ * mUSDC amount never a share count. A buy starts from BUY_AMOUNT; a sell starts from every share
+ * `held` on its side, or '' when none are. A turn that keeps the direction keeps the amount,
+ * except a sell that changes side.
+ */
+export function startAmount(
+  to: { action: TradeAction; side: Side },
+  from: { action: TradeAction; side: Side; amount: string },
+  held: string | undefined,
+): string {
+  if (to.action === 'buy') return from.action === 'buy' ? from.amount : BUY_AMOUNT
+  return from.action === 'sell' && from.side === to.side ? from.amount : (held ?? '')
+}
 
 export type Ready = 'no-wallet' | 'loading' | 'ready'
 

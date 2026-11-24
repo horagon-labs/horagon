@@ -1,12 +1,16 @@
 import type { Quote } from '@horagon/sdk'
 import { describe, expect, it } from 'vitest'
+import { market, position } from '../lib/chrono/fixtures'
 import {
+  BUY_AMOUNT,
   freshQuote,
+  heldOn,
   keepQuote,
   quoteKey,
   sendDisabled,
   sendText,
   sidePrice,
+  startAmount,
 } from '../lib/trade-view'
 
 describe('trade view (Chronometer spec 3.3)', () => {
@@ -35,6 +39,45 @@ describe('trade view (Chronometer spec 3.3)', () => {
     expect(sendDisabled('ready', true, 'signing')).toBe(true)
     expect(sendDisabled('ready', true, null)).toBe(false)
     expect(sendDisabled('no-wallet', false, null)).toBe(false)
+  })
+})
+
+describe('startAmount (one rule per direction, Task 18 ruling)', () => {
+  const buying = { action: 'buy' as const, side: 'home' as const, amount: '25' }
+  const selling = { action: 'sell' as const, side: 'home' as const, amount: '7.05' }
+
+  it('starts a buy from BUY_AMOUNT, never from a share count (the pick() reset)', () => {
+    expect(BUY_AMOUNT).toBe('10')
+    expect(startAmount({ action: 'buy', side: 'home' }, selling, '14.1')).toBe('10')
+    expect(startAmount({ action: 'buy', side: 'away' }, selling, undefined)).toBe('10')
+  })
+
+  it('starts a sell from every share held, or nothing when none are held', () => {
+    expect(startAmount({ action: 'sell', side: 'home' }, buying, '14.1')).toBe('14.1')
+    expect(startAmount({ action: 'sell', side: 'home' }, buying, undefined)).toBe('')
+    expect(startAmount({ action: 'sell', side: 'away' }, selling, '3')).toBe('3')
+  })
+
+  it('keeps the amount while the direction stays, and a sell’s while its side stays', () => {
+    expect(startAmount({ action: 'buy', side: 'home' }, buying, '14.1')).toBe('25')
+    expect(startAmount({ action: 'buy', side: 'away' }, buying, undefined)).toBe('25')
+    expect(startAmount({ action: 'sell', side: 'home' }, selling, '14.1')).toBe('7.05')
+  })
+})
+
+describe('heldOn (spec 3.2)', () => {
+  const MKT = market().pubkey
+
+  it('finds the position on one side of the market while it holds shares', () => {
+    const home = position({ market: MKT })
+    expect(heldOn([home], MKT, 'home')).toBe(home)
+    expect(heldOn([home], MKT, 'away')).toBeUndefined()
+    expect(heldOn([home], `${MKT.slice(0, -1)}2`, 'home')).toBeUndefined()
+    expect(heldOn(undefined, MKT, 'home')).toBeUndefined()
+  })
+
+  it('counts a position sold down to zero shares as none held (M11)', () => {
+    expect(heldOn([position({ market: MKT, shares: '0' })], MKT, 'home')).toBeUndefined()
   })
 })
 
