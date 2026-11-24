@@ -1,6 +1,6 @@
 'use client'
 // The price rolls digit by digit like a gauge (spec 2.4); other characters stand still.
-import { m } from 'motion/react'
+import * as m from 'motion/react-m'
 import { useMotionReduced } from '../../lib/chrono/feel'
 
 const DIGITS = [...'0123456789']

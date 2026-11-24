@@ -1,7 +1,7 @@
 'use client'
 // The dial (spec 3.2, 4.3): price needle, model mark, time ring and state on one face. It only
 // draws; every decision about what to show arrives in props.
-import { m } from 'motion/react'
+import * as m from 'motion/react-m'
 import { useEffect, useId, useRef, useState } from 'react'
 import { useMotionReduced } from '../../lib/chrono/feel'
 import { arcPath, polar, priceToAngle } from '../../lib/chrono/geometry'
