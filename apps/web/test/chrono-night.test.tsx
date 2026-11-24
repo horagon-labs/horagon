@@ -101,11 +101,28 @@ describe('NightDial (spec 3.2, 4.1)', () => {
 
   it('draws one arc per segment on its ring and lights your game in lume', () => {
     const html = night()
-    expect(html).toMatch(/class="stroke-lume-300 opacity-35" data-id="nba-401810001" data-ring="1"/)
-    expect(html).toMatch(
-      /stroke-dasharray="2 2.5" class="stroke-brass-500 " data-id="nba-401810004"/,
-    )
+    expect(html).toMatch(/class="stroke-lume-300 opacity-35"/)
+    expect(html).toMatch(/stroke-dasharray="2 2.5" class="stroke-brass-500"/)
+    expect(html).toMatch(/data-id="nba-401810001" data-ring="1"/)
+    expect(html).toContain('data-id="nba-401810004"')
     expect(html).toContain('data-now')
+  })
+
+  it('gives every arc a full-ring transparent hit path and keeps the visible arc inert', () => {
+    const html = night()
+    const paths = html.match(/<path [^>]*>/g) ?? []
+    const hits = paths.filter((t) => t.includes('data-hit'))
+    const visible = paths.filter(
+      (t) => t.includes('stroke-dasharray') || t.includes('class="stroke-'),
+    )
+    expect(hits.length).toBeGreaterThan(0)
+    for (const t of hits) {
+      expect(t).toContain('stroke-width="7"')
+      expect(t).toContain('stroke="transparent"')
+      expect(t).toMatch(/data-id="nba-\d+"/)
+    }
+    expect(visible).toHaveLength(hits.length)
+    for (const t of visible) expect(t).toContain('pointer-events="none"')
   })
 
   it('shows the empty line and no options without games (spec 4.4)', () => {

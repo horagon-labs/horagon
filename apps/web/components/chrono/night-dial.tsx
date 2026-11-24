@@ -9,6 +9,7 @@ import {
   labelIds,
   labelSpots,
   packTracks,
+  RING_STEP,
   ringRadius,
   segmentAngles,
   segments,
@@ -120,19 +121,33 @@ export function NightDial(p: {
           segments(t, p.now).map((s) => {
             const a = segmentAngles(s, p.now)
             const lit = t.item.id === hover || t.item.id === p.selectedId
+            const d = arcPath(C, C, ringRadius(t.ring), a.from, a.to)
             return (
-              <path
-                key={`${t.item.id}-${s.from}`}
-                d={arcPath(C, C, ringRadius(t.ring), a.from, a.to)}
-                fill="none"
-                strokeWidth={lit ? 5 : 3.5}
-                strokeDasharray={s.pre ? '2 2.5' : undefined}
-                className={`${arcClass(t.item, lit)} ${s.past ? 'opacity-35' : ''}`}
-                data-id={t.item.id}
-                data-ring={t.ring}
-                onPointerEnter={() => p.onHover?.(t.item.id)}
-                onPointerLeave={() => p.onHover?.(null)}
-              />
+              <g key={`${t.item.id}-${s.from}`}>
+                <path
+                  d={d}
+                  fill="none"
+                  strokeWidth={lit ? 5 : 3.5}
+                  strokeDasharray={s.pre ? '2 2.5' : undefined}
+                  className={[arcClass(t.item, lit), s.past && 'opacity-35']
+                    .filter(Boolean)
+                    .join(' ')}
+                  pointerEvents="none"
+                />
+                {/* A full ring pitch wide, so a thumb can hit it (neighbours never overlap). */}
+                <path
+                  d={d}
+                  fill="none"
+                  stroke="transparent"
+                  strokeWidth={RING_STEP}
+                  pointerEvents="stroke"
+                  data-hit
+                  data-id={t.item.id}
+                  data-ring={t.ring}
+                  onPointerEnter={() => p.onHover?.(t.item.id)}
+                  onPointerLeave={() => p.onHover?.(null)}
+                />
+              </g>
             )
           }),
         )}
