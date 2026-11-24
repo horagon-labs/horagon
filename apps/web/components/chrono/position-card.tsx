@@ -85,7 +85,7 @@ export function PositionCard(p: PositionCardProps) {
           href={explorerTx(sig)}
           target="_blank"
           rel="noreferrer"
-          className="block text-11 text-brass-400 underline"
+          className="flex min-h-11 items-center text-11 text-brass-400 underline"
         >
           Claimed: view transaction
         </a>

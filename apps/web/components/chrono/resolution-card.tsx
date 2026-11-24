@@ -21,7 +21,12 @@ export function ResolutionCard({ game }: { game: GameDetail }) {
           <li key={m.label} className="flex items-center gap-2" data-mark={m.mark}>
             <span aria-hidden="true" className={`size-2 rounded-full ${DOT[m.mark]}`} />
             {m.sig ? (
-              <a href={explorerTx(m.sig)} target="_blank" rel="noreferrer" className="underline">
+              <a
+                href={explorerTx(m.sig)}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex min-h-11 items-center underline"
+              >
                 {m.label}
               </a>
             ) : (
@@ -40,7 +45,12 @@ export function ResolutionCard({ game }: { game: GameDetail }) {
       )}
       {r.evidenceUrl && (
         <p>
-          <a href={r.evidenceUrl} target="_blank" rel="noreferrer" className="underline">
+          <a
+            href={r.evidenceUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex min-h-11 items-center underline"
+          >
             Evidence JSON
           </a>
           {r.evidenceHash && (
@@ -51,16 +61,31 @@ export function ResolutionCard({ game }: { game: GameDetail }) {
         </p>
       )}
       <p className="flex flex-wrap gap-x-3">
-        <a href={explorerAddress(r.market)} target="_blank" rel="noreferrer" className="underline">
+        <a
+          href={explorerAddress(r.market)}
+          target="_blank"
+          rel="noreferrer"
+          className="inline-flex min-h-11 items-center underline"
+        >
           Market account
         </a>
         {r.createSig && (
-          <a href={explorerTx(r.createSig)} target="_blank" rel="noreferrer" className="underline">
+          <a
+            href={explorerTx(r.createSig)}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex min-h-11 items-center underline"
+          >
             Created
           </a>
         )}
         {r.haltSig && (
-          <a href={explorerTx(r.haltSig)} target="_blank" rel="noreferrer" className="underline">
+          <a
+            href={explorerTx(r.haltSig)}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex min-h-11 items-center underline"
+          >
             Halted
           </a>
         )}

@@ -146,7 +146,11 @@ export function WalletButton() {
               {shown ? (
                 <p className="break-all rounded bg-enamel-800 p-2 font-mono text-11">{shown}</p>
               ) : (
-                <button type="button" className="underline" onClick={() => setShown(exportKey())}>
+                <button
+                  type="button"
+                  className="inline-flex min-h-11 items-center underline"
+                  onClick={() => setShown(exportKey())}
+                >
                   Show secret key (base58)
                 </button>
               )}
@@ -162,7 +166,7 @@ export function WalletButton() {
                 type="button"
                 disabled={!importText.trim() || (ageNeeded && !importAge)}
                 onClick={onImport}
-                className="underline disabled:opacity-50"
+                className="inline-flex min-h-11 items-center underline disabled:opacity-50"
               >
                 Import
               </button>

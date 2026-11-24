@@ -30,7 +30,7 @@ export function Positions({
               <div>
                 <Link
                   href={`/game/${p.gameId}`}
-                  className="font-medium text-ivory-100 underline-offset-2 hover:underline"
+                  className="inline-flex min-h-11 items-center font-medium text-ivory-100 underline-offset-2 hover:underline"
                 >
                   {sideLabel(p.side, teams)} · {usdc(p.shares)} shares
                 </Link>
@@ -64,7 +64,7 @@ export function Positions({
           href={explorerTx(sig)}
           target="_blank"
           rel="noreferrer"
-          className="block text-11 text-brass-400 underline"
+          className="flex min-h-11 items-center text-11 text-brass-400 underline"
         >
           Claimed: view transaction
         </a>

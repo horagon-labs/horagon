@@ -231,7 +231,7 @@ export function CrownPanel(p: CrownPanelProps) {
             href={explorerTx(t.done.signature)}
             target="_blank"
             rel="noreferrer"
-            className="underline"
+            className="inline-flex min-h-11 items-center underline"
           >
             View transaction
           </a>
