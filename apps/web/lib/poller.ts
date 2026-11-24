@@ -3,6 +3,11 @@
 export interface PollSink<T> {
   data: (value: T) => void
   error: (err: Error) => void
+  /**
+   * Consecutive failed runs, 0 again after a success (Chronometer spec 4.4: the UI marks the
+   * data stale at once and shows the error only after three). Only runs that may report count.
+   */
+  failures?: (n: number) => void
 }
 
 /**
@@ -16,15 +21,24 @@ export function createPoller<T>(
 ) {
   let latest = 0
   let inflight = false
+  let failures = 0
 
   async function run(): Promise<void> {
     const seq = ++latest
     inflight = true
     try {
       const value = await load()
-      if (seq === latest) sink.data(value)
+      if (seq === latest) {
+        failures = 0
+        sink.data(value)
+        sink.failures?.(0)
+      }
     } catch (err) {
-      if (seq === latest) sink.error(err instanceof Error ? err : new Error(String(err)))
+      if (seq === latest) {
+        failures++
+        sink.error(err instanceof Error ? err : new Error(String(err)))
+        sink.failures?.(failures)
+      }
     } finally {
       if (seq === latest) inflight = false
     }
@@ -37,10 +51,11 @@ export function createPoller<T>(
     tick: (): Promise<void> => (inflight || !enabled() ? Promise.resolve() : run()),
     /** A reload the UI asked for (after a trade): like `run`, but nothing without a key. */
     refresh: (): Promise<void> => (enabled() ? run() : Promise.resolve()),
-    /** The key changed or the view closed: every run in flight is dropped. */
+    /** The key changed or the view closed: every run in flight is dropped, the count restarts. */
     reset: (): void => {
       latest++
       inflight = false
+      failures = 0
     },
   }
 }

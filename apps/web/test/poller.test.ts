@@ -109,3 +109,47 @@ describe('createPoller', () => {
     expect(errors[1]?.message).toBe('x')
   })
 })
+
+describe('createPoller failures (Chronometer spec 4.4)', () => {
+  function counting() {
+    const calls: ReturnType<typeof deferred<number>>[] = []
+    const counts: number[] = []
+    const poller = createPoller<number>(
+      () => {
+        const d = deferred<number>()
+        calls.push(d)
+        return d.promise
+      },
+      { data: () => {}, error: () => {}, failures: (n) => counts.push(n) },
+    )
+    return { calls, counts, poller }
+  }
+
+  it('counts consecutive failed runs and goes back to 0 after a success', async () => {
+    const { calls, counts, poller } = counting()
+    for (let i = 0; i < 3; i++) {
+      const r = poller.run()
+      calls[i]?.reject(new Error('down'))
+      await r
+    }
+    const ok = poller.run()
+    calls[3]?.resolve(1)
+    await ok
+    expect(counts).toEqual([1, 2, 3, 0])
+  })
+
+  it('does not count a dropped run, and restarts the count on reset', async () => {
+    const { calls, counts, poller } = counting()
+    const first = poller.run()
+    calls[0]?.reject(new Error('down'))
+    await first
+    const late = poller.run()
+    poller.reset()
+    calls[1]?.reject(new Error('late'))
+    await late
+    const next = poller.run()
+    calls[2]?.reject(new Error('down'))
+    await next
+    expect(counts).toEqual([1, 1])
+  })
+})
