@@ -42,7 +42,8 @@ export function hold(s: HoldState, i: HoldInput): HoldResult {
       if (s.downAt !== null && i.at - s.downAt >= HOLD_MS) return CONFIRMED
       return same({ ...s, downAt: null })
     case 'leave':
-      return same({ ...s, downAt: null })
+      // No click follows a release outside the button: do not keep swallowing.
+      return same({ ...s, downAt: null, fired: false })
     case 'press':
       if (s.fired) return same({ ...s, fired: false })
       if (s.armedAt !== null && i.at - s.armedAt <= DOUBLE_MS) {

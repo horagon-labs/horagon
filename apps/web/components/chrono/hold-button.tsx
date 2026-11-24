@@ -23,6 +23,14 @@ export function HoldButton(p: {
   const [armed, setArmed] = useState(false)
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined)
   const disarm = useRef<ReturnType<typeof setTimeout>>(undefined)
+  const off = p.disabled || p.pending
+  // The timers outlive a render: keep the latest of what they call.
+  const onConfirmRef = useRef(p.onConfirm)
+  onConfirmRef.current = p.onConfirm
+  const feelRef = useRef(feel)
+  feelRef.current = feel
+  const offRef = useRef(off)
+  offRef.current = off
   useEffect(
     () => () => {
       clearTimeout(timer.current)
@@ -30,6 +38,15 @@ export function HoldButton(p: {
     },
     [],
   )
+  // Once the button is off (halted, or a send in flight) no hold or first press may complete.
+  useEffect(() => {
+    if (!off) return
+    clearTimeout(timer.current)
+    clearTimeout(disarm.current)
+    state.current = IDLE
+    setPressing(false)
+    setArmed(false)
+  }, [off])
 
   function apply(kind: HoldInput['kind']) {
     const r = hold(state.current, { kind, at: performance.now() })
@@ -43,12 +60,12 @@ export function HoldButton(p: {
     if (r.confirm) {
       clearTimeout(timer.current)
       setArmed(false)
-      buzz(feel, CONFIRM_BUZZ_MS)
-      p.onConfirm()
+      if (offRef.current) return
+      buzz(feelRef.current, CONFIRM_BUZZ_MS)
+      onConfirmRef.current()
     }
   }
 
-  const off = p.disabled || p.pending
   const release = (kind: 'up' | 'leave') => {
     clearTimeout(timer.current)
     apply(kind)

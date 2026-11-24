@@ -55,6 +55,12 @@ describe('hold (spec 3.2)', () => {
     expect(late).toMatchObject({ confirm: false, armed: true })
   })
 
+  it('does not swallow a later press when the release came without a click', () => {
+    const r = run(['down', 0], ['held', 500], ['leave', 700], ['press', 900])
+    expect(r[1]?.confirm).toBe(true)
+    expect(r[3]).toMatchObject({ confirm: false, armed: true })
+  })
+
   it('drops a hold when the pointer leaves', () => {
     const r = run(['down', 0], ['leave', 200], ['held', 500])
     expect(r.map((x) => x.confirm)).toEqual([false, false, false])
