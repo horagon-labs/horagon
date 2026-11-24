@@ -11,10 +11,5 @@ function decoded(id: string): string {
 
 export default async function GamePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
-  // The old game screen keeps its one-column width until wave 2 (Chronometer spec 6.3).
-  return (
-    <div className="mx-auto max-w-2xl">
-      <GameView id={decoded(id)} />
-    </div>
-  )
+  return <GameView id={decoded(id)} />
 }

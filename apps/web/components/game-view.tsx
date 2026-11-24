@@ -1,91 +1,81 @@
 'use client'
-import { type GameDetail, isHoragonError } from '@horagon/sdk'
+// The game screen's data (Chronometer spec 4.2, 5.2): the game every 3 s and its history every
+// 15 s as before, plus the winner market's state every 60 s for its real start_ts. While a
+// result is proposed, the published evidence JSON names the proposed side, so the needle can
+// turn toward it. No new endpoint: both are routes the SDK client already has.
+import { isHoragonError } from '@horagon/sdk'
 import { api } from '../lib/api'
-import { gameClock, percent } from '../lib/format'
+import { winnerOf } from '../lib/chrono/board'
+import { gameDial } from '../lib/chrono/game'
+import { pollHealth } from '../lib/chrono/health'
+import { useNow } from '../lib/chrono/now'
+import { proposedOutcome } from '../lib/chrono/state'
 import { usePoll } from '../lib/use-poll'
-import { Countdown } from './countdown'
+import { GameLoading, GameScreen, NoGame } from './chrono/game-screen'
+import { GamePositions, MarketBlock } from './chrono/market-block'
 import { ErrorText } from './error-text'
-import { Positions } from './positions'
-import { PriceChart } from './price-chart'
-import { ResolutionPanel } from './resolution-panel'
-import { TradePanel } from './trade-panel'
 
-function Scoreboard({ game }: { game: GameDetail }) {
-  const started = game.status !== 'scheduled'
-  return (
-    <section className="flex items-center justify-between rounded-xl bg-zinc-900 p-4 text-white">
-      <div className="text-center">
-        <p className="text-sm text-zinc-400">Away</p>
-        <p className="text-xl font-bold">{game.away}</p>
-        <p className="text-3xl font-bold">{started ? game.awayScore : '–'}</p>
-      </div>
-      <div className="text-center">
-        <p className={game.status === 'live' ? 'font-semibold text-red-400' : 'text-zinc-300'}>
-          {gameClock(game)}
-        </p>
-        <p className="text-xs text-zinc-400">
-          Model: {game.home} {percent(game.modelProb)}
-        </p>
-      </div>
-      <div className="text-center">
-        <p className="text-sm text-zinc-400">Home</p>
-        <p className="text-xl font-bold">{game.home}</p>
-        <p className="text-3xl font-bold">{started ? game.homeScore : '–'}</p>
-      </div>
-    </section>
-  )
-}
+const MARKET_STATE_MS = 60_000
 
 export function GameView({ id }: { id: string }) {
   const detail = usePoll(`game:${id}`, () => api.games.get(id))
   const history = usePoll(`history:${id}`, () => api.games.history(id), 15_000)
   const game = detail.data
+  const winner = game ? winnerOf(game) : undefined
+  const pubkey = winner?.pubkey ?? ''
+  const marketState = usePoll(
+    pubkey ? `market:${pubkey}` : null,
+    () => api.markets.get(pubkey),
+    MARKET_STATE_MS,
+  )
+  const evidence = usePoll(
+    winner?.status === 'proposed' ? `evidence:${id}` : null,
+    () => api.evidence(id, 'winner'),
+    MARKET_STATE_MS,
+  )
+  const now = useNow()
+  const health = pollHealth(detail)
 
   if (!game) {
     // A malformed id is refused as INVALID_INPUT before the lookup: it names no game either.
     const missing =
       isHoragonError(detail.error) &&
       (detail.error.code === 'NOT_FOUND' || detail.error.code === 'INVALID_INPUT')
-    if (missing) return <p className="text-zinc-500">This game does not exist.</p>
-    return detail.error ? (
-      <ErrorText error={detail.error} />
-    ) : (
-      <p className="text-zinc-500">Loading game…</p>
+    if (missing) return <NoGame />
+    return (
+      <div className="space-y-3">
+        <GameLoading stale={health.stale} />
+        <ErrorText error={health.error} />
+      </div>
     )
   }
-  const winner = game.markets.find((m) => m.kind === 'winner')
+
+  const proposed = evidence.data ? proposedOutcome(evidence.data.json) : null
+  const dial = gameDial(game, winner, marketState.data?.startTs ?? null, proposed, now)
   return (
-    <div className="space-y-6">
-      <Scoreboard game={game} />
-      {winner ? (
-        <>
-          <PriceChart
-            history={history.data}
-            market={winner.pubkey}
-            home={game.home}
-            away={game.away}
-          />
-          {winner.status === 'open' && (
-            <Countdown endTs={winner.endTs} chainTs={winner.priceTs ?? 0} />
-          )}
-          <TradePanel game={game} market={winner} />
-        </>
-      ) : (
-        <p className="text-zinc-500">The market opens 60 minutes before tip-off.</p>
-      )}
-      <section>
-        <h2 className="mb-1 font-semibold">Your position</h2>
-        <Positions gameId={game.id} teams={{ home: game.home, away: game.away }} />
-      </section>
-      <details>
-        <summary className="cursor-pointer font-semibold">Market rules</summary>
-        <ul className="mt-2 list-disc space-y-1 pl-5 text-sm">
-          {game.rules.map((r) => (
-            <li key={r}>{r}</li>
-          ))}
-        </ul>
-      </details>
-      <ResolutionPanel game={game} />
+    <div className="space-y-3">
+      <GameScreen
+        game={game}
+        history={history.data}
+        dial={dial}
+        now={now}
+        stale={health.stale}
+        right={
+          winner ? (
+            <MarketBlock
+              key={winner.pubkey}
+              game={game}
+              market={winner}
+              dial={dial}
+              now={now}
+              onMarketStale={detail.refresh}
+            />
+          ) : (
+            <GamePositions game={game} canSell={false} onSell={() => {}} />
+          )
+        }
+      />
+      <ErrorText error={health.error} />
     </div>
   )
 }

@@ -1,15 +1,28 @@
 'use client'
-// The dev-only state gallery (app/dev/chrono): every DialState and the board's shared states,
-// drawn from the fixtures at 9:08 PM ET, so each one can be screenshotted (spec 6.2).
+// The dev-only state gallery (app/dev/chrono): every DialState, the board's shared states and
+// the game screen's, drawn from the fixtures at 9:08 PM ET, so each one can be screenshotted
+// (spec 6.2). The crown needs a live market; the visual check takes it from the e2e run.
 import type { Game } from '@horagon/sdk'
 import { type ReactNode, useState } from 'react'
-import { evening, game, NOW, portfolio, position } from '../../lib/chrono/fixtures'
+import {
+  detail,
+  evening,
+  game,
+  history,
+  market,
+  NOW,
+  portfolio,
+  position,
+} from '../../lib/chrono/fixtures'
+import { gameDial } from '../../lib/chrono/game'
 import type { Health } from '../../lib/chrono/health'
 import { DIAL_STATES, type DialState, dialLabel } from '../../lib/chrono/state'
 import { BoardView } from './board-view'
 import { Dial } from './dial'
 import { stateLine } from './dial-look'
+import { GameLoading, GameScreen, NoGame } from './game-screen'
 import { MiniDial } from './mini-dial'
+import { PositionCard } from './position-card'
 
 interface Sample {
   price: number | null
@@ -64,6 +77,32 @@ function Board(p: { games: Game[] | undefined; health: Health }) {
       onSelect={setSelectedId}
       hoverId={hoverId}
       onHover={setHoverId}
+    />
+  )
+}
+
+function GameSample({ stale }: { stale: boolean }) {
+  const noop = () => {}
+  return (
+    <GameScreen
+      game={detail()}
+      history={history()}
+      dial={gameDial(game(), market(), NOW - 3_730, null, NOW)}
+      now={NOW}
+      stale={stale}
+      right={
+        <PositionCard
+          gameId={game().id}
+          teams={{ home: 'CLE', away: 'MEM' }}
+          portfolio={portfolio([position()])}
+          canSell
+          onSell={noop}
+          claiming={false}
+          claimed={[]}
+          claimError={undefined}
+          onClaim={noop}
+        />
+      }
     />
   )
 }
@@ -160,6 +199,18 @@ export function Gallery() {
       </Section>
       <Section title="Board error after three failures">
         <Board games={undefined} health={DOWN} />
+      </Section>
+      <Section title="Game screen">
+        <GameSample stale={false} />
+      </Section>
+      <Section title="Game screen stale">
+        <GameSample stale />
+      </Section>
+      <Section title="Game loading and no game">
+        <div className="grid grid-cols-2 gap-4">
+          <GameLoading stale={false} />
+          <NoGame />
+        </div>
       </Section>
     </div>
   )

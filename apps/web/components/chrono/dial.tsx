@@ -36,7 +36,10 @@ export interface DialProps {
   loading?: boolean
   /** Polls failing: a thin red line on the bezel (spec 4.4). */
   stale?: boolean
-  /** Changes when a new scoring run shows up: the rim flashes amber once (spec 2.4). */
+  /**
+   * Changes when a new scoring run shows up: the rim flashes amber once (spec 2.4). `undefined`
+   * means not known yet (history still loading): the first key that follows is absorbed.
+   */
   runKey?: string | null
   className?: string
 }
@@ -60,7 +63,7 @@ function pts(...points: { x: number; y: number }[]): string {
 export function Dial(p: DialProps) {
   const id = useId()
   const reduced = useMotionReduced()
-  const flash = useBeat(p.runKey, !p.loading)
+  const flash = useBeat(p.runKey, !p.loading && p.runKey !== undefined)
   const settle = useBeat(p.state === 'resolved' ? 'resolved' : null, !p.loading)
   const price = p.state === 'void' ? null : p.price
   const ghost = p.loading ? null : (p.ghostPrice ?? null)
@@ -225,10 +228,12 @@ export function Dial(p: DialProps) {
           text={p.loading ? '—' : priceDigits(price)}
           className="font-mono text-40 text-ivory-100 tabular-nums"
         />
-        <span className="flex items-center gap-1.5 text-11 uppercase tracking-[0.2em] text-brass-500">
-          {p.liveDot && <span className="size-1.5 rounded-full bg-lume-300" data-live />}
-          {p.team} wins
-        </span>
+        {p.team && (
+          <span className="flex items-center gap-1.5 text-11 uppercase tracking-[0.2em] text-brass-500">
+            {p.liveDot && <span className="size-1.5 rounded-full bg-lume-300" data-live />}
+            {p.team} wins
+          </span>
+        )}
         {p.detail && <span className="font-mono text-11 text-ash-400">{p.detail}</span>}
       </div>
     </div>

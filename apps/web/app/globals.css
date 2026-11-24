@@ -1,9 +1,5 @@
 @import "tailwindcss";
 
-/* Dark only (spec 2.1). The old components' `dark:` styles always apply (html has class
-   "dark") until wave 2 replaces the last of them. */
-@custom-variant dark (&:where(.dark, .dark *));
-
 /* The Chronometer tokens (spec 2.1-2.4). lib/chrono/tokens.ts mirrors the colors. */
 @theme {
   --color-enamel-950: #07090b;
@@ -18,9 +14,6 @@
   --color-ash-400: #8b8577;
   --color-amber-400: #fbbf24;
   --color-red-400: #f87171;
-  /* The old game page's sides: YES (home) is lume, NO (away) is brass. */
-  --color-home: #d9f99d;
-  --color-away: #c8a46a;
 
   --text-11: 0.6875rem;
   --text-11--line-height: 1rem;
