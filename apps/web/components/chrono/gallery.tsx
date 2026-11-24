@@ -1,8 +1,10 @@
 'use client'
 // The dev-only state gallery (app/dev/chrono): every DialState, the board's shared states and
 // the game screen's, drawn from the fixtures at 9:08 PM ET, so each one can be screenshotted
-// (spec 6.2). The crown needs a live market; the visual check takes it from the e2e run.
-import type { Game } from '@horagon/sdk'
+// (spec 6.2). The crown and the Pusher are drawn here from a stub trade that sends nothing, so
+// the bezel and the HoldButton can be tried by keyboard and pointer; the live send path was
+// verified in the Task 24 e2e run.
+import type { Game, Side, TradeAction } from '@horagon/sdk'
 import { type ReactNode, useState } from 'react'
 import {
   detail,
@@ -13,16 +15,24 @@ import {
   NOW,
   portfolio,
   position,
+  quote,
 } from '../../lib/chrono/fixtures'
 import { gameDial } from '../../lib/chrono/game'
 import type { Health } from '../../lib/chrono/health'
+import { type PusherInput, pusherMode } from '../../lib/chrono/pusher'
 import { DIAL_STATES, type DialState, dialLabel } from '../../lib/chrono/state'
+import { checkTrade } from '../../lib/trade-form'
+import { BUY_AMOUNT, startAmount } from '../../lib/trade-view'
+import type { Trade } from '../../lib/use-trade'
 import { BoardView } from './board-view'
+import { CrownPanel } from './crown-panel'
+import { CrownSheet } from './crown-sheet'
 import { Dial } from './dial'
 import { stateLine } from './dial-look'
 import { GameLoading, GameScreen, NoGame } from './game-screen'
 import { MiniDial } from './mini-dial'
 import { PositionCard } from './position-card'
+import { Pusher } from './pusher'
 
 interface Sample {
   price: number | null
@@ -106,6 +116,117 @@ function GameSample({ stale }: { stale: boolean }) {
     />
   )
 }
+
+const DEMO_BALANCE = '493.74'
+
+/**
+ * A Trade as useTrade returns it, for a ready wallet holding CLE shares, with the real step
+ * ladder and form checks. `send` only counts: no api, no wallet, no network.
+ */
+function useDemoTrade(): Trade & { sent: number } {
+  const [side, setSide] = useState<Side>('home')
+  const [action, setAction] = useState<TradeAction>('buy')
+  const [amount, setAmount] = useState(BUY_AMOUNT)
+  const [sent, setSent] = useState(0)
+  const g = detail()
+  const m = market()
+  const positionOn = (s: Side) => (s === 'home' ? position() : undefined)
+  const held = positionOn(side)
+  const q = quote()
+  return {
+    side,
+    action,
+    setDirection: (next, nextSide = side) => {
+      const to = { action: next, side: nextSide }
+      setAmount(startAmount(to, { action, side, amount }, positionOn(nextSide)?.shares))
+      setSide(nextSide)
+      setAction(next)
+    },
+    amount,
+    setAmount,
+    team: side === 'home' ? g.home : g.away,
+    ready: 'ready',
+    held,
+    balance: DEMO_BALANCE,
+    check: checkTrade({
+      action,
+      amount,
+      balance: DEMO_BALANCE,
+      shares: held?.shares,
+      marketStatus: m.status,
+      endTs: m.endTs,
+      nowSecs: NOW,
+    }),
+    quote: { data: q, error: undefined, failures: 0, refresh: () => {} },
+    lastQuote: q,
+    quotePending: false,
+    stage: null,
+    done: null,
+    error: undefined,
+    errorAt: 0,
+    failedAction: 'buy',
+    shownError: undefined,
+    fundNoteHidden: true,
+    send: () => setSent((n) => n + 1),
+    sent,
+  }
+}
+
+function CrownDemo() {
+  const t = useDemoTrade()
+  const [open, setOpen] = useState(false)
+  const dial = gameDial(game(), market(), NOW - 3_730, null, NOW)
+  const panel = (
+    <CrownPanel
+      trade={t}
+      game={detail()}
+      market={market()}
+      state="live"
+      timeLeft={dial.timeLeft}
+      now={NOW}
+      funding={false}
+      fundNote={undefined}
+      onFaucet={() => {}}
+    />
+  )
+  return (
+    <div className="max-w-sm space-y-3">
+      {panel}
+      <p className="text-13 text-ash-400">Demo sends: {t.sent}</p>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="min-h-11 rounded-card border border-line px-4 text-13"
+      >
+        Open the crown sheet
+      </button>
+      <CrownSheet
+        open={open}
+        onClose={() => setOpen(false)}
+        title={`${t.action === 'buy' ? 'Buy' : 'Sell'} ${t.team}`}
+      >
+        {panel}
+      </CrownSheet>
+    </div>
+  )
+}
+
+/** The Pusher's modes as pusherMode gives them for each input. */
+const PUSHER_BASE: PusherInput = {
+  state: 'live',
+  ready: 'ready',
+  balance: DEMO_BALANCE,
+  effect: null,
+  failedAction: 'buy',
+  secsLeft: 3_730,
+}
+const PUSHER_SAMPLES: [string, Partial<PusherInput>][] = [
+  ['live', {}],
+  ['closing', { state: 'closing', secsLeft: 252 }],
+  ['halted', { state: 'halted' }],
+  ['no wallet', { ready: 'no-wallet', balance: undefined }],
+  ['closed', { state: 'closed', secsLeft: 0 }],
+]
 
 export function Gallery() {
   return (
@@ -211,6 +332,27 @@ export function Gallery() {
           <GameLoading stale={false} />
           <NoGame />
         </div>
+      </Section>
+      <Section title="Pusher (spec 3.2, 4.3)">
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {PUSHER_SAMPLES.map(([name, over]) => (
+            <figure key={name} className="space-y-1">
+              <Pusher
+                mode={pusherMode({ ...PUSHER_BASE, ...over })}
+                home="CLE"
+                away="MEM"
+                price={0.77}
+                onPick={() => {}}
+                funding={false}
+                onFaucet={() => {}}
+              />
+              <figcaption className="text-center font-mono text-11 text-ash-400">{name}</figcaption>
+            </figure>
+          ))}
+        </div>
+      </Section>
+      <Section title="Crown, from a stub trade (spec 3.2, 5.5)">
+        <CrownDemo />
       </Section>
     </div>
   )

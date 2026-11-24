@@ -164,6 +164,18 @@ describe('dev gallery (spec 6.2)', () => {
     expect(html).toContain('No game here')
     expect(html).not.toContain('NaN')
   })
+
+  it('draws the crown from a stub trade and the Pusher in each of its modes (part G)', () => {
+    const html = renderToStaticMarkup(<Gallery />)
+    expect(html).toContain('role="slider"')
+    expect(html).toContain('Open the crown sheet')
+    expect(html).toContain('Demo sends: 0')
+    expect(html).toContain('>Buy CLE 77¢</button>')
+    expect(html).toContain('closes in 4:12')
+    expect(html).toContain('Get test mUSDC')
+    expect(html).toContain('Trading closed, waiting for the result')
+    expect(html).toContain('<dialog aria-label="Buy CLE"')
+  })
 })
 
 describe('wave 2 cleanup (spec 2.1)', () => {
