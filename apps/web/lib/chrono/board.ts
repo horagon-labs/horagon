@@ -8,7 +8,7 @@ import {
   type PositionsResponse,
   parseAmount,
 } from '@horagon/sdk'
-import { usdc } from '../format'
+import { isTonight, usdc } from '../format'
 import { timeLeftFraction } from './geometry'
 import { type DialState, deriveDialState, dialLabel, needlePrice, secsToClose } from './state'
 import { gameInterval, type Interval } from './tracks'
@@ -108,4 +108,41 @@ export function itemLabel(i: BoardItem): string {
     gameStatus: g.status,
   })
   return `${teams}. ${words}${i.held ? '. You hold a position' : ''}`
+}
+
+export interface BoardModel {
+  /** Every team playing tonight, for the follow chips. */
+  teams: string[]
+  /** The rows after the follow filter, in list order. */
+  items: BoardItem[]
+  /** The line for an empty board, with the words the board already uses; null with rows. */
+  empty: string | null
+  /** The Night dial's clock (spec 5.4): `now` moved up to the newest winner `priceTs` the board has seen. */
+  chainNow: number
+}
+
+/** Tonight's board (spec 4.1, 4.4): the 24-hour filter, the follow filter and the list order. */
+export function boardModel(
+  games: Game[] | undefined,
+  portfolio: PositionsResponse | undefined,
+  now: number,
+  follows: readonly string[],
+): BoardModel {
+  if (games === undefined) return { teams: [], items: [], empty: 'Loading games…', chainNow: now }
+  // Every endTs comparison on the Night dial uses chain time (spec 5.4), like each row does.
+  const newest = Math.max(0, ...games.map((g) => winnerOf(g)?.priceTs ?? 0))
+  const chainNow = effectiveTime(now, newest)
+  const tonight = games.filter((g) => isTonight(g, now * 1000))
+  const teams = [...new Set(tonight.flatMap((g) => [g.away, g.home]))].sort()
+  const shown =
+    follows.length === 0
+      ? tonight
+      : tonight.filter((g) => follows.includes(g.home) || follows.includes(g.away))
+  const items = shown.map((g) => boardItem(g, portfolio, now)).sort(listOrder)
+  if (items.length > 0) return { teams, items, empty: null, chainNow }
+  const empty =
+    follows.length > 0
+      ? 'No games for the teams you follow in the next 24 hours.'
+      : 'No NBA games in the next 24 hours.'
+  return { teams, items, empty, chainNow }
 }
