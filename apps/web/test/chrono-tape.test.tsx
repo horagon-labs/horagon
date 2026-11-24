@@ -4,7 +4,7 @@ import { Scorebug } from '../components/chrono/scorebug'
 import { Tape } from '../components/chrono/tape'
 import { game, history, market, NOW } from '../lib/chrono/fixtures'
 import { findRuns } from '../lib/chrono/runs'
-import { periodLabel, periodStarts, runMarkers, tapeTime } from '../lib/chrono/tape'
+import { periodLabel, periodStarts, runMarkers, tapeCents, tapeTime } from '../lib/chrono/tape'
 import { COLORS } from '../lib/chrono/tokens'
 
 const MKT = market().pubkey
@@ -21,6 +21,16 @@ describe('tape (spec 3.2)', () => {
     expect(tapeTime(NOW as Parameters<typeof tapeTime>[0])).toBe(NOW)
     expect(tapeTime('2026-11-25T02:08:00Z')).toBe(NOW)
     expect(tapeTime({ year: 2026, month: 11, day: 25 })).toBe(Date.UTC(2026, 10, 25) / 1000)
+  })
+
+  it('reads axis and crosshair prices inside 0-100¢, with no float noise at the edges', () => {
+    expect(tapeCents(-0.02)).toBe('0¢')
+    expect(tapeCents(1.02)).toBe('100¢')
+    expect(tapeCents(1e-12)).toBe('0¢')
+    expect(tapeCents(1 - 1e-12)).toBe('100¢')
+    expect(tapeCents(0.004)).toBe('<1¢')
+    expect(tapeCents(0.996)).toBe('>99¢')
+    expect(tapeCents(0.5)).toBe('50¢')
   })
 
   it('marks a run at its last basket on the model line, in its side’s color', () => {

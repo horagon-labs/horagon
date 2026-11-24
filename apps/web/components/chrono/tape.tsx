@@ -1,11 +1,13 @@
 'use client'
 // The Tape (spec 3.2): lightweight-charts 5.3.0 in Chronometer colors. Market line lume, model
 // line brass, a dashed line where each quarter starts (a series primitive, the v5 plugin API),
-// run markers from runs.ts (createSeriesMarkers), and the time axis in ET (spec 5.4).
+// run markers from runs.ts (createSeriesMarkers), and the time axis in ET (spec 5.4). Its
+// numbers are in JetBrains Mono, like every number on the page.
 import type { GameHistory } from '@horagon/sdk'
 import {
   createChart,
   createSeriesMarkers,
+  type IChartApi,
   type IPrimitivePaneRenderer,
   type IPrimitivePaneView,
   type ISeriesApi,
@@ -19,10 +21,15 @@ import {
 import { useEffect, useRef } from 'react'
 import { chartSeries, type Point } from '../../lib/chart'
 import { findRuns } from '../../lib/chrono/runs'
-import { type PeriodStart, periodStarts, runMarkers, tapeTime } from '../../lib/chrono/tape'
+import {
+  type PeriodStart,
+  periodStarts,
+  runMarkers,
+  tapeCents,
+  tapeTime,
+} from '../../lib/chrono/tape'
 import { etClock } from '../../lib/chrono/time'
 import { COLORS } from '../../lib/chrono/tokens'
-import { cents } from '../../lib/format'
 
 type Target = Parameters<IPrimitivePaneRenderer['draw']>[0]
 
@@ -35,6 +42,9 @@ class QuarterLines implements ISeriesPrimitive<Time> {
     zOrder: () => 'bottom',
     renderer: () => ({ draw: (target: Target) => this.draw(target) }),
   }
+
+  /** `font`: the family of the labels, the chart's own. */
+  constructor(private readonly font: string) {}
 
   attached(p: SeriesAttachedParameter<Time>): void {
     this.chart = p.chart
@@ -63,7 +73,7 @@ class QuarterLines implements ISeriesPrimitive<Time> {
       context.save()
       context.strokeStyle = COLORS['brass-700']
       context.fillStyle = COLORS['ash-400']
-      context.font = '10px monospace'
+      context.font = `11px ${this.font}`
       context.setLineDash([3, 3])
       for (const s of this.starts) {
         const x = chart.timeScale().timeToCoordinate(s.ts as UTCTimestamp)
@@ -80,6 +90,7 @@ class QuarterLines implements ISeriesPrimitive<Time> {
 }
 
 interface Handles {
+  chart: IChartApi
   market: ISeriesApi<'Line'>
   model: ISeriesApi<'Line'>
   markers: ISeriesMarkersPluginApi<Time>
@@ -88,9 +99,16 @@ interface Handles {
 
 const toData = (points: Point[]) =>
   points.map((p) => ({ time: p.time as UTCTimestamp, value: p.value }))
-const priceFormat = { type: 'custom' as const, formatter: (p: number) => cents(p) }
+const priceFormat = { type: 'custom' as const, formatter: tapeCents }
 // Probabilities: always the whole 0-100¢ range, so a move is never exaggerated.
 const fullRange = () => ({ priceRange: { minValue: 0, maxValue: 1 } })
+// Room after the last point, so the last " ET" tick label is not cut off at the right edge.
+const RIGHT_OFFSET_BARS = 3
+
+/** The family next/font resolved for JetBrains Mono (set on <html>, app/layout.tsx). */
+const monoFamily = (): string =>
+  getComputedStyle(document.documentElement).getPropertyValue('--font-jetbrains').trim() ||
+  'monospace'
 
 export function Tape(props: {
   history: GameHistory | undefined
@@ -100,12 +118,19 @@ export function Tape(props: {
 }) {
   const box = useRef<HTMLDivElement>(null)
   const handles = useRef<Handles | null>(null)
+  // The history is fitted to the width once: a later refresh must not undo a pan or a zoom.
+  const fitted = useRef(false)
 
   useEffect(() => {
     if (!box.current) return
+    const font = monoFamily()
     const chart = createChart(box.current, {
       autoSize: true,
-      layout: { background: { color: 'transparent' }, textColor: COLORS['ash-400'] },
+      layout: {
+        background: { color: 'transparent' },
+        textColor: COLORS['ash-400'],
+        fontFamily: font,
+      },
       grid: { vertLines: { visible: false }, horzLines: { color: COLORS.line } },
       crosshair: {
         vertLine: { color: COLORS['brass-700'] },
@@ -116,6 +141,7 @@ export function Tape(props: {
         timeVisible: true,
         secondsVisible: false,
         borderColor: COLORS.line,
+        rightOffset: RIGHT_OFFSET_BARS,
         tickMarkFormatter: (t: Time) => etClock(tapeTime(t)),
       },
       rightPriceScale: { borderColor: COLORS.line, scaleMargins: { top: 0.05, bottom: 0.05 } },
@@ -128,9 +154,10 @@ export function Tape(props: {
       lineWidth: 1,
       lineStyle: 2,
     })
-    const quarters = new QuarterLines()
+    const quarters = new QuarterLines(font)
     market.attachPrimitive(quarters)
-    handles.current = { market, model, markers: createSeriesMarkers(model, []), quarters }
+    handles.current = { chart, market, model, markers: createSeriesMarkers(model, []), quarters }
+    fitted.current = false
     return () => {
       chart.remove()
       handles.current = null
@@ -143,6 +170,10 @@ export function Tape(props: {
     const s = chartSeries(props.history, props.market)
     h.market.setData(toData(s.market))
     h.model.setData(toData(s.model))
+    if (!fitted.current && (s.market.length > 0 || s.model.length > 0)) {
+      h.chart.timeScale().fitContent()
+      fitted.current = true
+    }
     h.quarters.setStarts(periodStarts(props.history.snapshots))
     const times = new Set(s.model.map((p) => p.time))
     const teams = { home: props.home, away: props.away }
