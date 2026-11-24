@@ -44,7 +44,7 @@ export function MarketBlock(p: {
   dial: GameDial
   /** Unix seconds from useNow. */
   now: number
-  /** The game poll is failing (spec 4.4), for the crown's own dial. */
+  /** The game poll is failing (spec 4.4), for the crown's own dial and, in the sheet, its line. */
   stale: boolean
   /** MARKET_CLOSED or MARKET_HALTED: reload the game (spec 6.1). */
   onMarketStale: () => void
@@ -85,6 +85,7 @@ export function MarketBlock(p: {
       fundNote={fundNote}
       onFaucet={requestFaucet}
       stale={p.stale}
+      staleLine={p.stale && !wide}
     />
   )
   return (

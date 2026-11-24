@@ -1,7 +1,13 @@
 import { HoragonError } from '@horagon/sdk'
 import { describe, expect, it } from 'vitest'
 import { errorText } from '../components/error-text'
-import { errorEffect, quoteError, retryLeft } from '../lib/chrono/errors'
+import {
+  clearedByFaucet,
+  errorEffect,
+  quoteError,
+  requoteShown,
+  retryLeft,
+} from '../lib/chrono/errors'
 
 describe('quoteError (spec 4.4, M5)', () => {
   it('shows a network failure only after three failed polls in a row', () => {
@@ -66,5 +72,35 @@ describe('retryLeft (spec 6.1)', () => {
     const inf = new HoragonError('RATE_LIMITED', 'x', { retryAfterSecs: Number.POSITIVE_INFINITY })
     expect(retryLeft(nan, 100, 100)).toBe(0)
     expect(retryLeft(inf, 100, 100)).toBe(0)
+  })
+})
+
+describe('requoteShown (spec 6.1, M6, N1, N3)', () => {
+  // Both times are the API's: `errorQuoteNow` is the now of the quote on screen at the error.
+  const AT = 1_800_000_000
+
+  it('offers a new quote until one newer than the failed send’s has come', () => {
+    expect(requoteShown('requote', true, { now: AT }, AT)).toBe(true)
+    expect(requoteShown('requote', true, { now: AT + 5 }, AT)).toBe(false)
+    expect(requoteShown('requote', true, undefined, AT)).toBe(true)
+    // No quote was on screen at the error: any quote since is newer.
+    expect(requoteShown('requote', true, { now: AT }, Number.NEGATIVE_INFINITY)).toBe(false)
+  })
+
+  it('offers nothing while no quote can load, or for another error (N3)', () => {
+    expect(requoteShown('requote', false, { now: AT }, AT)).toBe(false)
+    expect(requoteShown('requote', false, undefined, AT)).toBe(false)
+    expect(requoteShown('faucet', true, { now: AT }, AT)).toBe(false)
+    expect(requoteShown(null, true, { now: AT }, AT)).toBe(false)
+  })
+})
+
+describe('clearedByFaucet (I3, N6)', () => {
+  it('clears only the error the faucet answers, so a failed transaction keeps its link', () => {
+    expect(clearedByFaucet(new HoragonError('INSUFFICIENT_FUNDS', 'low'))).toBe(true)
+    expect(clearedByFaucet(new HoragonError('PROGRAM_ERROR', 'failed'))).toBe(false)
+    expect(clearedByFaucet(new HoragonError('SLIPPAGE_EXCEEDED', 'moved'))).toBe(false)
+    expect(clearedByFaucet(new Error('boom'))).toBe(false)
+    expect(clearedByFaucet(undefined)).toBe(false)
   })
 })

@@ -164,6 +164,7 @@ function useDemoTrade(): Trade & { sent: number } {
     done: null,
     error: undefined,
     errorAt: 0,
+    errorQuoteNow: Number.NEGATIVE_INFINITY,
     failedAction: 'buy',
     shownError: undefined,
     fundNoteHidden: true,

@@ -102,8 +102,9 @@ const toData = (points: Point[]) =>
 const priceFormat = { type: 'custom' as const, formatter: tapeCents }
 // Probabilities: always the whole 0-100¢ range, so a move is never exaggerated.
 const fullRange = () => ({ priceRange: { minValue: 0, maxValue: 1 } })
-// Room after the last point, so the last " ET" tick label is not cut off at the right edge.
-const RIGHT_OFFSET_BARS = 3
+// Room after the last point, so the last " ET" tick label is not cut off at the right edge: about
+// half the widest label, in pixels, since fitContent folds a bar offset into the fit (N4).
+const RIGHT_OFFSET_PX = 40
 
 /** The family next/font resolved for JetBrains Mono (set on <html>, app/layout.tsx). */
 const monoFamily = (): string =>
@@ -141,7 +142,7 @@ export function Tape(props: {
         timeVisible: true,
         secondsVisible: false,
         borderColor: COLORS.line,
-        rightOffset: RIGHT_OFFSET_BARS,
+        rightOffsetPixels: RIGHT_OFFSET_PX,
         tickMarkFormatter: (t: Time) => etClock(tapeTime(t)),
       },
       rightPriceScale: { borderColor: COLORS.line, scaleMargins: { top: 0.05, bottom: 0.05 } },

@@ -42,6 +42,27 @@ export function errorEffect(err: unknown): ErrorEffect | null {
   }
 }
 
+/**
+ * SLIPPAGE_EXCEEDED: shake the ghost and offer "Get a new quote" until a quote newer than the
+ * one on screen at the error has come (M6). Both `now`s are the API's clock, so a browser clock
+ * that is off changes nothing (N1). While no quote can load (`quotes` false: a closed or halted
+ * market, a bad amount), there is nothing to offer (N3).
+ */
+export function requoteShown(
+  effect: ErrorEffect | null,
+  quotes: boolean,
+  quote: { now: number } | undefined,
+  errorQuoteNow: number,
+): boolean {
+  return effect === 'requote' && quotes && !(quote !== undefined && quote.now > errorQuoteNow)
+}
+
+/**
+ * A faucet request answers only an INSUFFICIENT_FUNDS send (I3). Any other error stays, so a
+ * failed transaction keeps its "may still land" link (R2, N6).
+ */
+export const clearedByFaucet = (err: unknown): boolean => errorEffect(err) === 'faucet'
+
 /** Whole seconds until a rate-limited send may go again, from when the error was seen. */
 export function retryLeft(err: unknown, seenAt: number, now: number): number {
   if (!isHoragonError(err)) return 0

@@ -55,9 +55,10 @@ export const canTrade = (state: DialState): boolean =>
 
 /**
  * The crown, inline or as the sheet, stays while the market trades, and also while a send is in
- * flight or its result is on screen: a market that closes or halts mid-send must not take the
- * success line, or the R2 link to a transaction that may still land, with it. Sending stays off
- * then (checkTrade says why).
+ * flight. Its result stays while the market is closed or halted, the states a mid-send close
+ * lands in: such a close must not take the success line, or the R2 link to a transaction that
+ * may still land, with it. Sending stays off then (checkTrade says why). Once the market moves on
+ * to its result, the old line goes with the crown (N2).
  */
 export const crownShown = (
   state: DialState,
@@ -65,5 +66,5 @@ export const crownShown = (
 ): boolean =>
   canTrade(state) ||
   t.stage !== null ||
-  t.done !== null ||
-  (t.error !== undefined && t.error !== null)
+  ((state === 'closed' || state === 'halted') &&
+    (t.done !== null || (t.error !== undefined && t.error !== null)))

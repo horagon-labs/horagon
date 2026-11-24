@@ -4,7 +4,7 @@
 // Trade from useTrade; the same panel is the mobile sheet and the desktop right column.
 import { type GameDetail, type MarketSummary, parseAmount } from '@horagon/sdk'
 import { buySteps, percentOf, sellSteps, stepIndex } from '../../lib/chrono/bezel'
-import { errorEffect, retryLeft } from '../../lib/chrono/errors'
+import { errorEffect, requoteShown, retryLeft } from '../../lib/chrono/errors'
 import type { DialState } from '../../lib/chrono/state'
 import { cents, explorerTx, usdc } from '../../lib/format'
 import { DEFAULT_SLIPPAGE_BPS } from '../../lib/trade'
@@ -35,6 +35,11 @@ export interface CrownPanelProps {
    * covers the big one on a phone.
    */
   stale?: boolean
+  /**
+   * Say "Reconnecting…" here as well: only in the sheet, which covers the game screen's own
+   * line. Inline on desktop that line is on screen, and one status region says it once (N5).
+   */
+  staleLine?: boolean
 }
 
 export function CrownPanel(p: CrownPanelProps) {
@@ -43,8 +48,8 @@ export function CrownPanel(p: CrownPanelProps) {
   const steps = buying ? buySteps(t.balance) : sellSteps(t.held?.shares)
   const q = t.quote.data ?? t.lastQuote
   const effect = errorEffect(t.error)
-  // SLIPPAGE_EXCEEDED: until a quote newer than the error has come.
-  const requote = effect === 'requote' && !(q !== undefined && q.now > t.errorAt)
+  // SLIPPAGE_EXCEEDED: until a quote newer than the error's has come, while quotes can load.
+  const requote = requoteShown(effect, t.check.quote, q, t.errorQuoteNow)
   const wait = effect === 'countdown' ? retryLeft(t.error, t.errorAt, p.now) : 0
   const label = wait > 0 ? `Try again in ${wait} s` : sendText(t.ready, t.stage, t.action, t.team)
   const ghost = q && t.check.quote ? q.priceAfter : null
@@ -56,7 +61,7 @@ export function CrownPanel(p: CrownPanelProps) {
     'min-h-11 flex-1 rounded-card border border-line font-mono text-13 aria-pressed:border-lume-300 aria-pressed:text-lume-300 disabled:opacity-40'
   return (
     <div className="space-y-4">
-      <Reconnecting stale={p.stale ?? false} />
+      <Reconnecting stale={p.staleLine ?? false} />
       <fieldset className="flex gap-2">
         <legend className="sr-only">Buy or sell</legend>
         <button

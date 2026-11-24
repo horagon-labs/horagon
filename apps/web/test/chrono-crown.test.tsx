@@ -32,6 +32,7 @@ function trade(over: Partial<Trade> = {}): Trade {
     done: null,
     error: undefined,
     errorAt: NOW,
+    errorQuoteNow: NOW,
     failedAction: 'buy',
     shownError: undefined,
     fundNoteHidden: false,
@@ -178,19 +179,35 @@ describe('CrownPanel (spec 3.2, 5.5)', () => {
     expect(html).not.toContain('Try again in 5 s')
   })
 
-  it('stops the shake and the new-quote button once a newer quote has come (M6)', () => {
+  it('stops the shake and the new-quote button once a newer quote has come (M6, N1)', () => {
     const error = new HoragonError('SLIPPAGE_EXCEEDED', 'price moved')
     const newer = { data: quote({ now: NOW + 3 }), error: undefined, failures: 0, refresh: noop }
-    const html = panel({ error, shownError: error, errorAt: NOW, quote: newer })
-    expect(html).not.toContain('animate-shake')
-    expect(html).not.toContain('Get a new quote')
+    // The browser's clock is an hour ahead: errorAt is far past every quote's now.
+    const ahead = { error, shownError: error, errorAt: NOW + 3_600, errorQuoteNow: NOW }
+    expect(panel({ ...ahead, quote: newer })).not.toContain('animate-shake')
+    expect(panel({ ...ahead, quote: newer })).not.toContain('Get a new quote')
+    // An hour behind: the quote from before the error must not pass for a newer one.
+    const behind = { error, shownError: error, errorAt: NOW - 3_600, errorQuoteNow: NOW }
+    expect(panel(behind)).toContain('animate-shake')
+    expect(panel(behind)).toContain('Get a new quote')
   })
 
-  it('shows the stale line and Reconnecting on the crown’s own dial (M4)', () => {
+  it('offers no new quote on a market that has stopped quoting (N3)', () => {
+    const error = new HoragonError('SLIPPAGE_EXCEEDED', 'price moved')
+    const closed = { ok: false, quote: false, reason: 'Trading has closed.' }
+    const html = panel({ error, shownError: error, check: closed }, { state: 'closed' })
+    expect(html).not.toContain('Get a new quote')
+    expect(html).not.toContain('animate-shake')
+  })
+
+  it('shows the stale line on the crown’s own dial, and Reconnecting in the sheet only (M4, N5)', () => {
     expect(panel()).not.toContain('Reconnecting…')
-    const html = panel({}, { stale: true })
-    expect(html).toContain('Reconnecting…')
-    expect(html).toContain('data-stale')
+    const inline = panel({}, { stale: true })
+    expect(inline).toContain('data-stale')
+    expect(inline).not.toContain('Reconnecting…')
+    const sheet = panel({}, { stale: true, staleLine: true })
+    expect(sheet).toContain('data-stale')
+    expect(sheet).toContain('Reconnecting…')
   })
 
   it('sets up a wallet with a plain button, not a hold (M12)', () => {
@@ -223,6 +240,16 @@ describe('crownShown (I4)', () => {
     expect(crownShown('closed', { ...idle, stage: 'confirming' })).toBe(true)
     const error = new HoragonError('MARKET_CLOSED', 'closed')
     expect(crownShown('halted', { ...idle, error })).toBe(true)
+  })
+
+  it('lets the old result go once the market moves on to its result (N2)', () => {
+    const error = new HoragonError('MARKET_CLOSED', 'closed')
+    for (const state of ['proposed', 'challenged', 'resolved', 'void'] as const) {
+      expect(crownShown(state, { ...idle, done }), state).toBe(false)
+      expect(crownShown(state, { ...idle, error }), state).toBe(false)
+    }
+    // A send still in flight keeps it, whatever the state.
+    expect(crownShown('resolved', { ...idle, stage: 'confirming' })).toBe(true)
   })
 })
 

@@ -18,7 +18,7 @@ import type { Keypair } from '@solana/web3.js'
 import { useEffect, useRef, useState } from 'react'
 import { useWallet } from '../components/wallet'
 import { api } from './api'
-import { errorEffect, quoteError } from './chrono/errors'
+import { clearedByFaucet, errorEffect, quoteError } from './chrono/errors'
 import { awaitFill, createFillTracker, fillLine, holding } from './fill'
 import { DEFAULT_SLIPPAGE_BPS, executeTrade, type TradeStage } from './trade'
 import { checkTrade, type TradeCheck, tradeReady } from './trade-form'
@@ -84,6 +84,11 @@ export interface Trade {
   error: unknown
   /** Unix seconds when `error` was set, for the RATE_LIMITED countdown (spec 6.1). */
   errorAt: number
+  /**
+   * The API's `now` on the quote on screen when `error` was set, -Infinity when there was none.
+   * A quote with a later `now` is newer than the error, on one clock (M6, N1).
+   */
+  errorQuoteNow: number
   /** The direction of the send that failed with `error`; the faucet answers only a buy's. */
   failedAction: TradeAction
   /** What ErrorText shows: the send's error, else the faucet's, else the quote's. */
@@ -106,13 +111,17 @@ export function useTrade(game: GameDetail, market: MarketSummary, opts: TradeOpt
   const [fundNoteHidden, setFundNoteHidden] = useState(false)
   const [error, setError] = useState<unknown>()
   const [errorAt, setErrorAt] = useState(0)
+  const [errorQuoteNow, setErrorQuoteNow] = useState(Number.NEGATIVE_INFINITY)
   const [failedAction, setFailedAction] = useState<TradeAction>('buy')
-  // A faucet request answers the send's error (INSUFFICIENT_FUNDS): the Pusher's buy buttons
-  // come back, so a phone is not left with the faucet until a reload.
+  // The error as of the latest render, for the faucet effect below, which runs on `funding` only.
+  const errorNow = useRef<unknown>(undefined)
+  errorNow.current = error
+  // A faucet request answers the send's INSUFFICIENT_FUNDS: the Pusher's buy buttons come back,
+  // so a phone is not left with the faucet until a reload. Any other error stays (N6).
   useEffect(() => {
     if (funding) {
       setFundNoteHidden(false)
-      setError(undefined)
+      if (clearedByFaucet(errorNow.current)) setError(undefined)
     }
   }, [funding])
   const [done, setDone] = useState<{ signature: string; text: string } | null>(null)
@@ -166,6 +175,9 @@ export function useTrade(game: GameDetail, market: MarketSummary, opts: TradeOpt
   const nextKept = keepQuote(kept, fresh, side, action, key)
   if (nextKept !== kept) setKept(nextKept)
   const lastQuote = nextKept?.quote
+  // The quote on screen as of the latest render: a send's catch runs renders after its start.
+  const onScreenQuoteNow = useRef(Number.NEGATIVE_INFINITY)
+  onScreenQuoteNow.current = (fresh ?? lastQuote)?.now ?? Number.NEGATIVE_INFINITY
 
   async function submit(keypair: Keypair) {
     if (busy.current || !check.ok) return
@@ -220,6 +232,7 @@ export function useTrade(game: GameDetail, market: MarketSummary, opts: TradeOpt
       // Shown with its transaction, if it names one (ErrorText); never sent again from here.
       setError(err)
       setErrorAt(Date.now() / 1000)
+      setErrorQuoteNow(onScreenQuoteNow.current)
       setFailedAction(action)
       if (errorEffect(err) === 'refresh') onStale.current?.()
     } finally {
@@ -252,6 +265,7 @@ export function useTrade(game: GameDetail, market: MarketSummary, opts: TradeOpt
     done,
     error,
     errorAt,
+    errorQuoteNow,
     failedAction,
     // A quote that fails on the network shows only after three polls in a row (spec 4.4).
     shownError: error ?? fundError ?? (check.quote ? quoteError(quote) : undefined),
