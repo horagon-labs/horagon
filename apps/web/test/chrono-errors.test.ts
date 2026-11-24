@@ -35,5 +35,9 @@ describe('retryLeft (spec 6.1)', () => {
   it('has nothing to wait for without retryAfterSecs', () => {
     expect(retryLeft(new HoragonError('RATE_LIMITED', 'x'), 100, 100)).toBe(0)
     expect(retryLeft(new Error('x'), 100, 100)).toBe(0)
+    const nan = new HoragonError('RATE_LIMITED', 'x', { retryAfterSecs: Number.NaN })
+    const inf = new HoragonError('RATE_LIMITED', 'x', { retryAfterSecs: Number.POSITIVE_INFINITY })
+    expect(retryLeft(nan, 100, 100)).toBe(0)
+    expect(retryLeft(inf, 100, 100)).toBe(0)
   })
 })

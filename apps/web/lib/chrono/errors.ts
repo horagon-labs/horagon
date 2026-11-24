@@ -28,6 +28,8 @@ export function errorEffect(err: unknown): ErrorEffect | null {
 
 /** Whole seconds until a rate-limited send may go again, from when the error was seen. */
 export function retryLeft(err: unknown, seenAt: number, now: number): number {
-  if (!isHoragonError(err) || err.retryAfterSecs === undefined) return 0
-  return Math.max(0, Math.ceil(seenAt + err.retryAfterSecs - now))
+  if (!isHoragonError(err)) return 0
+  const wait = err.retryAfterSecs
+  if (wait === undefined || !Number.isFinite(wait)) return 0
+  return Math.max(0, Math.ceil(seenAt + wait - now))
 }

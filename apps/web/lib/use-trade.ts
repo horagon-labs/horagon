@@ -22,7 +22,16 @@ import { errorEffect } from './chrono/errors'
 import { awaitFill, createFillTracker, fillLine, holding } from './fill'
 import { DEFAULT_SLIPPAGE_BPS, executeTrade, type TradeStage } from './trade'
 import { checkTrade, type TradeCheck, tradeReady } from './trade-form'
-import { QUOTE_DEBOUNCE_MS, QUOTE_POLL_MS, quoteKey, type Ready } from './trade-view'
+import {
+  freshQuote,
+  type KeptQuote,
+  keepQuote,
+  QUOTE_DEBOUNCE_MS,
+  QUOTE_POLL_MS,
+  quoteKey,
+  type Ready,
+  sendDisabled,
+} from './trade-view'
 import { type Poll, usePoll } from './use-poll'
 
 function useDebounced<T>(value: T, ms: number): T {
@@ -114,25 +123,29 @@ export function useTrade(game: GameDetail, market: MarketSummary, opts: TradeOpt
     nowSecs: effectiveTime(Date.now() / 1000, market.priceTs ?? 0),
   })
   const quoted = useDebounced(check.quote ? amount.trim() : null, QUOTE_DEBOUNCE_MS)
-  const quote = usePoll(
-    quoteKey(market.pubkey, side, action, quoted),
-    () =>
-      api.quote({
+  const key = quoteKey(market.pubkey, side, action, quoted)
+  const poll = usePoll(
+    key,
+    async () => ({
+      key: key ?? '',
+      quote: await api.quote({
         market: market.pubkey,
         side,
         action,
         amount: quoted ?? '0',
         slippageBps: DEFAULT_SLIPPAGE_BPS,
       }),
+    }),
     QUOTE_POLL_MS,
   )
-  const [lastQuote, setLastQuote] = useState<Quote>()
-  useEffect(() => {
-    if (quote.data) setLastQuote(quote.data)
-  }, [quote.data])
-  // A new side or direction has nothing to keep: its old ghost would point the wrong way.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: runs on purpose when these change
-  useEffect(() => setLastQuote(undefined), [side, action])
+  // Only a quote loaded for this very key counts: usePoll clears its data a render late.
+  const fresh = freshQuote(poll.data, key)
+  const quote: Poll<Quote> = { ...poll, data: fresh }
+  // The ghost's last position, adjusted while rendering so it never lags a render behind.
+  const [kept, setKept] = useState<KeptQuote>()
+  const nextKept = keepQuote(kept, fresh, side, action, key)
+  if (nextKept !== kept) setKept(nextKept)
+  const lastQuote = nextKept?.quote
 
   async function submit(keypair: Keypair) {
     if (busy.current || !check.ok) return
@@ -209,13 +222,18 @@ export function useTrade(game: GameDetail, market: MarketSummary, opts: TradeOpt
     check,
     quote,
     lastQuote,
-    quotePending: check.quote && (quoted !== amount.trim() || quote.data === undefined),
+    quotePending: check.quote && fresh === undefined,
     stage,
     done,
     error,
     errorAt,
     shownError: error ?? fundError ?? (check.quote ? quote.error : undefined),
     fundNoteHidden,
-    send: () => (ready === 'no-wallet' ? openGate() : withAge((kp) => void submit(kp), 'trade')),
+    send: () => {
+      if (ready === 'no-wallet') return openGate()
+      // The button's own rule, kept here for callers that skip the button (a hold gesture).
+      if (sendDisabled(ready, check.ok, stage)) return
+      withAge((kp) => void submit(kp), 'trade')
+    },
   }
 }
