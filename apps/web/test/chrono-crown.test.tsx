@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest'
 import { Bezel } from '../components/chrono/bezel'
 import { CrownPanel, type CrownPanelProps } from '../components/chrono/crown-panel'
 import { CrownSheet } from '../components/chrono/crown-sheet'
+import { PLAY_MONEY } from '../components/play-money-banner'
 import { buySteps, onRing, sellSteps, startsDrag } from '../lib/chrono/bezel'
 import { detail, market, NOW, position, quote } from '../lib/chrono/fixtures'
 import { crownShown } from '../lib/chrono/game'
@@ -203,5 +204,16 @@ describe('CrownSheet (spec 3.2)', () => {
     expect(html).toContain('<dialog aria-label="Buy CLE"')
     expect(html).toContain('aria-label="Close"')
     expect(html).toContain('<p>inside</p>')
+  })
+
+  it('keeps the play-money line on screen, since the sheet covers the banner (I5)', () => {
+    const html = renderToStaticMarkup(
+      <CrownSheet open={false} onClose={noop} title="Buy CLE">
+        <p>inside</p>
+      </CrownSheet>,
+    )
+    expect(PLAY_MONEY).toBe('Play-money on devnet. No real value. No prizes.')
+    expect(html).toContain(PLAY_MONEY)
+    expect(html.indexOf(PLAY_MONEY)).toBeGreaterThan(html.indexOf('<p>inside</p>'))
   })
 })
