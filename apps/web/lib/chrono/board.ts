@@ -10,7 +10,7 @@ import {
 } from '@horagon/sdk'
 import { usdc } from '../format'
 import { timeLeftFraction } from './geometry'
-import { type DialState, deriveDialState, needlePrice, secsToClose } from './state'
+import { type DialState, deriveDialState, dialLabel, needlePrice, secsToClose } from './state'
 import { gameInterval, type Interval } from './tracks'
 
 export interface BoardItem {
@@ -90,4 +90,22 @@ export function yourHour(
   const open = portfolio.positions.filter((p) => parseAmount(p.shares) > 0n)
   const value = open.reduce((sum, p) => sum + parseAmount(p.valueUsdc), 0n)
   return { count: open.length, value: usdc(formatAmount(value)) }
+}
+
+/** What a screen reader hears for one game, on its row link and in the Night dial's list. */
+export function itemLabel(i: BoardItem): string {
+  const g = i.game
+  const teams =
+    g.status === 'scheduled'
+      ? `${g.away} at ${g.home}`
+      : `${g.away} ${g.awayScore}, ${g.home} ${g.homeScore}`
+  const words = dialLabel({
+    team: g.home,
+    price: i.price,
+    modelProb: g.modelProb,
+    state: i.state,
+    secsLeft: i.secsLeft,
+    gameStatus: g.status,
+  })
+  return `${teams}. ${words}${i.held ? '. You hold a position' : ''}`
 }

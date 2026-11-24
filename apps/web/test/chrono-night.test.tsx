@@ -1,0 +1,156 @@
+import { renderToStaticMarkup } from 'react-dom/server'
+import { describe, expect, it } from 'vitest'
+import { DialRow } from '../components/chrono/dial-row'
+import { NightDial } from '../components/chrono/night-dial'
+import { boardItem, itemLabel, listOrder } from '../lib/chrono/board'
+import { evening, game, NOW, portfolio, position } from '../lib/chrono/fixtures'
+import { keyStep } from '../lib/chrono/keys'
+
+const held = portfolio([position()])
+const items = evening()
+  .map((g) => boardItem(g, held, NOW))
+  .sort(listOrder)
+
+const night = (over: Partial<Parameters<typeof NightDial>[0]> = {}) =>
+  renderToStaticMarkup(
+    <NightDial
+      items={items}
+      now={NOW}
+      selectedId={null}
+      onSelect={() => {}}
+      emptyText="No NBA games in the next 24 hours."
+      {...over}
+    />,
+  )
+
+/** The sr-only options in document order, as [id suffix, selected, text]. */
+const options = (html: string) =>
+  [
+    ...html.matchAll(
+      /id="[^"]*-(\d+)" role="option" tabindex="-1" aria-selected="(true|false)" class="sr-only">([^<]*)</g,
+    ),
+  ].map((m) => [Number(m[1]), m[2] === 'true', m[3] ?? ''] as const)
+
+describe('keyStep (spec 2.6)', () => {
+  it('moves a slider one step on arrows, three on PageUp/PageDown, to the ends on Home/End', () => {
+    expect(keyStep('ArrowUp', 2, 8, 'slider')).toBe(3)
+    expect(keyStep('ArrowRight', 2, 8, 'slider')).toBe(3)
+    expect(keyStep('ArrowDown', 2, 8, 'slider')).toBe(1)
+    expect(keyStep('ArrowLeft', 2, 8, 'slider')).toBe(1)
+    expect(keyStep('PageUp', 2, 8, 'slider')).toBe(5)
+    expect(keyStep('PageDown', 2, 8, 'slider')).toBe(0)
+    expect(keyStep('Home', 5, 8, 'slider')).toBe(0)
+    expect(keyStep('End', 0, 8, 'slider')).toBe(7)
+  })
+
+  it('walks a list down or right, clamps at both ends, and ignores other keys', () => {
+    expect(keyStep('ArrowDown', 0, 3, 'list')).toBe(1)
+    expect(keyStep('ArrowUp', 0, 3, 'list')).toBe(0)
+    expect(keyStep('ArrowRight', 2, 3, 'list')).toBe(2)
+    expect(keyStep('PageUp', 0, 3, 'list')).toBeNull()
+    expect(keyStep('a', 0, 3, 'list')).toBeNull()
+    expect(keyStep('ArrowDown', 0, 0, 'list')).toBeNull()
+  })
+})
+
+describe('itemLabel (spec 2.6)', () => {
+  it('reads the score, the dial sentence and your position', () => {
+    expect(itemLabel(boardItem(game(), held, NOW))).toBe(
+      'MEM 78, CLE 84. CLE wins, 77 cents, model 74, closes in 1 hour 2 minutes. You hold a position',
+    )
+  })
+
+  it('reads a game without a market as not open yet', () => {
+    const phx = items.find((i) => i.id === 'nba-401810004')
+    expect(phx && itemLabel(phx)).toBe(
+      'DEN at PHX. PHX wins, no price yet, model 44, market opens 60 min before tip-off',
+    )
+  })
+})
+
+describe('NightDial (spec 3.2, 4.1)', () => {
+  it('hides the picture and lists every arc for screen readers, by closing time', () => {
+    const html = night()
+    expect(html).toContain('role="listbox"')
+    expect(html).toContain('<svg viewBox="0 0 200 200" aria-hidden="true"')
+    const opts = options(html)
+    expect(opts.map((o) => o[0])).toEqual([0, 1, 2, 3, 4])
+    expect(opts.map((o) => o[2].split('.')[0])).toEqual([
+      'BOS 101, MIL 99',
+      'MEM 78, CLE 84',
+      'NYK 44, ATL 47',
+      'DEN at PHX',
+      'LAL at SAC',
+    ])
+    expect(html).toMatch(/aria-activedescendant="[^"]*-0"/)
+  })
+
+  it('marks the selected game in the list and puts its summary in the middle', () => {
+    const html = night({ selectedId: 'nba-401810002' })
+    expect(options(html).map((o) => o[1])).toEqual([false, false, true, false, false])
+    expect(html).toMatch(/aria-activedescendant="[^"]*-2"/)
+    expect(html).toContain('>NYK @ ATL<')
+    expect(html).toContain('closes in 1:32:10')
+  })
+
+  it('summarises the game that closes soonest when nothing is selected', () => {
+    const html = night()
+    expect(html).toContain('>BOS @ MIL<')
+    expect(html).toContain('41¢')
+  })
+
+  it('draws one arc per segment on its ring and lights your game in lume', () => {
+    const html = night()
+    expect(html).toMatch(/class="stroke-lume-300 opacity-35" data-id="nba-401810001" data-ring="1"/)
+    expect(html).toMatch(
+      /stroke-dasharray="2 2.5" class="stroke-brass-500 " data-id="nba-401810004"/,
+    )
+    expect(html).toContain('data-now')
+  })
+
+  it('shows the empty line and no options without games (spec 4.4)', () => {
+    const html = night({ items: [] })
+    expect(html).toContain('No NBA games in the next 24 hours.')
+    expect(options(html)).toEqual([])
+    expect(html).not.toContain('aria-activedescendant')
+  })
+
+  it('draws the stale line on the bezel only while polls fail (spec 4.4)', () => {
+    expect(night({ stale: true })).toContain('data-stale')
+    expect(night()).not.toContain('data-stale')
+  })
+
+  it('counts the games past the 8th ring as +N', () => {
+    const many = Array.from({ length: 10 }, (_, i) =>
+      boardItem(game({ id: `g${i}` }), undefined, NOW),
+    )
+    expect(night({ items: many })).toContain('data-overflow="2"')
+  })
+})
+
+describe('DialRow (spec 3.2)', () => {
+  const cle = boardItem(game(), held, NOW)
+  const row = renderToStaticMarkup(<DialRow item={cle} />)
+
+  it('is one link to the game, named by the whole sentence', () => {
+    expect(row).toContain('href="/game/nba-401810001"')
+    expect(row).toContain(`aria-label="${itemLabel(cle)}"`)
+  })
+
+  it('shows the mini dial, the score, the price in mono 19 px, the ET close and your diamond', () => {
+    expect(row).toContain('viewBox="0 0 100 100"')
+    expect(row).toContain('78–84 · Q3 4:12')
+    expect(row).toContain('font-mono text-19 text-lume-300 tabular-nums">77¢')
+    expect(row).toContain('closes 10:10 PM ET')
+    expect(row).toContain('◆')
+  })
+
+  it('shows the tip-off and the opening time before a market exists', () => {
+    const phx = items.find((i) => i.id === 'nba-401810004')
+    const html = phx ? renderToStaticMarkup(<DialRow item={phx} />) : ''
+    expect(html).toContain('tip-off 10:30 PM ET')
+    expect(html).toContain('opens 9:30 PM ET')
+    expect(html).toContain('>—<')
+    expect(html).not.toContain('◆')
+  })
+})

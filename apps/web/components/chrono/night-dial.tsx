@@ -1,0 +1,208 @@
+'use client'
+// The Night dial (spec 3.2, 4.1): tonight on one 12-hour ET face, one arc per game on the ring
+// tracks.ts picks. The picture is hidden; a listbox of sr-only options carries the same games.
+import { type KeyboardEvent, type MouseEvent, useId, useState } from 'react'
+import { type BoardItem, itemLabel } from '../../lib/chrono/board'
+import { arcPath, etClockAngle, polar } from '../../lib/chrono/geometry'
+import { keyStep } from '../../lib/chrono/keys'
+import {
+  labelIds,
+  labelSpots,
+  packTracks,
+  ringRadius,
+  segmentAngles,
+  segments,
+} from '../../lib/chrono/tracks'
+import { cents } from '../../lib/format'
+import { stateLine } from './dial-look'
+
+const C = 100
+const HOURS = Array.from({ length: 12 }, (_, h) => h)
+
+/** Your games glow lume; amber near the close; brass while open; ash once trading stopped. */
+function arcClass(item: BoardItem, lit: boolean): string {
+  if (item.held) return 'stroke-lume-300'
+  if (item.state === 'closing' || item.state === 'halted') return 'stroke-amber-400'
+  if (item.state === 'live' || item.state === 'pre')
+    return lit ? 'stroke-brass-400' : 'stroke-brass-500'
+  return 'stroke-ash-400'
+}
+
+export function NightDial(p: {
+  items: readonly BoardItem[]
+  now: number
+  selectedId: string | null
+  onSelect: (id: string) => void
+  /** The game hovered or focused here or in the list: its arc lights up (spec 4.1). */
+  hoverId?: string | null
+  onHover?: (id: string | null) => void
+  /** The face's words when no arc is drawn (spec 4.4). */
+  emptyText: string
+  /** Polls failing: a thin red line on the bezel (spec 4.4). */
+  stale?: boolean
+  className?: string
+}) {
+  const id = useId()
+  const [active, setActive] = useState<string | null>(null)
+  const { tracks, overflow } = packTracks(p.items, p.now)
+  // Arrow keys walk the arcs by closing time (spec 3.2).
+  const order = [...tracks].sort((a, b) => a.item.interval.end - b.item.interval.end)
+  const index = Math.max(
+    0,
+    order.findIndex((t) => t.item.id === (active ?? p.selectedId)),
+  )
+  const hover = p.hoverId ?? null
+  const ids = labelIds(tracks, { selectedId: p.selectedId, hoverId: hover, now: p.now })
+  const spots = labelSpots(tracks, ids, p.now)
+  const focus = tracks.find((t) => t.item.id === ids[0])?.item
+  const hand = polar(C, C, 92, etClockAngle(p.now))
+
+  function onKeyDown(e: KeyboardEvent<HTMLDivElement>) {
+    const current = order[index]
+    if ((e.key === 'Enter' || e.key === ' ') && current) {
+      e.preventDefault()
+      p.onSelect(current.item.id)
+      return
+    }
+    const next = order[keyStep(e.key, index, order.length, 'list') ?? -1]
+    if (!next) return
+    e.preventDefault()
+    setActive(next.item.id)
+    p.onHover?.(next.item.id)
+  }
+
+  function onClick(e: MouseEvent<HTMLDivElement>) {
+    const hit = (e.target as Element).closest('[data-id]')?.getAttribute('data-id')
+    if (hit) p.onSelect(hit)
+  }
+
+  return (
+    <div
+      role="listbox"
+      tabIndex={0}
+      aria-label="Tonight on the clock"
+      aria-activedescendant={order.length > 0 ? `${id}-${index}` : undefined}
+      onKeyDown={onKeyDown}
+      onClick={onClick}
+      onBlur={() => {
+        setActive(null)
+        p.onHover?.(null)
+      }}
+      className={`relative aspect-square w-full rounded-full ${p.className ?? ''}`}
+    >
+      <svg viewBox="0 0 200 200" aria-hidden="true" className="absolute inset-0 size-full">
+        <circle cx={C} cy={C} r={97} strokeWidth={1} className="fill-enamel-800 stroke-line" />
+        {p.stale && (
+          <path
+            d={arcPath(C, C, 97, -40, 40)}
+            fill="none"
+            strokeWidth={1.5}
+            className="stroke-red-400"
+            data-stale
+          />
+        )}
+        {HOURS.map((h) => {
+          const o = polar(C, C, 95, h * 30)
+          const i = polar(C, C, h % 3 === 0 ? 89 : 92, h * 30)
+          return (
+            <line
+              key={h}
+              x1={o.x}
+              y1={o.y}
+              x2={i.x}
+              y2={i.y}
+              strokeWidth={h % 3 === 0 ? 1.5 : 1}
+              className="stroke-brass-700"
+            />
+          )
+        })}
+        {tracks.map((t) =>
+          segments(t, p.now).map((s) => {
+            const a = segmentAngles(s, p.now)
+            const lit = t.item.id === hover || t.item.id === p.selectedId
+            return (
+              <path
+                key={`${t.item.id}-${s.from}`}
+                d={arcPath(C, C, ringRadius(t.ring), a.from, a.to)}
+                fill="none"
+                strokeWidth={lit ? 5 : 3.5}
+                strokeDasharray={s.pre ? '2 2.5' : undefined}
+                className={`${arcClass(t.item, lit)} ${s.past ? 'opacity-35' : ''}`}
+                data-id={t.item.id}
+                data-ring={t.ring}
+                onPointerEnter={() => p.onHover?.(t.item.id)}
+                onPointerLeave={() => p.onHover?.(null)}
+              />
+            )
+          }),
+        )}
+        {spots.map((s) => (
+          <text
+            key={s.id}
+            x={s.x}
+            y={s.y}
+            textAnchor={s.anchor}
+            dominantBaseline="middle"
+            className="fill-ivory-100 font-mono text-[7px]"
+          >
+            {tracks.find((t) => t.item.id === s.id)?.item.game.home}
+          </text>
+        ))}
+        <line
+          x1={C}
+          y1={C}
+          x2={hand.x}
+          y2={hand.y}
+          strokeWidth={1.5}
+          strokeLinecap="round"
+          className="stroke-ivory-100"
+          data-now
+        />
+        <circle cx={C} cy={C} r={3} className="fill-ivory-100" />
+        {overflow.length > 0 && (
+          <text
+            x={C}
+            y={C + 28}
+            textAnchor="middle"
+            className="fill-ash-400 font-mono text-[8px]"
+            data-overflow={overflow.length}
+          >
+            +{overflow.length}
+          </text>
+        )}
+      </svg>
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-0.5 text-center"
+      >
+        {focus ? (
+          <>
+            <span className="text-11 uppercase tracking-[0.2em] text-brass-500">
+              {focus.game.away} @ {focus.game.home}
+            </span>
+            <span className="font-mono text-24 text-ivory-100 tabular-nums">
+              {focus.price === null ? '—' : cents(focus.price)}
+            </span>
+            <span className="font-mono text-11 text-ash-400">
+              {stateLine(focus.state, focus.game, focus.secsLeft, p.now)}
+            </span>
+          </>
+        ) : (
+          <span className="max-w-[60%] text-13 text-ash-400">{p.emptyText}</span>
+        )}
+      </div>
+      {order.map((t, i) => (
+        <div
+          key={t.item.id}
+          id={`${id}-${i}`}
+          role="option"
+          tabIndex={-1}
+          aria-selected={t.item.id === p.selectedId}
+          className="sr-only"
+        >
+          {itemLabel(t.item)}
+        </div>
+      ))}
+    </div>
+  )
+}
