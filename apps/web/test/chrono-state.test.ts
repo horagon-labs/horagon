@@ -1,12 +1,12 @@
 import type { Game, MarketSummary } from '@horagon/sdk'
 import { describe, expect, it } from 'vitest'
+import { proposedOutcome } from '../lib/chrono/evidence'
 import {
   CLOSING_SECS,
   DIAL_STATES,
   deriveDialState,
   dialLabel,
   needlePrice,
-  proposedOutcome,
   secsToClose,
 } from '../lib/chrono/state'
 

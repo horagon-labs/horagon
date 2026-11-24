@@ -1,12 +1,6 @@
 // The one place that decides how a dial looks (spec 4.3): `deriveDialState` checks the rows of
 // the table in order and the first match wins. Every "now" is chain-adjusted (spec 5.4).
-import {
-  effectiveTime,
-  type Game,
-  type MarketSummary,
-  type Outcome,
-  parseResolutionEvidence,
-} from '@horagon/sdk'
+import { effectiveTime, type Game, type MarketSummary, type Outcome } from '@horagon/sdk'
 import { cents, percent } from '../format'
 import { spokenDuration } from './time'
 
@@ -82,15 +76,6 @@ export function needlePrice(
   if (state === 'resolved' && market.outcome) return market.outcome === 'yes' ? 1 : 0
   if (state === 'proposed' && proposed) return proposed === 'yes' ? 1 : 0
   return market.price
-}
-
-/** The outcome a proposal's evidence JSON names, or null when it cannot be read. */
-export function proposedOutcome(json: string): Outcome | null {
-  try {
-    return parseResolutionEvidence(JSON.parse(json)).outcome
-  } catch {
-    return null
-  }
 }
 
 export interface DialLabelInput {
