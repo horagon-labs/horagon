@@ -1,5 +1,5 @@
 // Display helpers. Prices are the home team's win probability (YES); AWAY shows 1 - price.
-import type { Game, GameHistory } from '@horagon/sdk'
+import type { Game } from '@horagon/sdk'
 
 /**
  * The cluster the explorer links point at. `NEXT_PUBLIC_HORAGON_CLUSTER` is HORAGON_CLUSTER, made
@@ -85,54 +85,6 @@ export function isTonight(g: Pick<Game, 'status' | 'scheduledTipoff'>, nowMs: nu
   if (g.status === 'live') return true
   const t = Date.parse(g.scheduledTipoff)
   return t >= nowMs - 4 * HOUR_MS && t <= nowMs + 24 * HOUR_MS
-}
-
-/** Featured first, then live, then by tip-off. */
-export function tonightOrder(a: Game, b: Game): number {
-  if (a.featured !== b.featured) return a.featured ? -1 : 1
-  if ((a.status === 'live') !== (b.status === 'live')) return a.status === 'live' ? -1 : 1
-  return Date.parse(a.scheduledTipoff) - Date.parse(b.scheduledTipoff)
-}
-
-export interface RunMarker {
-  ts: number
-  team: 'home' | 'away'
-  points: number
-}
-
-/**
- * One marker per scoring run of `min`+ unanswered points (spec 10: "a team scores >= 8 in a
- * row"), placed at the snapshot where the run reaches `min`. A snapshot where both teams
- * scored ends any run.
- */
-export function scoringRuns(snapshots: GameHistory['snapshots'], min = 8): RunMarker[] {
-  const out: RunMarker[] = []
-  let team: 'home' | 'away' | null = null
-  let points = 0
-  let marked = false
-  let prev: { home: number; away: number } | null = null
-  for (const s of [...snapshots].sort((a, b) => a.ts - b.ts)) {
-    if (prev !== null) {
-      const dh = s.homeScore - prev.home
-      const da = s.awayScore - prev.away
-      if (dh > 0 && da > 0) team = null
-      else if (dh > 0 || da > 0) {
-        const scorer = dh > 0 ? 'home' : 'away'
-        if (scorer !== team) {
-          team = scorer
-          points = 0
-          marked = false
-        }
-        points += Math.max(dh, da)
-        if (!marked && points >= min) {
-          out.push({ ts: s.ts, team: scorer, points })
-          marked = true
-        }
-      }
-    }
-    prev = { home: s.homeScore, away: s.awayScore }
-  }
-  return out
 }
 
 export const shortKey = (k: string) => `${k.slice(0, 4)}…${k.slice(-4)}`

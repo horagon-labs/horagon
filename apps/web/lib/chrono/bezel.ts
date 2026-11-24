@@ -25,8 +25,9 @@ function units(value: string | null | undefined): bigint | null {
 }
 
 /**
- * Buy steps under `balance` plus the balance as the last step (Review Focus 2): 0.5 gives one
- * step of 0.5, exactly 25 gives ..., 10, 25 once. An unknown balance gives the whole ladder.
+ * Buy steps strictly below `balance`, then the balance itself as the last step (Review Focus 2):
+ * 0.5 gives one step, 0.5; exactly 25 gives 1, 2, 5, 10, 25 with 25 once; an unknown balance
+ * gives the whole ladder.
  */
 export function buySteps(balance: string | null | undefined): Step[] {
   const cap = units(balance)

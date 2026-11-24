@@ -37,10 +37,6 @@ describe('chartSeries', () => {
   it('skips snapshots without a model probability', () => {
     expect(chartSeries(history, M).model.map((p) => p.time)).toEqual([100, 130])
   })
-
-  it('puts run markers only where the model line has a point', () => {
-    expect(chartSeries(history, M).runs).toEqual([{ ts: 130, team: 'home', points: 8 }])
-  })
 })
 
 describe('follows', () => {

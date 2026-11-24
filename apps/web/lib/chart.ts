@@ -1,7 +1,6 @@
 // History -> chart series. lightweight-charts wants strictly increasing times, so points that
 // share a second keep the last one.
 import type { GameHistory } from '@horagon/sdk'
-import { type RunMarker, scoringRuns } from './format'
 
 export interface Point {
   time: number
@@ -11,7 +10,6 @@ export interface Point {
 export interface ChartSeries {
   market: Point[]
   model: Point[]
-  runs: RunMarker[]
 }
 
 function ascending(points: Point[]): Point[] {
@@ -21,9 +19,8 @@ function ascending(points: Point[]): Point[] {
 }
 
 /**
- * The market line (YES price of `market`), the model line, and the scoring-run markers. Runs
- * sit on the model line, whose points come from the same snapshots, so a marker always has a
- * point at its time.
+ * The market line (YES price of `market`) and the model line. The Tape's run markers come from
+ * lib/chrono/runs.ts and sit on the model line.
  */
 export function chartSeries(history: GameHistory, market: string): ChartSeries {
   const market_ = ascending(
@@ -32,8 +29,5 @@ export function chartSeries(history: GameHistory, market: string): ChartSeries {
   const modelPoints = history.snapshots.flatMap((s) =>
     s.modelProb === null ? [] : [{ time: s.ts, value: s.modelProb }],
   )
-  const model = ascending(modelPoints)
-  const times = new Set(model.map((p) => p.time))
-  const runs = scoringRuns(history.snapshots).filter((r) => times.has(r.ts))
-  return { market: market_, model, runs }
+  return { market: market_, model: ascending(modelPoints) }
 }

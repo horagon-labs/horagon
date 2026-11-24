@@ -3,7 +3,8 @@
 // Space (spec 3.2, 2.6). `hold-safe` stops iOS from selecting text or opening its callout. The
 // ring is `keep-motion`: it is the button's meaning, not decoration, so reduced motion keeps it.
 import { useEffect, useRef, useState } from 'react'
-import { buzz, CONFIRM_BUZZ_MS, useFeel } from '../../lib/chrono/feel'
+import { useFeel } from '../../lib/chrono/feel'
+import { buzz, CONFIRM_BUZZ_MS } from '../../lib/chrono/haptics'
 import { DOUBLE_MS, HOLD_MS, type HoldInput, hold, IDLE } from '../../lib/chrono/hold'
 
 export const AGAIN = 'Press again to confirm'

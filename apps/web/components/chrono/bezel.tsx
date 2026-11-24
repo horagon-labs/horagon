@@ -15,8 +15,9 @@ import {
   stepCrossed,
   wheelTarget,
 } from '../../lib/chrono/bezel'
-import { buzz, playTick, STEP_BUZZ_MS, useFeel } from '../../lib/chrono/feel'
+import { useFeel } from '../../lib/chrono/feel'
 import { arcPath, MIN_ANGLE, polar } from '../../lib/chrono/geometry'
+import { buzz, playTick, STEP_BUZZ_MS } from '../../lib/chrono/haptics'
 import { keyStep } from '../../lib/chrono/keys'
 
 const C = 100

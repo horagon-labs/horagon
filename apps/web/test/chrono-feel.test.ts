@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
-  buzz,
   canVibrate,
   createFeelStore,
   DEFAULT_FEEL,
@@ -8,9 +7,7 @@ import {
   type Feel,
   loadFeel,
   motionReduced,
-  playTick,
   saveFeel,
-  type TickAudio,
 } from '../lib/chrono/feel'
 
 function store(initial?: string) {
@@ -66,95 +63,11 @@ describe('feel preferences (spec 2.5)', () => {
     expect(motionReduced({ ...DEFAULT_FEEL, reducedMotion: false }, true)).toBe(false)
     expect(motionReduced({ ...DEFAULT_FEEL, reducedMotion: true }, false)).toBe(true)
   })
-})
 
-describe('buzz', () => {
-  it('vibrates only when allowed and supported', () => {
-    const vibrate = vi.fn(() => true)
-    expect(buzz(DEFAULT_FEEL, 5, { vibrate })).toBe(true)
-    expect(vibrate).toHaveBeenCalledWith(5)
-    expect(buzz({ ...DEFAULT_FEEL, haptics: false }, 5, { vibrate })).toBe(false)
-    expect(vibrate).toHaveBeenCalledTimes(1)
-    expect(buzz(DEFAULT_FEEL, 5, {})).toBe(false)
-    expect(buzz(DEFAULT_FEEL, 5, undefined)).toBe(false)
-    expect(canVibrate({ vibrate })).toBe(true)
+  it('tells whether the device can vibrate, for the haptics switch', () => {
+    expect(canVibrate({ vibrate: () => true })).toBe(true)
     expect(canVibrate({})).toBe(false)
-  })
-
-  it('swallows a vibrate that throws', () => {
-    const vibrate = () => {
-      throw new Error('blocked')
-    }
-    expect(buzz(DEFAULT_FEEL, 20, { vibrate })).toBe(false)
-  })
-})
-
-describe('playTick', () => {
-  function fakeAudio(state = 'running') {
-    const calls: string[] = []
-    const audio: TickAudio = {
-      state,
-      resume: async () => {
-        calls.push('resume')
-      },
-      currentTime: 2,
-      destination: 'speakers',
-      createOscillator: () => ({
-        frequency: { value: 0 },
-        connect: () => calls.push('osc.connect'),
-        start: () => calls.push('start'),
-        stop: (when) => calls.push(`stop@${when}`),
-      }),
-      createGain: () => ({
-        gain: {
-          setValueAtTime: () => calls.push('gain.set'),
-          exponentialRampToValueAtTime: () => calls.push('gain.ramp'),
-        },
-        connect: (node) => calls.push(`gain.connect:${String(node)}`),
-      }),
-    }
-    return { audio, calls }
-  }
-
-  it('is silent by default and never opens audio then', () => {
-    const getAudio = vi.fn(() => null)
-    expect(playTick(DEFAULT_FEEL, getAudio)).toBe(false)
-    expect(getAudio).not.toHaveBeenCalled()
-  })
-
-  it('plays a 30 ms oscillator tick when sound is on', () => {
-    const { audio, calls } = fakeAudio()
-    expect(playTick({ ...DEFAULT_FEEL, sound: true }, () => audio)).toBe(true)
-    expect(calls).toEqual([
-      'gain.set',
-      'gain.ramp',
-      'osc.connect',
-      'gain.connect:speakers',
-      'start',
-      'stop@2.03',
-    ])
-  })
-
-  it('resumes a context the browser left suspended, then ticks (M14)', () => {
-    const { audio, calls } = fakeAudio('suspended')
-    expect(playTick({ ...DEFAULT_FEEL, sound: true }, () => audio)).toBe(true)
-    expect(calls[0]).toBe('resume')
-    expect(calls).toContain('start')
-  })
-
-  it('survives a resume the browser refuses', async () => {
-    const { audio } = fakeAudio('suspended')
-    const refused = { ...audio, resume: () => Promise.reject(new Error('NotAllowedError')) }
-    expect(playTick({ ...DEFAULT_FEEL, sound: true }, () => refused)).toBe(true)
-    await Promise.resolve()
-  })
-
-  it('does nothing without audio support, and survives an audio error', () => {
-    expect(playTick({ ...DEFAULT_FEEL, sound: true }, () => null)).toBe(false)
-    const broken = () => {
-      throw new Error('NotAllowedError')
-    }
-    expect(playTick({ ...DEFAULT_FEEL, sound: true }, broken)).toBe(false)
+    expect(canVibrate(undefined)).toBe(false)
   })
 })
 

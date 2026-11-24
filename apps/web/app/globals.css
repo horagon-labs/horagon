@@ -33,7 +33,6 @@
 
   --animate-blink: chrono-blink 1s steps(2, start) infinite;
   --animate-shake: chrono-shake 0.3s ease-in-out 2;
-  --animate-beat: chrono-blink 1.4s ease-in-out infinite;
 
   @keyframes chrono-blink {
     50% {

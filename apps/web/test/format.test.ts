@@ -1,4 +1,4 @@
-import type { Game, GameHistory } from '@horagon/sdk'
+import type { Game } from '@horagon/sdk'
 import { describe, expect, it } from 'vitest'
 import {
   cents,
@@ -8,10 +8,8 @@ import {
   gameClock,
   isTonight,
   percent,
-  scoringRuns,
   shortKey,
   sideLabel,
-  tonightOrder,
   usdc,
 } from '../lib/format'
 
@@ -132,69 +130,5 @@ describe('Tonight list', () => {
     expect(isTonight(game({}), now - 25 * 3_600_000)).toBe(false)
     expect(isTonight(game({}), now + 5 * 3_600_000)).toBe(false)
     expect(isTonight(game({ status: 'live' }), now + 9 * 3_600_000)).toBe(true)
-  })
-
-  it('orders featured, then live, then by tip-off', () => {
-    const later = new Date(now + 3_600_000).toISOString()
-    const list = [
-      game({ id: 'nba-a', scheduledTipoff: later }),
-      game({ id: 'nba-b' }),
-      game({ id: 'nba-c', status: 'live', scheduledTipoff: later }),
-      game({ id: 'nba-d', featured: true, scheduledTipoff: later }),
-    ].sort(tonightOrder)
-    expect(list.map((g) => g.id)).toEqual(['nba-d', 'nba-c', 'nba-b', 'nba-a'])
-  })
-})
-
-type Snap = GameHistory['snapshots'][number]
-const snaps = (scores: [number, number][]): Snap[] =>
-  scores.map(([h, a], i) => ({
-    ts: 100 + i * 15,
-    homeScore: h,
-    awayScore: a,
-    period: 1,
-    clockSecs: 600,
-    modelProb: 0.5,
-  }))
-
-describe('scoringRuns', () => {
-  it('marks a run once, where it reaches 8 unanswered points', () => {
-    const s = snaps([
-      [0, 0],
-      [3, 0],
-      [5, 0],
-      [8, 0],
-      [10, 0],
-    ])
-    expect(scoringRuns(s)).toEqual([{ ts: 145, team: 'home', points: 8 }])
-  })
-
-  it('an answer from the other team resets the run', () => {
-    const s = snaps([
-      [0, 0],
-      [6, 0],
-      [6, 2],
-      [8, 2],
-      [8, 10],
-    ])
-    expect(scoringRuns(s)).toEqual([{ ts: 160, team: 'away', points: 8 }])
-  })
-
-  it('a snapshot where both teams scored ends any run', () => {
-    const s = snaps([
-      [0, 0],
-      [6, 0],
-      [8, 2],
-      [12, 2],
-    ])
-    expect(scoringRuns(s)).toEqual([])
-  })
-
-  it('sorts snapshots by time first', () => {
-    const s = snaps([
-      [0, 0],
-      [8, 0],
-    ]).reverse()
-    expect(scoringRuns(s)).toHaveLength(1)
   })
 })
