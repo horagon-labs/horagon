@@ -55,10 +55,27 @@ describe('hold (spec 3.2)', () => {
     expect(late).toMatchObject({ confirm: false, armed: true })
   })
 
-  it('does not swallow a later press when the release came without a click', () => {
-    const r = run(['down', 0], ['held', 500], ['leave', 700], ['press', 900])
-    expect(r[1]?.confirm).toBe(true)
+  it('swallows the click that follows a touch release, whose pointerleave comes first', () => {
+    const r = run(
+      ['down', 0],
+      ['held', 500],
+      ['up', 900],
+      ['leave', 901],
+      ['press', 905],
+      ['press', 1_200],
+    )
+    expect(r[4]).toMatchObject({ confirm: false, armed: false })
+    expect(r[5]).toMatchObject({ confirm: false, armed: true })
+  })
+
+  it('does not keep swallowing when no click follows the release', () => {
+    const r = run(['down', 0], ['held', 500], ['leave', 600], ['press', 3_000])
     expect(r[3]).toMatchObject({ confirm: false, armed: true })
+  })
+
+  it('swallows the click after a long hold released seconds after the confirm', () => {
+    const r = run(['down', 0], ['held', 500], ['up', 2_500], ['press', 2_510])
+    expect(r[3]).toMatchObject({ confirm: false, armed: false })
   })
 
   it('drops a hold when the pointer leaves', () => {
