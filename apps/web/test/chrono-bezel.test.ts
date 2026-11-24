@@ -5,11 +5,13 @@ import {
   dragAngle,
   percentOf,
   pointerAngle,
+  ringHit,
   sellSteps,
   stepAngle,
   stepCrossed,
   stepIndex,
   wheelStep,
+  wheelTarget,
 } from '../lib/chrono/bezel'
 
 const amounts = (steps: { amount: string }[]) => steps.map((s) => s.amount)
@@ -116,6 +118,27 @@ describe('bezel angles (spec 3.1, 3.2)', () => {
     expect(dragAngle(135, -170)).toBe(190)
     expect(dragAngle(-135, 170)).toBe(-190)
     expect(dragAngle(135, 100)).toBe(100)
+  })
+
+  it('starts a drag on the ring only: not in the middle, not outside the circle (I6)', () => {
+    const box = { left: 20, top: 40, width: 200, height: 200 }
+    // The centre is (120, 140) and the radius 100.
+    expect(ringHit(120 + 80, 140, box)).toBe(true)
+    expect(ringHit(120, 140 - 99, box)).toBe(true)
+    expect(ringHit(120 + 62, 140, box)).toBe(true)
+    expect(ringHit(120, 140, box)).toBe(false)
+    expect(ringHit(120 + 61, 140, box)).toBe(false)
+    expect(ringHit(120 + 101, 140, box)).toBe(false)
+    expect(ringHit(120 + 95, 140 + 95, box)).toBe(false)
+  })
+
+  it('takes a wheel notch while it has steps, holding at either end (M3)', () => {
+    expect(wheelTarget(-120, 3, 8)).toBe(4)
+    expect(wheelTarget(40, 3, 8)).toBe(2)
+    expect(wheelTarget(-120, 7, 8)).toBe(7)
+    expect(wheelTarget(40, 0, 8)).toBe(0)
+    expect(wheelTarget(0, 3, 8)).toBeNull()
+    expect(wheelTarget(-120, 0, 0)).toBeNull()
   })
 
   it('finds the step for an amount and says when a step was crossed', () => {

@@ -102,8 +102,34 @@ export const startsDrag = (button: number, pointerType: string): boolean =>
 export const onRing = (dx: number, dy: number, radius: number): boolean =>
   Math.hypot(dx, dy) >= radius * 0.62
 
+/**
+ * Whether a point (client coordinates) on the slider's square box starts a drag: on the ring,
+ * neither in the middle nor outside the circle. Only such a touch is kept from scrolling the
+ * page; a swipe over the middle still scrolls the sheet (I6).
+ */
+export function ringHit(
+  x: number,
+  y: number,
+  box: { left: number; top: number; width: number; height: number },
+): boolean {
+  const radius = box.width / 2
+  const dx = x - (box.left + radius)
+  const dy = y - (box.top + box.height / 2)
+  return onRing(dx, dy, radius) && Math.hypot(dx, dy) <= radius
+}
+
 /** A step changed: the moment to buzz and tick (spec 2.5). */
 export const stepCrossed = (prev: number, next: number): boolean => prev !== next
 
 /** One wheel notch is one step: up (away from you) is more. */
 export const wheelStep = (deltaY: number): number => (deltaY < 0 ? 1 : deltaY > 0 ? -1 : 0)
+
+/**
+ * The step a wheel notch on the focused bezel goes to, held at either end; null when the notch
+ * is not the bezel's (no steps, or no vertical movement), so the page may scroll then.
+ */
+export function wheelTarget(deltaY: number, index: number, count: number): number | null {
+  const d = wheelStep(deltaY)
+  if (count === 0 || d === 0) return null
+  return Math.min(count - 1, Math.max(0, index + d))
+}

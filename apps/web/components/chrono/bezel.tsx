@@ -1,18 +1,19 @@
 'use client'
 // The bezel (spec 3.2, 2.6): a slider ring around the dial. Drag the ring, scroll one step per
 // notch, or use a slider's keys; the crown at 3 o'clock is where a thumb starts. Each new step
-// buzzes 5 ms and ticks when those are on (spec 2.5).
-import { type PointerEvent, type ReactNode, useRef } from 'react'
+// buzzes 5 ms and ticks when those are on (spec 2.5). A finger on the ring turns it; a swipe
+// over the dial's middle scrolls the page or the sheet (touch-action pan-y).
+import { type PointerEvent, type ReactNode, useEffect, useRef } from 'react'
 import {
   angleToStep,
   dragAngle,
-  onRing,
   pointerAngle,
+  ringHit,
   type Step,
   startsDrag,
   stepAngle,
   stepCrossed,
-  wheelStep,
+  wheelTarget,
 } from '../../lib/chrono/bezel'
 import { buzz, playTick, STEP_BUZZ_MS, useFeel } from '../../lib/chrono/feel'
 import { arcPath, MIN_ANGLE, polar } from '../../lib/chrono/geometry'
@@ -62,6 +63,40 @@ export function Bezel(p: {
     go(angleToStep(angle.current, n))
   }
 
+  // React's touchstart and wheel listeners are passive, so neither can stop the page scrolling:
+  // these two are native, and read the latest render through `native`.
+  const slider = useRef<HTMLDivElement>(null)
+  const native = useRef({ wheel: (_: WheelEvent) => {}, touch: (_: TouchEvent) => {} })
+  native.current = {
+    wheel(e) {
+      // Only while focused: a scroll over the dial must scroll the page, not change the trade.
+      if (document.activeElement !== slider.current) return
+      const next = wheelTarget(e.deltaY, index, n)
+      if (next === null) return
+      e.preventDefault()
+      go(next)
+    },
+    touch(e) {
+      const el = slider.current
+      const t = e.touches[0]
+      if (!el || !t || n === 0 || e.touches.length !== 1) return
+      // A finger on the ring turns the bezel; anywhere else it may scroll.
+      if (ringHit(t.clientX, t.clientY, el.getBoundingClientRect())) e.preventDefault()
+    },
+  }
+  useEffect(() => {
+    const el = slider.current
+    if (!el) return
+    const wheel = (e: WheelEvent) => native.current.wheel(e)
+    const touch = (e: TouchEvent) => native.current.touch(e)
+    el.addEventListener('wheel', wheel, { passive: false })
+    el.addEventListener('touchstart', touch, { passive: false })
+    return () => {
+      el.removeEventListener('wheel', wheel)
+      el.removeEventListener('touchstart', touch)
+    }
+  }, [])
+
   const crown = polar(C, C, 97, 90)
   return (
     // The dial sits beside the slider, not inside it: a slider's children are presentational,
@@ -69,6 +104,7 @@ export function Bezel(p: {
     // through the dial to the ring.
     <div className={`relative aspect-square w-full ${p.className ?? ''}`}>
       <div
+        ref={slider}
         role="slider"
         tabIndex={0}
         aria-label={p.label}
@@ -85,10 +121,7 @@ export function Bezel(p: {
         }}
         onPointerDown={(e) => {
           if (n === 0 || !startsDrag(e.button, e.pointerType)) return
-          const box = e.currentTarget.getBoundingClientRect()
-          const dx = e.clientX - (box.left + box.width / 2)
-          const dy = e.clientY - (box.top + box.height / 2)
-          if (!onRing(dx, dy, box.width / 2)) return
+          if (!ringHit(e.clientX, e.clientY, e.currentTarget.getBoundingClientRect())) return
           dragging.current = true
           angle.current = stepAngle(index, n)
           e.currentTarget.setPointerCapture(e.pointerId)
@@ -109,13 +142,7 @@ export function Bezel(p: {
         onLostPointerCapture={() => {
           dragging.current = false
         }}
-        onWheel={(e) => {
-          // Only while focused: a scroll over the dial must scroll the page, not change the trade.
-          if (document.activeElement !== e.currentTarget) return
-          const d = wheelStep(e.deltaY)
-          if (d !== 0) go(Math.min(n - 1, Math.max(0, index + d)))
-        }}
-        className="absolute inset-0 touch-none select-none rounded-full"
+        className="absolute inset-0 touch-pan-y touch-pinch-zoom select-none rounded-full"
       >
         <svg viewBox="0 0 200 200" aria-hidden="true" className="absolute inset-0 size-full">
           <circle cx={C} cy={C} r={95} fill="none" strokeWidth={6} className="stroke-enamel-800" />
