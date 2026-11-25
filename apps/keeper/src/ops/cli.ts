@@ -10,13 +10,16 @@ import { parseArgs } from 'node:util'
 import {
   connectPostgres,
   type Db,
+  FLAG_NAMES,
   getDraft,
   getGame,
   getHeartbeat,
   listGames,
   logOps,
+  readFlags,
   setDraftState,
   setFeatured,
+  setFlag,
   setWalletKind,
   updateMarket,
 } from '@horagon/db'
@@ -49,6 +52,7 @@ import { periodsConsistent } from '../feeds/types'
 import {
   boxScoreUrl,
   disputeWindowArg,
+  flagArgs,
   gameDateArg,
   noticeUrl,
   opsArgv,
@@ -85,6 +89,7 @@ const USAGE = `usage: horagon-ops <command>
   pause | resume
   fund-authority <sol>
   team <pubkey>...
+  flag on|off <FLAG_NAME>
   watchdog
   help | --help | -h
 options:
@@ -683,6 +688,16 @@ async function run(argv: string[]): Promise<void> {
         for (const w of wallets) await setWalletKind(db, w, 'team')
         await logOps(db, { actor: 'admin', action: 'team', detail: { wallets } })
         console.log(`team wallets: ${wallets.join(', ')}`)
+      })
+    }
+    case 'flag': {
+      // Tier 2 feature flags (spec 3.3); the API reads them on every request.
+      const { name, on } = flagArgs(args)
+      return withDb(async (db) => {
+        await setFlag(db, name, on, 'ops')
+        const flags = await readFlags(db)
+        console.log(`${name} is now ${on ? 'on' : 'off'}`)
+        for (const n of FLAG_NAMES) console.log(`  ${n.padEnd(20)} ${flags[n] ? 'on' : 'off'}`)
       })
     }
     case 'watchdog': {

@@ -1,3 +1,6 @@
+import { readdirSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { PLAY_MONEY_NOTICE } from '@horagon/sdk'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import { AgeDialog } from '../components/age-dialog'
@@ -16,6 +19,20 @@ describe('app shell (spec 2.7, 3.2)', () => {
     expect(html).toContain('text-brass-500')
     expect(html).toContain('aria-hidden="true"')
     expect(html).toContain('>HORAGON</span>')
+  })
+
+  it('takes the banner words from PLAY_MONEY_NOTICE, the one copy, in the SDK', () => {
+    const root = join(import.meta.dirname, '..')
+    const sources = ['app', 'components', 'lib'].flatMap((dir) =>
+      readdirSync(join(root, dir), { recursive: true, encoding: 'utf8' })
+        .filter((file) => /\.tsx?$/.test(file))
+        .map((file) => join(dir, file)),
+    )
+    expect(sources.length).toBeGreaterThan(10)
+    const copies = sources.filter((file) =>
+      readFileSync(join(root, file), 'utf8').includes(PLAY_MONEY_NOTICE),
+    )
+    expect(copies).toEqual([])
   })
 
   it('keeps the play-money banner’s words exactly', () => {

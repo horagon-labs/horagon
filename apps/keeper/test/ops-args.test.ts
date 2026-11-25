@@ -5,6 +5,7 @@ import { ProgramFailure, UnresolvedAttempt } from '../src/executor'
 import {
   boxScoreUrl,
   disputeWindowArg,
+  flagArgs,
   gameDateArg,
   noticeUrl,
   opsArgv,
@@ -160,5 +161,28 @@ describe('opsErrorReport', () => {
     Object.defineProperty(withSig, 'signature', { value: SIG })
     expect(opsErrorReport(withSig).lines).toEqual(['error: sent, answer lost', `signature: ${SIG}`])
     expect(opsErrorReport('a string').lines).toEqual(['error: a string'])
+  })
+})
+
+describe('flagArgs', () => {
+  it('reads on or off, then a flag name', () => {
+    expect(flagArgs(['on', 'FLAG_ME'])).toEqual({ name: 'FLAG_ME', on: true })
+    expect(flagArgs(['off', 'FLAG_VERIFY'])).toEqual({ name: 'FLAG_VERIFY', on: false })
+  })
+
+  it.each<[string[]]>([
+    [[]],
+    [['on']],
+    [['FLAG_ME', 'on']],
+    [['enable', 'FLAG_ME']],
+    [['on', 'FLAG_ME', 'FLAG_SHARE']],
+  ])('refuses %j with the usage', (args) => {
+    expect(() => flagArgs(args)).toThrow('usage: flag on|off <FLAG_NAME>')
+  })
+
+  it('lists the flags when the name is not one', () => {
+    expect(() => flagArgs(['on', 'flag_me'])).toThrow(
+      'unknown flag "flag_me"; flags: FLAG_ME, FLAG_METRICS, FLAG_METRICS_COHORT, FLAG_SHARE, FLAG_RANK, FLAG_CREWS, FLAG_TELEGRAM, FLAG_CLUTCH, FLAG_PRACTICE, FLAG_VERIFY',
+    )
   })
 })

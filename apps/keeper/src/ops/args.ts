@@ -1,4 +1,5 @@
 // Pure helpers for `horagon-ops`, kept apart from the CLI glue so they are unit tested.
+import { FLAG_NAMES, type FlagName, isFlagName } from '@horagon/db'
 import { errorSignature, errorSummary } from '@horagon/sdk'
 import { PublicKey } from '@solana/web3.js'
 import { checkBoxScoreUrl } from '../evidence'
@@ -159,4 +160,16 @@ export function heartbeatStale(
 ): boolean {
   const gameNight = tipoffs.some((t) => nowSecs >= t - 90 * 60 && nowSecs <= t + 4 * 3600)
   return gameNight && (ageSecs === null || ageSecs > maxAgeSecs)
+}
+
+/** `flag on|off <FLAG_NAME>`: the flag and its new state, checked before anything connects. */
+export function flagArgs(args: readonly string[]): { name: FlagName; on: boolean } {
+  const [state, name, ...rest] = args
+  if ((state !== 'on' && state !== 'off') || name === undefined || rest.length > 0) {
+    throw new Error('usage: flag on|off <FLAG_NAME>')
+  }
+  if (!isFlagName(name)) {
+    throw new Error(`unknown flag "${name}"; flags: ${FLAG_NAMES.join(', ')}`)
+  }
+  return { name, on: state === 'on' }
 }

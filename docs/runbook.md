@@ -34,6 +34,7 @@ horagon-ops help          # prints the usage (so do --help and -h)
   `HORAGON_PUBLIC_URL`, the https site the evidence URI points to. Without `HORAGON_RPC_URL`,
   `status` still lists the games, but a propose line that needs the chain reads
   `pending check: may still land` (it fails closed).
+- `flag` needs only `DATABASE_URL` (procedure I).
 - With `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` set (both or neither), `horagon-ops` sends
   its own `tx:` and `tx-unresolved:` alerts to the same chat.
 
@@ -297,6 +298,30 @@ come too late, so:
 The keeper tries the create again every round, so the market opens within seconds of the
 treasury holding the seed: 1,000 mUSDC for a featured game, 300 for the others (a featured game
 takes 300 when the treasury holds 300 to 1,000, with a `treasury-low` alert).
+
+### I. Turn a feature off
+
+Each Tier 2 feature sits behind a flag, and every flag starts off: `FLAG_ME`, `FLAG_METRICS`,
+`FLAG_METRICS_COHORT`, `FLAG_SHARE`, `FLAG_RANK`, `FLAG_CREWS`, `FLAG_TELEGRAM`, `FLAG_CLUTCH`,
+`FLAG_PRACTICE` and `FLAG_VERIFY`. While a flag is off, the API routes behind it answer 404
+(`application/problem+json`), POST routes too, and the pages built on them hide the feature.
+The API reads the flags on every request, so a change applies at once, with no deploy and no
+restart.
+
+When a feature misbehaves during a night, turn its flag off first and look into it after:
+
+```bash
+horagon-ops flag off FLAG_SHARE
+```
+
+The command prints every flag with its state and logs the change in `ops_events` (actor ops,
+action flag). Turn the flag back on once the fix is deployed:
+
+```bash
+horagon-ops flag on FLAG_SHARE
+```
+
+`GET /api/v1/flags`, `POST /api/v1/tx/trade` and the Tier 1 game routes have no flag.
 
 ## Alerts
 

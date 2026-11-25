@@ -1,10 +1,9 @@
-import { HoragonError } from '@horagon/sdk'
+import { HoragonError, PLAY_MONEY_NOTICE } from '@horagon/sdk'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import { Bezel } from '../components/chrono/bezel'
 import { CrownPanel, type CrownPanelProps } from '../components/chrono/crown-panel'
 import { backdropHit, CrownSheet } from '../components/chrono/crown-sheet'
-import { PLAY_MONEY } from '../components/play-money-banner'
 import { buySteps, onRing, sellSteps, startsDrag } from '../lib/chrono/bezel'
 import { detail, market, NOW, position, quote } from '../lib/chrono/fixtures'
 import { crownShown } from '../lib/chrono/game'
@@ -271,9 +270,9 @@ describe('CrownSheet (spec 3.2)', () => {
         <p>inside</p>
       </CrownSheet>,
     )
-    expect(PLAY_MONEY).toBe('Play-money on devnet. No real value. No prizes.')
-    expect(html).toContain(PLAY_MONEY)
-    expect(html.indexOf(PLAY_MONEY)).toBeGreaterThan(html.indexOf('<p>inside</p>'))
+    expect(PLAY_MONEY_NOTICE).toBe('Play-money on devnet. No real value. No prizes.')
+    expect(html).toContain(PLAY_MONEY_NOTICE)
+    expect(html.indexOf(PLAY_MONEY_NOTICE)).toBeGreaterThan(html.indexOf('<p>inside</p>'))
   })
 
   it('keeps its title and Close at the top while the content scrolls', () => {

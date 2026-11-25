@@ -155,6 +155,7 @@ const NOT_ALERT_WORDS = new Set([
   'resume',
   'fund-authority',
   'status',
+  'flag',
   // keeper actions and steps, fields of its heartbeat row
   'create',
   'finalize',

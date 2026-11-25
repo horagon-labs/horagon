@@ -4,8 +4,8 @@
 // The sheet sits in the top layer over the play-money banner, so it carries the same line in a
 // footer that stays put while its content scrolls (spec 2.7). Its title and Close stay at the
 // top of the scrolling area, each open starts at the top, and a tap on the backdrop closes it.
+import { PLAY_MONEY_NOTICE } from '@horagon/sdk'
 import { type MouseEvent, type ReactNode, useEffect, useRef } from 'react'
-import { PLAY_MONEY } from '../play-money-banner'
 
 interface Box {
   left: number
@@ -90,7 +90,7 @@ export function CrownSheet(p: {
           role="note"
           className="shrink-0 border-t border-amber-400/40 px-4 py-2 text-center text-11 text-amber-400"
         >
-          {PLAY_MONEY}
+          {PLAY_MONEY_NOTICE}
         </p>
       </div>
     </dialog>
