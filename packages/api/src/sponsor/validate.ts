@@ -1,3 +1,4 @@
+import { isBotMemoInstruction, MEMO_PROGRAM_ID } from '@horagon/sdk'
 import { PM_AMM_PROGRAM_ID, pmAmmInstructionName } from '@horagon/sdk/pm-amm'
 import {
   ASSOCIATED_TOKEN_PROGRAM_ID,
@@ -152,6 +153,7 @@ function validate(
   const traded = tradedMarkets(keys, instructions)
   let trades = 0
   let ataCreates = 0
+  let memos = 0
   for (const ix of instructions) {
     const program = keys[ix.programIdIndex]
     if (!program) reject('PROGRAM_NOT_ALLOWED', 'Program index out of range')
@@ -170,6 +172,12 @@ function validate(
     } else if (program.equals(PM_AMM_PROGRAM_ID)) {
       checkPmAmm(accounts, ix.data, user, policy)
       trades++
+    } else if (program.equals(MEMO_PROGRAM_ID)) {
+      // The one Memo a player may add: horagon:bot with no accounts (spec 4.2), at most once.
+      if (!isBotMemoInstruction(program, accounts.length, ix.data)) {
+        reject('PROGRAM_NOT_ALLOWED', 'The only Memo allowed is horagon:bot, with no accounts')
+      }
+      if (++memos > 1) reject('PROGRAM_NOT_ALLOWED', 'At most one horagon:bot memo')
     } else {
       // SPL Token included: Horagon builds no Token instruction for a player. claim_winnings
       // closes the YES and NO accounts itself, so a CloseAccount after it can only fail.

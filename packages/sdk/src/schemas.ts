@@ -178,6 +178,8 @@ export const TradeBuildRequestSchema = QuoteRequestSchema.extend({
   wallet: PubkeySchema,
   /** Default true: the sponsor pays the fee and ATA rent (spec section 9). */
   sponsored: z.boolean().optional(),
+  /** "bot": the transaction carries the horagon:bot memo, so the wallet counts as a bot (spec 4.2). */
+  client: z.literal('bot').optional(),
 })
 
 export const BuiltTxWireSchema = z.object({

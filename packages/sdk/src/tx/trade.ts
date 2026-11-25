@@ -12,6 +12,7 @@ import {
 import { PROTOCOL_DAO } from '../pm-amm/constants'
 import { buildSwapIx, type SwapIxInput } from '../pm-amm/ix'
 import { deriveNoMint, deriveYesMint } from '../pm-amm/pda'
+import { botMemoIx } from './memo'
 
 /** Swaps peak near 510k CU (S1, S3a); 800k leaves headroom and stays under the sponsor's 1M cap. */
 export const SWAP_COMPUTE_UNITS = 800_000
@@ -59,9 +60,14 @@ export interface BuildTradeTxInput {
   createAtas: readonly AtaSpec[]
   computeUnits?: number
   microLamportsPerCu?: number
+  /** Add the `horagon:bot` memo right before the swap: the client declares itself a bot. */
+  botMemo?: boolean
 }
 
-/** Unsigned v0 swap transaction: compute budget, idempotent ATA creates, then the swap. */
+/**
+ * Unsigned v0 swap transaction: compute budget, idempotent ATA creates, the bot memo when asked,
+ * then the swap.
+ */
 export function buildTradeTransaction(input: BuildTradeTxInput): VersionedTransaction {
   const instructions: TransactionInstruction[] = [
     ComputeBudgetProgram.setComputeUnitLimit({ units: input.computeUnits ?? SWAP_COMPUTE_UNITS }),
@@ -71,7 +77,9 @@ export function buildTradeTransaction(input: BuildTradeTxInput): VersionedTransa
       ComputeBudgetProgram.setComputeUnitPrice({ microLamports: input.microLamportsPerCu }),
     )
   }
-  instructions.push(...createAtaIxs(input.feePayer, input.createAtas), buildSwapIx(input.swap))
+  instructions.push(...createAtaIxs(input.feePayer, input.createAtas))
+  if (input.botMemo) instructions.push(botMemoIx())
+  instructions.push(buildSwapIx(input.swap))
   const message = new TransactionMessage({
     payerKey: input.feePayer,
     recentBlockhash: input.recentBlockhash,

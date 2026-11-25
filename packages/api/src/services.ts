@@ -141,6 +141,7 @@ export async function buildTrade(ctx: Ctx, req: TradeBuildRequest) {
       minOut: q.minOut,
     },
     createAtas: atas.filter((_, i) => !infos[i]),
+    botMemo: req.client === 'bot',
   })
   return {
     tx: base64(tx),

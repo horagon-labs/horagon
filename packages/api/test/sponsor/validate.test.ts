@@ -1,4 +1,4 @@
-import { buildClaimTransactions } from '@horagon/sdk'
+import { botMemoIx, buildClaimTransactions, MEMO_PROGRAM_ID } from '@horagon/sdk'
 import {
   DEVNET_MUSDC_MINT,
   PM_AMM_IX_DISCRIMINATORS,
@@ -102,6 +102,16 @@ const userSigns = (ix: TransactionInstruction) =>
 /** The CloseAccount the SDK used to append after claim_winnings, which already closed it. */
 const close = (destination = sponsor) =>
   createCloseAccountInstruction(getAssociatedTokenAddressSync(yesMint, user), destination, user)
+
+const LEGACY_MEMO = new PublicKey('Memo1UhkJRfHyvLMcVucJwxXeuD728EqVDDwQDxFMNo')
+
+/** A Memo instruction: the bot memo unless `opts` changes its text, program or accounts. */
+const memo = (opts: { text?: string; program?: PublicKey; keys?: PublicKey[] } = {}) =>
+  new TransactionInstruction({
+    programId: opts.program ?? MEMO_PROGRAM_ID,
+    keys: (opts.keys ?? []).map((pubkey) => ({ pubkey, isSigner: true, isWritable: false })),
+    data: Buffer.from(opts.text ?? 'horagon:bot', 'utf8'),
+  })
 
 function build(
   instructions: TransactionInstruction[],
@@ -447,6 +457,51 @@ describe('validateSponsoredTransaction on legacy messages', () => {
   })
 })
 
+// Spec 4.2: the sponsor allows the horagon:bot memo, exactly, once; every other Memo is refused.
+describe('validateSponsoredTransaction and the horagon:bot memo', () => {
+  it('accepts one bot memo next to a buy, before or after the swap', () => {
+    const before = build([...BUY.slice(0, -1), botMemoIx(), pmAmm('swap')])
+    expect(validateSponsoredTransaction(before, policy)).toEqual({ ok: true, user, ataCreates: 5 })
+    const after = build([...BUY, memo()])
+    expect(validateSponsoredTransaction(after, policy)).toEqual({ ok: true, user, ataCreates: 5 })
+  })
+
+  it.each([
+    ['other data', build([memo({ text: 'horagon:bots' }), pmAmm('swap')]), 'PROGRAM_NOT_ALLOWED'],
+    ['an empty memo', build([memo({ text: '' }), pmAmm('swap')]), 'PROGRAM_NOT_ALLOWED'],
+    [
+      'a memo with an account',
+      build([memo({ keys: [user] }), pmAmm('swap')]),
+      'PROGRAM_NOT_ALLOWED',
+    ],
+    [
+      'the legacy Memo program',
+      build([memo({ program: LEGACY_MEMO }), pmAmm('swap')]),
+      'PROGRAM_NOT_ALLOWED',
+    ],
+    ['two bot memos', build([memo(), memo(), pmAmm('swap')]), 'PROGRAM_NOT_ALLOWED'],
+    [
+      'a bot memo next to an unknown program',
+      build([
+        memo(),
+        new TransactionInstruction({ programId: key(40), keys: [], data: Buffer.alloc(0) }),
+        pmAmm('swap'),
+      ]),
+      'PROGRAM_NOT_ALLOWED',
+    ],
+    [
+      'a memo that names the sponsor',
+      build([memo({ keys: [sponsor] }), pmAmm('swap')]),
+      'SPONSOR_MISUSE',
+    ],
+    ['a bot memo and no trade', build([userSigns(ata(user, usdc)), memo()]), 'NO_TRADE'],
+  ])('rejects %s', (_label, tx, reason) => {
+    const verdict = validateSponsoredTransaction(tx, policy)
+    expect(verdict.ok).toBe(false)
+    if (!verdict.ok) expect(verdict.reason).toBe(reason)
+  })
+})
+
 describe('validateSponsoredTransaction property', () => {
   const good: TransactionInstruction[] = [
     ComputeBudgetProgram.setComputeUnitLimit({ units: 1_000_000 }),
@@ -471,12 +526,18 @@ describe('validateSponsoredTransaction property', () => {
     close(stranger),
     new TransactionInstruction({ programId: key(41), keys: [], data: Buffer.from([1]) }),
   ]
+  const badMemos: TransactionInstruction[] = [
+    memo({ text: 'horagon:bot\n' }),
+    memo({ keys: [user] }),
+    memo({ program: LEGACY_MEMO }),
+  ]
   const atom = fc.oneof(
-    fc.constantFrom(...good).map((ix) => ({ ix, ok: true })),
-    fc.constantFrom(...bad).map((ix) => ({ ix, ok: false })),
+    fc.constantFrom(...good).map((ix) => ({ ix, ok: true, memo: false })),
+    fc.constantFrom(...bad, ...badMemos).map((ix) => ({ ix, ok: false, memo: false })),
+    fc.constant({ ix: memo(), ok: true, memo: true }),
   )
 
-  it('accepts a transaction exactly when every instruction is on the allowlist', () => {
+  it('accepts a transaction exactly when every instruction is on the allowlist, with at most one bot memo', () => {
     fc.assert(
       fc.property(fc.array(atom, { maxLength: 10 }), (atoms) => {
         const ixs = atoms.map((a) => a.ix)
@@ -485,8 +546,11 @@ describe('validateSponsoredTransaction property', () => {
         const ataCreates = ixs.filter((ix) =>
           ix.programId.equals(ASSOCIATED_TOKEN_PROGRAM_ID),
         ).length
+        const memos = atoms.filter((a) => a.memo).length
         expect(verdict.ok).toBe(
-          atoms.every((a) => a.ok) && ataCreates <= DEFAULT_SPONSOR_LIMITS.maxAtaCreates,
+          atoms.every((a) => a.ok) &&
+            ataCreates <= DEFAULT_SPONSOR_LIMITS.maxAtaCreates &&
+            memos <= 1,
         )
       }),
       { numRuns: 500 },

@@ -384,6 +384,9 @@ refuses a transaction that differs from the allowlist in any point:
   same transaction trades.
 - **pm-AMM.** Only `swap`, `redeem_pair` and `claim_winnings`, signed by the player, on a market
   listed as Horagon's.
+- **SPL Memo.** At most one instruction, with no accounts and the data `horagon:bot` exactly. A
+  client adds it to declare itself a bot, and `POST /api/v1/tx/trade` with `client: "bot"`
+  builds it. Any other Memo instruction is refused, as is any program not listed here.
 - **The sponsor's role.** It appears only as fee payer and rent payer. No instruction closes
   an account back to it: `claim_winnings` closes the player's YES and NO accounts itself and
   pays their rent to the player.
