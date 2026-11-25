@@ -30,3 +30,6 @@ next-env.d.ts
 
 # Keeper data: raw ESPN archive, Elo build cache, elo.json (copied to the VPS by hand).
 apps/keeper/data/
+
+# Vercel CLI link (`vercel link`): the project and team ids.
+.vercel
