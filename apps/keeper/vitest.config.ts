@@ -4,6 +4,8 @@ export default defineConfig({
   test: {
     include: ['test/**/*.test.ts'],
     hookTimeout: 30_000,
+    // The ata-watch flood test and other PGlite-backed tests exceeded the 5 s per-test budget under turbo's parallel load.
+    testTimeout: 30_000,
     coverage: {
       provider: 'v8',
       include: ['src/**/*.ts'],
