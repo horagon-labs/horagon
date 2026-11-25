@@ -268,6 +268,23 @@ export const ProblemSchema = z.object({
   requestId: z.string().optional(),
 })
 
+/** Tier 2 feature flags (spec 3.3); every one is off until `horagon-ops flag on` turns it on. */
+export const FlagsSchema = z.strictObject({
+  FLAG_ME: z.boolean(),
+  FLAG_METRICS: z.boolean(),
+  FLAG_METRICS_COHORT: z.boolean(),
+  FLAG_SHARE: z.boolean(),
+  FLAG_RANK: z.boolean(),
+  FLAG_CREWS: z.boolean(),
+  FLAG_TELEGRAM: z.boolean(),
+  FLAG_CLUTCH: z.boolean(),
+  FLAG_PRACTICE: z.boolean(),
+  FLAG_VERIFY: z.boolean(),
+})
+
+/** `GET /api/v1/flags`. */
+export const FlagsResponseSchema = z.object({ flags: FlagsSchema })
+
 export type GameStatus = z.infer<typeof GameStatusSchema>
 export type MarketKind = z.infer<typeof MarketKindSchema>
 export type MarketStatus = z.infer<typeof MarketStatusSchema>
@@ -291,6 +308,7 @@ export type PositionsResponse = z.infer<typeof PositionsResponseSchema>
 export type FaucetResponse = z.infer<typeof FaucetResponseSchema>
 export type Health = z.infer<typeof HealthSchema>
 export type Problem = z.infer<typeof ProblemSchema>
+export type FlagsResponse = z.infer<typeof FlagsResponseSchema>
 
 /** On-chain `GameMarket.kind` <-> API name. */
 export const MARKET_KIND_CODE: Readonly<Record<MarketKind, 0 | 1>> = { winner: 0, 'second-half': 1 }

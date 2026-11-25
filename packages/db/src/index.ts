@@ -1,4 +1,5 @@
 export * from './client'
+export * from './flags'
 export * from './games'
 export * from './markets'
 export * from './ops'

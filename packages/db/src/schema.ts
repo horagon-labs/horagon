@@ -270,7 +270,7 @@ export const opsEvents = pgTable(
   {
     id: serial('id').primaryKey(),
     ts: ts('ts').notNull().defaultNow(),
-    /** keeper | indexer | guardian | admin */
+    /** keeper | indexer | guardian | admin | ops */
     actor: text('actor').notNull(),
     action: text('action').notNull(),
     gameId: text('game_id'),
@@ -280,3 +280,15 @@ export const opsEvents = pgTable(
   },
   (t) => [index('ops_events_ts_idx').on(t.ts)],
 )
+
+/**
+ * Tier 2 feature flags (spec 3.3). A flag with no row is off; `setFlag` (flags.ts) writes a row
+ * and its `ops_events` line in one transaction. A row whose name is not in FLAG_NAMES is ignored.
+ */
+export const flags = pgTable('flags', {
+  name: text('name').primaryKey(),
+  enabled: boolean('enabled').notNull().default(false),
+  updatedAt: ts('updated_at').notNull().defaultNow(),
+  /** Who set it: `ops` for horagon-ops. */
+  updatedBy: text('updated_by').notNull(),
+})

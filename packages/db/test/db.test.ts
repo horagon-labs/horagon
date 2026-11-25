@@ -97,6 +97,7 @@ const seedGames = async (...ids: string[]) =>
 
 const TABLES = [
   'evidence',
+  'flags',
   'game_snapshots',
   'games',
   'keeper_heartbeats',

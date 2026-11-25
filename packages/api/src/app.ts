@@ -8,6 +8,7 @@ import {
   listGames,
   listPricePoints,
   listSnapshots,
+  readFlags,
 } from '@horagon/db'
 import {
   BuiltTxWireSchema,
@@ -17,6 +18,7 @@ import {
   errorSummary,
   FaucetRequestSchema,
   FaucetResponseSchema,
+  FlagsResponseSchema,
   formatAmount,
   GameDetailSchema,
   GameIdSchema,
@@ -47,6 +49,7 @@ import { requestId } from 'hono/request-id'
 import { ChainReader } from './chain'
 import type { ApiDeps } from './deps'
 import { claimFaucet } from './faucet'
+import { flagsOf, provideFlags } from './flags'
 import { ApiError, problemResponse } from './problem'
 import {
   buildClaims,
@@ -127,6 +130,11 @@ export function createApp(deps: ApiDeps) {
   }).basePath('/api/v1')
 
   app.use('*', requestId())
+  // Read lazily: a route that never asks costs no query (packages/api/src/flags.ts).
+  app.use(
+    '*',
+    provideFlags(() => readFlags(deps.db)),
+  )
   app.use('*', async (c, next) => {
     const started = performance.now()
     await next()
@@ -432,6 +440,18 @@ export function createApp(deps: ApiDeps) {
     async (c) => {
       const { wallet } = c.req.valid('json')
       return c.json(await claimFaucet(deps, wallet, clientIp(c.req.raw.headers)), 200)
+    },
+  )
+
+  app.openapi(
+    createRoute({
+      method: 'get',
+      path: '/flags',
+      responses: { 200: json(FlagsResponseSchema, 'Feature flags; every one is off by default') },
+    }),
+    async (c) => {
+      c.header('cache-control', 'no-store')
+      return c.json({ flags: await flagsOf(c) }, 200)
     },
   )
 

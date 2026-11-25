@@ -30,6 +30,7 @@ export {
   type SwapQuote,
 } from './math'
 export * from './model'
+export * from './notice'
 export * from './pm-amm/constants'
 export * from './pm-amm/errors'
 export * from './pm-amm/instructions'
