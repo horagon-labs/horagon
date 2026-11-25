@@ -53,6 +53,7 @@ function trade(usdc: bigint, yes: bigint, no: bigint): TradeRow {
     fee: 0n,
     slot: BigInt(n),
     blockTime: new Date(n * 1000),
+    botMemo: false,
   }
 }
 

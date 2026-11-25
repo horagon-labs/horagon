@@ -156,6 +156,7 @@ const NOT_ALERT_WORDS = new Set([
   'fund-authority',
   'status',
   'flag',
+  'backfill-bot-memo',
   // keeper actions and steps, fields of its heartbeat row
   'create',
   'finalize',

@@ -63,6 +63,7 @@ import {
   signatureIn,
   solToLamports,
 } from './args'
+import { backfillBotMemo } from './backfill-bot-memo'
 import {
   type AttemptLookups,
   chooseAndStoreEvidence,
@@ -90,6 +91,7 @@ const USAGE = `usage: horagon-ops <command>
   fund-authority <sol>
   team <pubkey>...
   flag on|off <FLAG_NAME>
+  backfill-bot-memo
   watchdog
   help | --help | -h
 options:
@@ -698,6 +700,28 @@ async function run(argv: string[]): Promise<void> {
         const flags = await readFlags(db)
         console.log(`${name} is now ${on ? 'on' : 'off'}`)
         for (const n of FLAG_NAMES) console.log(`  ${n.padEnd(20)} ${flags[n] ? 'on' : 'off'}`)
+      })
+    }
+    case 'backfill-bot-memo': {
+      // trades.bot_memo of the rows indexed before the column existed; safe to run again.
+      const [rpc] = rpcEndpoints([need('HORAGON_RPC_URL')], env.RPC_WS_URLS)
+      if (!rpc) throw new Error('HORAGON_RPC_URL is not set')
+      const connection = makeConnection(rpc.url, rpc.wsUrl)
+      await assertCluster(connection, cluster())
+      return withDb(async (db) => {
+        const result = await backfillBotMemo({
+          db,
+          getTransactions: (sigs) =>
+            connection.getTransactions(sigs, {
+              maxSupportedTransactionVersion: 0,
+              commitment: 'confirmed',
+            }),
+          log: (line) => console.log(line),
+        })
+        await logOps(db, { actor: 'admin', action: 'backfill-bot-memo', detail: { ...result } })
+        console.log(
+          `done: ${result.read} read, ${result.bots} with the bot memo, ${result.left} left`,
+        )
       })
     }
     case 'watchdog': {

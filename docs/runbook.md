@@ -35,6 +35,13 @@ horagon-ops help          # prints the usage (so do --help and -h)
   `status` still lists the games, but a propose line that needs the chain reads
   `pending check: may still land` (it fails closed).
 - `flag` needs only `DATABASE_URL` (procedure I).
+- `backfill-bot-memo` needs `DATABASE_URL` and `HORAGON_RPC_URL` (and `HORAGON_CLUSTER` unless
+  it is `devnet`). It reads again from chain each trade indexed before trades.bot_memo existed,
+  and records whether its transaction carries the horagon:bot memo. Run it after the keeper that
+  writes the column is deployed, until it reports 0 left, before the metrics flag goes on; run it
+  again after any rollback and redeploy of the keeper. It can run again at any time: it reads only
+  the transactions still unset, and stops at the first one the RPC cannot return, keeping what it
+  wrote.
 - With `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` set (both or neither), `horagon-ops` sends
   its own `tx:` and `tx-unresolved:` alerts to the same chat.
 

@@ -126,6 +126,11 @@ export const trades = pgTable(
     fee: raw('fee').notNull(),
     slot: raw('slot').notNull(),
     blockTime: ts('block_time').notNull(),
+    /**
+     * The transaction carries the top-level `horagon:bot` memo (docs/metrics.md bot rule (a)).
+     * Null: indexed before the column existed; `horagon-ops backfill-bot-memo` fills it.
+     */
+    botMemo: boolean('bot_memo'),
   },
   (t) => [
     primaryKey({ columns: [t.sig, t.ixIndex] }),

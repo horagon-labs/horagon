@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gte, inArray, isNull, ne, or } from 'drizzle-orm'
+import { and, asc, countDistinct, desc, eq, gte, inArray, isNull, ne, or } from 'drizzle-orm'
 import type { Db } from './client'
 import { markets, pricePoints, redeemsClaims, trades } from './schema'
 
@@ -124,6 +124,36 @@ export async function walletActivity(
       .orderBy(asc(redeemsClaims.blockTime), asc(redeemsClaims.sig), asc(redeemsClaims.ixIndex)),
   ])
   return { trades: t, claims: c }
+}
+
+/** Signatures of trades indexed before `bot_memo` existed (null), oldest first, each once. */
+export async function tradeSigsWithoutBotMemo(db: Db, limit: number): Promise<string[]> {
+  const rows = await db
+    .selectDistinct({ sig: trades.sig, blockTime: trades.blockTime })
+    .from(trades)
+    .where(isNull(trades.botMemo))
+    .orderBy(asc(trades.blockTime), asc(trades.sig))
+    .limit(limit)
+  return rows.map((r) => r.sig)
+}
+
+/** Sets `bot_memo` on the rows of one transaction that are still null. Returns how many. */
+export async function setTradeBotMemo(db: Db, sig: string, botMemo: boolean): Promise<number> {
+  const rows = await db
+    .update(trades)
+    .set({ botMemo })
+    .where(and(eq(trades.sig, sig), isNull(trades.botMemo)))
+    .returning({ sig: trades.sig })
+  return rows.length
+}
+
+/** Transactions with a trade whose `bot_memo` is still null. */
+export async function countTradesWithoutBotMemo(db: Db): Promise<number> {
+  const [row] = await db
+    .select({ n: countDistinct(trades.sig) })
+    .from(trades)
+    .where(isNull(trades.botMemo))
+  return row?.n ?? 0
 }
 
 export async function marketsByPubkeys(db: Db, pubkeys: string[]) {

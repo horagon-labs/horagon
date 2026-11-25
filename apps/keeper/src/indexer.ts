@@ -16,6 +16,7 @@ import {
 import {
   decodeMarketAccount,
   errorSummary,
+  isBotMemoInstruction,
   liveMarket,
   PM_AMM_PROGRAM_ID,
   PROTOCOL_DAO,
@@ -37,7 +38,7 @@ import type { Logger } from 'pino'
 import type { Alerter } from './alerts'
 import { base58Decode } from './base58'
 
-type TradeInsert = Parameters<typeof insertTrades>[1][number]
+type TradeInsert = Parameters<typeof insertTrades>[1][number] & { botMemo: boolean }
 type ClaimInsert = Parameters<typeof insertClaims>[1][number]
 
 export interface Decoded {
@@ -197,6 +198,21 @@ function deltas(tx: VersionedTransactionResponse, owner: string, mint: string): 
   )
 }
 
+/**
+ * The transaction carries the top-level `horagon:bot` SPL Memo, with no accounts and that exact
+ * data: bot rule (a) of docs/metrics.md, read the way scripts/count-fans.mjs reads it.
+ */
+export function hasBotMemo(tx: VersionedTransactionResponse): boolean {
+  const msg = tx.transaction.message
+  const keys = msg.staticAccountKeys
+  return msg.compiledInstructions.some((ix) => {
+    const program = keys[ix.programIdIndex]
+    return (
+      program !== undefined && isBotMemoInstruction(program, ix.accountKeyIndexes.length, ix.data)
+    )
+  })
+}
+
 /** Trades and claims of one confirmed transaction that touched `ctx.market`. */
 export function decodeTransaction(
   sig: string,
@@ -214,6 +230,7 @@ export function decodeTransaction(
   // With a sponsor, signer 0 pays the fee and signer 1 is the user (spec 9).
   const user = signers.length > 1 ? (signers[1] as string) : (signers[0] as string)
   const blockTime = new Date(tx.blockTime * 1000)
+  const botMemo = hasBotMemo(tx)
   const slot = BigInt(tx.slot)
   const m = ctx.market
   const pmAmmCalls = msg.compiledInstructions.filter(
@@ -256,6 +273,7 @@ export function decodeTransaction(
         fee,
         slot,
         blockTime,
+        botMemo,
       })
     } else if (name === 'redeemPair' || name === 'claimWinnings') {
       // A row is never stored from flows that cannot be right (a node that returns token balances
