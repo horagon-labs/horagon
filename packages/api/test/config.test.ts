@@ -131,6 +131,17 @@ describe('depsFromEnv', () => {
     expect(deps.publicUrl).toBe('https://horagon.test')
   })
 
+  it('reports the commit SHA, falling back to HORAGON_VERSION when it is empty', () => {
+    const version = (env: Record<string, string>) => depsFromEnv({ ...base, ...env }, db).version
+    expect(version({ VERCEL_GIT_COMMIT_SHA: '967b2b0aa1b2c3d4', HORAGON_VERSION: 'x' })).toBe(
+      '967b2b0',
+    )
+    // `vercel deploy` from the CLI sets VERCEL_GIT_COMMIT_SHA to an empty string.
+    expect(version({ VERCEL_GIT_COMMIT_SHA: '', HORAGON_VERSION: 'abc1234' })).toBe('abc1234')
+    expect(version({ VERCEL_GIT_COMMIT_SHA: '', HORAGON_VERSION: '' })).toBe('dev')
+    expect(version({})).toBe('dev')
+  })
+
   it('reads the sponsor key with the default limits', () => {
     const kp = Keypair.generate()
     const deps = depsFromEnv({ ...base, SPONSOR_SECRET_KEY: bs58.encode(kp.secretKey) }, db)

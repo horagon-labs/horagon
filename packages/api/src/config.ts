@@ -136,7 +136,8 @@ export function depsFromEnv(env: Record<string, string | undefined>, db?: Db): A
     faucet: pmAmmFaucet(env.HORAGON_FAUCET_URL),
     publicUrl: (env.HORAGON_PUBLIC_URL ?? 'http://localhost:3000').replace(/\/$/, ''),
     ipSalt: need('IP_HASH_SALT'),
-    version: env.VERCEL_GIT_COMMIT_SHA?.slice(0, 7) ?? env.HORAGON_VERSION ?? 'dev',
+    // `||`, not `??`: a CLI deploy sets VERCEL_GIT_COMMIT_SHA to an empty string.
+    version: env.VERCEL_GIT_COMMIT_SHA?.slice(0, 7) || env.HORAGON_VERSION || 'dev',
     log: pino({ level: env.LOG_LEVEL ?? 'info', base: { service: 'api' } }),
     now: () => Math.floor(Date.now() / 1000),
   }
