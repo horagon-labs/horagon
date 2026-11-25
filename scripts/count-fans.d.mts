@@ -9,7 +9,7 @@ export const GAME_MARKET_DISCRIMINATOR: Uint8Array
 /** 8 bytes. */
 export const SWAP_DISCRIMINATOR: Uint8Array
 export const BOT_MEMO: 'horagon:bot'
-export const WINDOW: { readonly first: '2026-11-23'; readonly last: '2026-12-04' }
+export const WINDOW: { readonly first: '2026-11-25'; readonly last: '2026-12-10' }
 export const BOT_RATE: { readonly swaps: 20; readonly seconds: 300 }
 export const DEFAULT_RPC: 'https://api.devnet.solana.com'
 

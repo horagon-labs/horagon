@@ -189,8 +189,10 @@ describe('main: the count', () => {
       '\nper ET night: wallets with a night touch, then night touches\n' +
         'night (ET)  human  bot  team  human touches  bot touches  team touches\n',
     )
-    expect(r.stdout).toMatch(/^2026-11-23 +0 +0 +0 +0 +0 +0$/m)
-    expect(r.stdout).toMatch(/^2026-12-04 +0 +0 +0 +0 +0 +0$/m)
+    expect(r.stdout).toMatch(/^2026-11-25 +0 +0 +0 +0 +0 +0$/m)
+    expect(r.stdout).toMatch(/^2026-12-10 +0 +0 +0 +0 +0 +0$/m)
+    expect(r.stdout).not.toMatch(/^2026-11-24 /m)
+    expect(r.stdout).not.toMatch(/^2026-12-11 /m)
     expect(r.stdout).toContain('\nexcluded markets: 0 listed in the wallets file, 0 on chain\n')
     expect(r.stdout.endsWith('\nelapsed: 0.0 s\n')).toBe(true)
     expect(r.stderr).toContain('count-fans: transactions 0/0\n')
@@ -349,14 +351,14 @@ describe('main: a swap whose market comes from a lookup table', () => {
   })
   const chain = seasonChain({
     markets: [
-      nba('n1', '401810401', '2026-11-24T00:00:00Z'), // night 2026-11-23
-      nba('n2', '401810402', '2026-11-26T00:00:00Z'), // night 2026-11-25
-      nba('n3', '401810403', '2026-11-29T00:00:00Z'), // night 2026-11-28
+      nba('n1', '401810401', '2026-11-26T00:00:00Z'), // night 2026-11-25
+      nba('n2', '401810402', '2026-11-28T00:00:00Z'), // night 2026-11-27
+      nba('n3', '401810403', '2026-12-01T00:00:00Z'), // night 2026-11-30
     ],
     swaps: [
-      ['fan', 'n1', '2026-11-24T01:00:00Z'],
-      ['fan', 'n2', '2026-11-26T01:00:00Z'],
-      ['fan', 'n3', '2026-11-29T01:00:00Z', { tx: 'lookup', lookup: true }],
+      ['fan', 'n1', '2026-11-26T01:00:00Z'],
+      ['fan', 'n2', '2026-11-28T01:00:00Z'],
+      ['fan', 'n3', '2026-12-01T01:00:00Z', { tx: 'lookup', lookup: true }],
     ],
   })
   const files = { 'w.json': JSON.stringify(EMPTY) }
