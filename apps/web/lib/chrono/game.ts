@@ -41,13 +41,17 @@ export function gameDial(
   const price = needlePrice(state, market, proposed)
   const secsLeft = secsToClose(market, now)
   const tip = Math.floor(Date.parse(game.scheduledTipoff) / 1000)
-  const timeLeft = market
-    ? timeLeftFraction(
-        startTs ?? tip - PRE_OPEN_SECS,
-        market.endTs,
-        effectiveTime(now, market.priceTs ?? 0),
-      )
-    : 1
+  // No time is left once trading stopped (R5c): a close at the final buzzer, before end_ts,
+  // leaves no ring that reads as time still to trade.
+  const timeLeft = !isTrading(state)
+    ? 0
+    : market
+      ? timeLeftFraction(
+          startTs ?? tip - PRE_OPEN_SECS,
+          market.endTs,
+          effectiveTime(now, market.priceTs ?? 0),
+        )
+      : 1
   const label = dialLabel({
     game,
     outcome: market?.outcome ?? null,

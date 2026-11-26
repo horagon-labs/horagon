@@ -2,6 +2,7 @@
 // Positions of the wallet (all, or one game's). The Claim all run is the wallet's
 // (WalletProvider): every copy of this list shows the same run, and one run at a time.
 import Link from 'next/link'
+import { positionStatus } from '../lib/chrono/copy'
 import { explorerTx, sideLabel, usdc } from '../lib/format'
 import { ErrorText } from './error-text'
 import { useWallet } from './wallet'
@@ -35,7 +36,8 @@ export function Positions({
                   {sideLabel(p.side, teams)} · {usdc(p.shares)} shares
                 </Link>
                 <p className="font-mono text-ash-400 tabular-nums">
-                  cost {usdc(p.costUsdc)} · value {usdc(p.valueUsdc)} · {p.marketStatus}
+                  cost {usdc(p.costUsdc)} · value {usdc(p.valueUsdc)} ·{' '}
+                  {positionStatus(p.marketStatus)}
                 </p>
               </div>
               <span

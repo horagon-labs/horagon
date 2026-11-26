@@ -167,8 +167,11 @@ describe('dial words', () => {
     expect(stateLine('challenged', live, 0, NOW)).toBe('Result under review')
     expect(stateLine('halted', live, 900, NOW)).toBe('Trading halted')
     expect(stateLine('void', game({ status: 'postponed' }), null, NOW)).toBe('Postponed')
-    expect(stateLine('pre', live, null, NOW)).toBe('Opens 60 min before tip-off')
     const later = game({ status: 'scheduled', scheduledTipoff: '2026-11-25T03:30:00Z' })
+    expect(stateLine('pre', later, null, NOW)).toBe('Opens 60 min before tip-off')
+    // A game that started with no market will not get one (R5c, review finding 5).
+    expect(stateLine('pre', live, null, NOW)).toBe('No market for this game')
+    expect(stateLine('pre', game({ status: 'final' }), null, NOW)).toBe('No market for this game')
     expect(stateLine('pre', later, 9000, NOW)).toBe('tip-off in 1:22:00')
     expect(stateLine('pre', later, 9000, at('2026-11-25T03:31:00Z'))).toBe('tip-off soon')
   })

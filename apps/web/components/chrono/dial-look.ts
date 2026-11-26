@@ -1,5 +1,6 @@
 // How each DialState colors a dial (spec 4.3): the time ring, and the face's rim.
 import type { Game, GameHistory } from '@horagon/sdk'
+import { NO_MARKET, started } from '../../lib/chrono/copy'
 import type { Run } from '../../lib/chrono/runs'
 import type { DialState } from '../../lib/chrono/state'
 import { cents, countdown, gameClock } from '../../lib/format'
@@ -87,7 +88,8 @@ export function stateLine(
     case 'live':
       return 'Open until the final buzzer'
     case 'pre': {
-      if (secsLeft === null) return 'Opens 60 min before tip-off'
+      // No market: one opens 60 min before tip-off, so a game already started will not get one.
+      if (secsLeft === null) return started(game) ? NO_MARKET : 'Opens 60 min before tip-off'
       const tip = Math.floor(Date.parse(game.scheduledTipoff) / 1000)
       return tip > nowSecs ? `tip-off in ${countdown(tip, nowSecs)}` : 'tip-off soon'
     }

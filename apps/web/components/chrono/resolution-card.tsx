@@ -2,7 +2,7 @@
 // and the market account. The status line comes from the dial's state (R5), so it never says
 // "open" next to a dial that says trading closed.
 import type { GameDetail } from '@horagon/sdk'
-import { resolutionStatus } from '../../lib/chrono/copy'
+import { haltLinkLabel, resolutionStatus } from '../../lib/chrono/copy'
 import { milestones } from '../../lib/chrono/resolution'
 import type { DialState } from '../../lib/chrono/state'
 import { explorerAddress, explorerTx } from '../../lib/format'
@@ -88,7 +88,7 @@ export function ResolutionCard({ game, state }: { game: GameDetail; state: DialS
             rel="noreferrer"
             className="inline-flex min-h-11 items-center underline"
           >
-            Halted
+            {haltLinkLabel(game)}
           </a>
         )}
       </p>

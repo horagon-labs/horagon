@@ -11,9 +11,9 @@ import { useState } from 'react'
 import { buySteps, percentOf, sellSteps, stepIndex } from '../../lib/chrono/bezel'
 import { dialCaption } from '../../lib/chrono/copy'
 import { errorEffect, requoteShown, retryLeft } from '../../lib/chrono/errors'
-import type { DialState } from '../../lib/chrono/state'
-import { cents, explorerTx, percent, usdc } from '../../lib/format'
-import { DEFAULT_SLIPPAGE_BPS } from '../../lib/trade'
+import { crownLabel, type DialState } from '../../lib/chrono/state'
+import { cents, explorerTx, usdc } from '../../lib/format'
+import { DEFAULT_SLIPPAGE_BPS } from '../../lib/trade-shared'
 import { sendDisabled, sendText } from '../../lib/trade-view'
 import type { Trade } from '../../lib/use-trade'
 import { FAUCET_BUTTON, WALLET_LOADING } from '../../lib/wallet-copy'
@@ -67,7 +67,6 @@ export function CrownPanel(p: CrownPanelProps) {
   const ghost = q && t.check.quote ? q.priceAfter : null
   const spendable = t.balance ? parseAmount(t.balance) > 0n : false
   const tone = t.side === 'home' ? 'lume' : 'brass'
-  const now = p.market.price === null ? 'no price yet' : percent(p.market.price)
   const chip =
     'min-h-11 flex-1 rounded-card border border-line font-mono text-13 aria-pressed:border-lume-300 aria-pressed:text-lume-300 disabled:opacity-40'
   return (
@@ -115,7 +114,13 @@ export function CrownPanel(p: CrownPanelProps) {
           ghostShake={requote}
           stale={p.stale}
           detail={buying ? `${t.amount} mUSDC` : `${t.amount} shares`}
-          label={`${p.game.home} to win, ${now}${ghost === null ? '' : `, after this trade ${percent(ghost)}`}`}
+          label={crownLabel({
+            state: p.state,
+            game: p.game,
+            outcome: p.market.outcome,
+            price: p.market.price,
+            ghost,
+          })}
         />
       </Bezel>
       {q && t.check.quote && (
@@ -270,7 +275,11 @@ export function CrownPanel(p: CrownPanelProps) {
         </p>
       )}
       {/* A RATE_LIMITED wait counts down on the HoldButton: the line leaves the seconds to it. */}
-      <ErrorText error={t.shownError} countdown={effect === 'countdown'} />
+      <ErrorText
+        error={t.shownError}
+        countdown={effect === 'countdown'}
+        gameFinal={p.game.status === 'final'}
+      />
     </div>
   )
 }

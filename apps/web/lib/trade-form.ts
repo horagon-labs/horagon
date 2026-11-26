@@ -10,7 +10,7 @@ export interface TradeFormInput {
   /** Shares held on the chosen side; undefined for none. */
   shares: string | undefined
   marketStatus: MarketStatus
-  /** The game's status: a halt under a final game is the close at the final buzzer (R1). */
+  /** The game's status: a final game trades no more, halted or not yet (R1, R5c). */
   gameStatus?: GameStatus
   endTs: number
   nowSecs: number
@@ -27,10 +27,12 @@ export interface TradeCheck {
 
 const AMOUNT = /^(0|[1-9]\d{0,11})(\.\d{1,6})?$/
 
+/** Why nothing trades once the game is final, open market or halted (R1, R5c). */
+export const BUZZER_CLOSED = 'Trading closed at the final buzzer.'
+
 export function checkTrade(i: TradeFormInput): TradeCheck {
-  if (i.marketStatus === 'halted' && i.gameStatus === 'final') {
-    return { ok: false, quote: false, reason: 'Trading closed at the final buzzer.' }
-  }
+  // The final buzzer closes trading, also before the keeper's halt reaches the index (R5c).
+  if (i.gameStatus === 'final') return { ok: false, quote: false, reason: BUZZER_CLOSED }
   if (i.marketStatus === 'halted') {
     return { ok: false, quote: false, reason: 'Trading is halted while the result is checked.' }
   }

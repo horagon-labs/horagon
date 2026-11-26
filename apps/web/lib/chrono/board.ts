@@ -9,7 +9,7 @@ import {
   parseAmount,
 } from '@horagon/sdk'
 import { isTonight, percent, usdc } from '../format'
-import { rowSubject } from './copy'
+import { rowSubject, started } from './copy'
 import { timeLeftFraction } from './geometry'
 import {
   type DialState,
@@ -61,10 +61,13 @@ export function boardItem(
     market,
     state,
     price: needlePrice(state, market),
-    // MarketSummary has no startTs: tip-off - 60 min stands in for it (spec 4.1).
-    timeLeft: market
-      ? timeLeftFraction(interval.start, market.endTs, effectiveTime(now, market.priceTs ?? 0))
-      : 1,
+    // MarketSummary has no startTs: tip-off - 60 min stands in for it (spec 4.1). Once trading
+    // stopped no time is left (R5c): a close at the final buzzer leaves no ring up to end_ts.
+    timeLeft: !isTrading(state)
+      ? 0
+      : market
+        ? timeLeftFraction(interval.start, market.endTs, effectiveTime(now, market.priceTs ?? 0))
+        : 1,
     secsLeft: secsToClose(market, now),
     held: holds(portfolio, game.id),
     interval,
@@ -111,13 +114,14 @@ export function yourHour(
  * in percent, and the close. "MEM to win · 62% · latest 10:40 PM ET" while it trades (it closes
  * at the final buzzer, end_ts at the latest, R1); once the final buzzer went, "CHA lost · 74% ·
  * result pending"; after the result, "Resolved: MEM won" with no number. A market that stopped
- * names no time.
+ * names no time. A game that started with no market says so (R5c), never a past opening time.
  */
 export function rowWords(i: BoardItem): { subject: string; value: string; note: string } {
   const subject = rowSubject(i.state, i.game, i.market?.outcome ?? null)
   if (i.state === 'resolved') return { subject, value: '', note: 'result final' }
   if (i.state === 'void') return { subject, value: '', note: '' }
   const value = i.price === null ? '—' : percent(i.price)
+  if (!i.market && started(i.game)) return { subject, value, note: 'no market' }
   const pending = i.game.status === 'final' || i.state === 'proposed' || i.state === 'challenged'
   if (pending) return { subject, value, note: 'result pending' }
   if (!i.market) return { subject, value, note: `opens ${etClock(i.interval.start)}` }

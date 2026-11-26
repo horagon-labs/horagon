@@ -2,7 +2,7 @@
 // home side's chance to win: it reads "MEM to win · 62%", never a bare "62¢". Once the game is
 // over the words follow the scoreboard, then the result on-chain: "Final · CHA lost · result
 // pending", then "Resolved: MEM won". A losing side is never shown as "wins".
-import type { Game, Outcome } from '@horagon/sdk'
+import type { Game, MarketStatus, Outcome } from '@horagon/sdk'
 import { percent } from '../format'
 import type { DialState } from './state'
 
@@ -38,9 +38,22 @@ function resolvedWords(g: VerdictGame, homeWon: boolean): string {
   return `Resolved: ${homeWon ? g.home : g.away} won`
 }
 
+/** "Final · CHA lost", or "Final" while the scoreboard names no winner. */
+export function finalWords(g: VerdictGame, homeWon: boolean | null): string {
+  return homeWon === null ? 'Final' : `Final · ${g.home} ${homeWon ? 'won' : 'lost'}`
+}
+
+/** The keeper never opened a market for a game that has started (R5c, review finding 5). */
+export const NO_MARKET = 'No market for this game'
+
+/** The game is on the court or over: a missing market will not open any more. */
+export const started = (g: Pick<Game, 'status'>): boolean => g.status !== 'scheduled'
+
 /**
  * The line under the dial's number: "MEM to win", "Final · CHA lost · result pending",
  * "Resolved: MEM won", or nothing for a void game (its own line says postponed or canceled).
+ * A final game with no market (`pre`, the only state a final game without one has) has no result
+ * to wait for: "Final · CHA lost".
  */
 export function dialCaption(state: DialState, g: VerdictGame, outcome: Outcome | null): string {
   const v = verdict(state, g, outcome)
@@ -48,15 +61,27 @@ export function dialCaption(state: DialState, g: VerdictGame, outcome: Outcome |
     case 'resolved':
       return resolvedWords(g, v.homeWon)
     case 'final':
-      return v.homeWon === null
-        ? 'Final · result pending'
-        : `Final · ${g.home} ${v.homeWon ? 'won' : 'lost'} · result pending`
+      return state === 'pre'
+        ? finalWords(g, v.homeWon)
+        : `${finalWords(g, v.homeWon)} · result pending`
     case 'void':
       return ''
     case 'to-win':
       return `${g.home} to win`
   }
 }
+
+/**
+ * A position's market status in the wallet sheet (R5c, review finding 2): the keeper's halt is
+ * the normal close at the final buzzer, so `halted` reads "trading closed". A Position carries no
+ * game status to tell that from a halt mid-game; the game page says which one it was.
+ */
+export const positionStatus = (status: MarketStatus): string =>
+  status === 'halted' ? 'trading closed' : status
+
+/** The ResolutionCard's link to the halt transaction: at the final buzzer it is the close. */
+export const haltLinkLabel = (g: Pick<Game, 'status'>): string =>
+  g.status === 'final' ? 'Closed' : 'Halted'
 
 /** The short subject over a row's number: "MEM to win", "CHA lost", "Resolved: MEM won". */
 export function rowSubject(state: DialState, g: VerdictGame, outcome: Outcome | null): string {
