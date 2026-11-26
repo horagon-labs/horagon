@@ -167,15 +167,23 @@ const tipOf = (g: Pick<Game, 'scheduledTipoff'>): number =>
  * can say when the next ones are (R5). Null when `games` holds none.
  */
 export function upcomingOf(games: readonly Game[], nowSecs: number): Upcoming | null {
-  const later = games
-    .filter((g) => g.status === 'scheduled' && !isTonight(g, nowSecs * 1000))
+  return aheadOf(
+    games.filter((g) => !isTonight(g, nowSecs * 1000)),
+    nowSecs,
+  )
+}
+
+/** The first scheduled tip-off still ahead in `games`, and how many games share its ET date. */
+function aheadOf(games: readonly Game[], now: number): Upcoming | null {
+  const tips = games
+    .filter((g) => g.status === 'scheduled')
     .map(tipOf)
-    .filter((t) => t > nowSecs)
+    .filter((t) => t > now)
     .sort((a, b) => a - b)
-  const first = later[0]
+  const first = tips[0]
   if (first === undefined) return null
   const day = etDay(first)
-  return { tip: first, count: later.filter((t) => etDay(t) === day).length }
+  return { tip: first, count: tips.filter((t) => etDay(t) === day).length }
 }
 
 /** "Next games: Fri, Nov 27 · 4 games from 7:00 PM ET". */
@@ -205,19 +213,6 @@ export function nextLabel(tip: number): string {
 /** The game is on the court, or tips off on the ET night `night` (etNight, 06:00 rollover). */
 const ofNight = (g: Game, night: string): boolean =>
   g.status === 'live' || etDay(tipOf(g)) === night
-
-/** The first scheduled games still ahead in `games`, the 24 h window included. */
-function firstAhead(games: readonly Game[], now: number): Upcoming | null {
-  const tips = games
-    .filter((g) => g.status === 'scheduled')
-    .map(tipOf)
-    .filter((t) => t > now)
-    .sort((a, b) => a - b)
-  const first = tips[0]
-  if (first === undefined) return null
-  const day = etDay(first)
-  return { tip: first, count: tips.filter((t) => etDay(t) === day).length }
-}
 
 const REST = 'The dial rests tonight.'
 
@@ -254,17 +249,8 @@ export function calendarLink(next: Upcoming): { href: string; label: string } {
 export function nightOver(games: readonly Game[], now: number): boolean {
   if (games.some((g) => g.status === 'live')) return false
   const night = etNight(now)
-  const ofNight = games.filter((g) => etDay(tipOf(g)) === night)
-  return ofNight.length > 0 && ofNight.every((g) => !boardItem(g, undefined, now).trading)
-}
-
-/** The first scheduled tip-off still ahead in `games`, if any. */
-function nextTip(games: readonly Game[], now: number): number | null {
-  const tips = games
-    .filter((g) => g.status === 'scheduled')
-    .map(tipOf)
-    .filter((t) => t > now)
-  return tips.length > 0 ? Math.min(...tips) : null
+  const nightGames = games.filter((g) => etDay(tipOf(g)) === night)
+  return nightGames.length > 0 && nightGames.every((g) => !boardItem(g, undefined, now).trading)
 }
 
 export interface BoardModel {
@@ -340,7 +326,7 @@ export function boardModel(
   // games all stopped is over, not at rest, even once they left the 4 h window.
   const night = etNight(now)
   const resting = !games.some((g) => ofNight(g, night)) && !over
-  const restNext = resting ? (firstAhead(games, now) ?? ahead) : null
+  const restNext = resting ? (aheadOf(games, now) ?? ahead) : null
   // Every listed game is of a later night: head the list with that night's date, not tonight's.
   const firstListed = Math.min(...tonight.map(tipOf))
   const laterOnly = tonight.length > 0 && !tonight.some((g) => ofNight(g, night))
@@ -352,7 +338,7 @@ export function boardModel(
     label: laterOnly ? nextLabel(firstListed) : label,
     rest: resting ? restLine(restNext, now) : null,
     calendar: restNext ? calendarLink(restNext) : null,
-    stopped: over ? stoppedLine(nextTip(games, now) ?? ahead?.tip ?? null, now) : null,
+    stopped: over ? stoppedLine(aheadOf(games, now)?.tip ?? ahead?.tip ?? null, now) : null,
   }
   if (items.length > 0) return { ...base, empty: null, filtered: false, next: null }
   if (follows.length > 0) {
