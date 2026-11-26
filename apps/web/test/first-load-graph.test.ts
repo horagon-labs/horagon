@@ -26,8 +26,8 @@ const SDK_ENTRIES: Record<string, string> = Object.fromEntries(
   ]),
 )
 
-const ENTRIES = ['app/layout.tsx', 'app/page.tsx', 'app/game/[id]/page.tsx'].map((f) =>
-  join(WEB, f),
+const ENTRIES = ['app/layout.tsx', 'app/page.tsx', 'app/game/[id]/page.tsx', 'app/me/page.tsx'].map(
+  (f) => join(WEB, f),
 )
 
 interface Parsed {
@@ -143,7 +143,12 @@ describe('the first load of / and /game/[id] has no web3.js (R5c)', () => {
     expect(resolveLocal(from, '@horagon/no-such-package')).toBeNull()
     // SDK_ENTRIES (from tsup.config.ts) has every entry, each a real export of the SDK.
     expect(Object.keys(SDK_ENTRIES)).toEqual(
-      expect.arrayContaining(['@horagon/sdk', '@horagon/sdk/client', '@horagon/sdk/notice']),
+      expect.arrayContaining([
+        '@horagon/sdk',
+        '@horagon/sdk/client',
+        '@horagon/sdk/notice',
+        '@horagon/sdk/et',
+      ]),
     )
     for (const spec of Object.keys(SDK_ENTRIES)) {
       expect(workspaceExport(spec), spec).toMatch(/dist[\\/][\w-]+\.js$/)

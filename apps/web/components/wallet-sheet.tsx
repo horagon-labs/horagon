@@ -2,17 +2,12 @@
 // The play wallet sheet's body (R5): test funds, positions, motion settings, Export and Import.
 // Loaded on the first open (components/wallet-button.tsx), so it is not part of a page's first
 // load. Closing the sheet unmounts it, which also hides a shown secret key again.
-import { useEffect, useRef, useState } from 'react'
-import {
-  FAUCET_BUTTON,
-  importErrorText,
-  readyHint,
-  replacePrompt,
-  WALLET_PREPARING,
-} from '../lib/wallet-copy'
-import { AgeCheckbox } from './age-dialog'
+import Link from 'next/link'
+import { useEffect, useRef } from 'react'
+import { FAUCET_BUTTON, readyHint, WALLET_PREPARING } from '../lib/wallet-copy'
 import { FeelToggles } from './chrono/feel-toggles'
 import { ErrorText } from './error-text'
+import { KeyBackup } from './key-backup'
 import { Positions } from './positions'
 import { useWallet } from './wallet'
 
@@ -24,49 +19,24 @@ export default function WalletSheet(p: {
   const {
     address,
     ephemeral,
-    ageNeeded,
     walletsCreated,
     portfolio,
     requestFaucet,
     funding,
     fundNote,
     fundError,
-    exportKey,
-    importKey,
     preparing,
   } = useWallet()
-  const [shown, setShown] = useState<string>()
-  const [importText, setImportText] = useState('')
-  const [importAge, setImportAge] = useState(false)
-  const [importError, setImportError] = useState<string>()
-  const [importing, setImporting] = useState(false)
-  const [note, setNote] = useState<string>()
   const positions = useRef<HTMLElement>(null)
 
   useEffect(() => {
     if (p.atPositions) positions.current?.scrollIntoView({ block: 'start' })
   }, [p.atPositions])
 
-  async function onImport() {
-    if (!window.confirm(replacePrompt(ephemeral))) return
-    setImportError(undefined)
-    setImporting(true)
-    try {
-      // The key code loads with the first import (R5c), so this waits for it, and says so.
-      if (!(await importKey(importText, importAge))) return
-      setImportText('')
-      setImportAge(false)
-      setShown(undefined)
-      setNote('Wallet imported.')
-    } catch (err) {
-      // The key's own problem in words; a load that failed never calls the key bad.
-      setImportError(importErrorText(err))
-    } finally {
-      setImporting(false)
-    }
-  }
-
   const balance = portfolio?.usdcBalance
+  // My Game-day is linked only while the API sends the nights (FLAG_ME on), so a site with the
+  // flag off never links a page that says it is switched off.
+  const meOn = portfolio?.wallet === address && portfolio?.nights !== undefined
   // The faucet hint for a wallet created in this tab, until it holds mUSDC.
   const hint = readyHint(walletsCreated > 0, portfolio?.wallet === address ? balance : undefined)
 
@@ -99,54 +69,23 @@ export default function WalletSheet(p: {
       >
         {funding ? 'Requesting…' : preparing ? WALLET_PREPARING : FAUCET_BUTTON}
       </button>
-      {note && <p className="text-13 text-lume-300">{note}</p>}
       {fundNote && <p className="text-13 text-lume-300">{fundNote}</p>}
       <ErrorText error={fundError} />
+      {meOn && (
+        <Link
+          href="/me"
+          onClick={p.onClose}
+          className="inline-flex min-h-11 items-center text-13 font-semibold text-lume-300 underline-offset-4 hover:underline"
+        >
+          My Game-day
+        </Link>
+      )}
       <section ref={positions} className="scroll-mt-4">
         <h3 className="mb-1 text-13 font-semibold">Positions</h3>
         <Positions />
       </section>
       <FeelToggles />
-      <details>
-        <summary className="min-h-11 cursor-pointer text-13 font-semibold">Export / Import</summary>
-        <div className="mt-2 space-y-2 text-13">
-          <p className="text-ash-400">
-            The secret key controls this wallet. Anyone with it can trade as you.
-          </p>
-          {shown ? (
-            <p className="break-all rounded bg-enamel-800 p-2 font-mono text-12">{shown}</p>
-          ) : (
-            <button
-              type="button"
-              className="inline-flex min-h-11 items-center underline"
-              onClick={() => setShown(exportKey())}
-            >
-              Show secret key
-            </button>
-          )}
-          <textarea
-            value={importText}
-            onChange={(e) => setImportText(e.target.value)}
-            placeholder="Paste a base58 secret key or a JSON byte array"
-            aria-label="Secret key to import"
-            className="h-20 w-full rounded border border-line bg-transparent p-2 font-mono text-12"
-          />
-          {ageNeeded && <AgeCheckbox checked={importAge} onChange={setImportAge} />}
-          <button
-            type="button"
-            disabled={importing || !importText.trim() || (ageNeeded && !importAge)}
-            onClick={() => void onImport()}
-            className="inline-flex min-h-11 items-center underline disabled:opacity-50"
-          >
-            {importing ? 'Importing…' : 'Import'}
-          </button>
-          {importError && (
-            <p role="alert" className="text-red-400">
-              {importError}
-            </p>
-          )}
-        </div>
-      </details>
+      <KeyBackup open={false} />
     </div>
   )
 }
