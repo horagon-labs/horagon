@@ -61,7 +61,7 @@ let current: FeedGame
 let alerts: Array<[string, string]>
 let logs: LogLine[]
 /** balldontlie's answer for 2026-11-18, and every date it was asked for. */
-let bdl: { status: string; home: number; away: number } | 'none' | 'down'
+let bdl: { status: string; home: number; away: number } | 'none' | 'down' | 'refused'
 let bdlAsked: string[]
 
 const final: FeedGame = {
@@ -96,6 +96,7 @@ const fakeFetch = (async (input: URL) => {
   const date = input.searchParams.get('dates[]') ?? ''
   bdlAsked.push(date)
   if (bdl === 'down') return new Response('', { status: 503 })
+  if (bdl === 'refused') return new Response('', { status: 401 })
   const games =
     bdl === 'none' || date !== '2026-11-18'
       ? []
@@ -366,6 +367,23 @@ describe('the keeper proposes, checks and pages', () => {
     bdl = { status: 'Final', home: 111, away: 106 }
     expect(await at(k, END + 1_860)).toEqual(['propose'])
     expect(chain.sends).toEqual([`propose ${ID}`])
+  })
+
+  it('pages a guardian when balldontlie refuses the key, without the key', async () => {
+    bdl = 'refused'
+    const k = keeperWith()
+    await drafted(k)
+    expect(await at(k, END - 840)).toEqual([])
+    expect(alerts.at(-1)).toEqual([
+      'second-source-refused',
+      'balldontlie refused BALLDONTLIE_API_KEY (HTTP 401): it checks no result until the key in .env.keeper is fixed and the keeper restarted, so every proposal pages CHECK',
+    ])
+    expect(JSON.stringify([alerts, logs])).not.toContain(BDL_KEY)
+    // A failure that is not a refusal pages nothing.
+    bdl = 'down'
+    alerts = []
+    expect(await at(k, END - 780)).toEqual([])
+    expect(alerts).toEqual([])
   })
 
   it('keeps holding when balldontlie stops reporting the game, and after a restart', async () => {

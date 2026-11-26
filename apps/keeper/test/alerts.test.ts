@@ -45,6 +45,7 @@ describe('personAlertWindow', () => {
       'index-failing',
       'evidence-mismatch:nba-1',
       'source-held:nba-1',
+      'second-source-refused',
     ]) {
       expect(personAlertWindow(key), key).toBe(PERSON_ALERT_SECS)
     }

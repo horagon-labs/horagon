@@ -681,14 +681,19 @@ export class Keeper {
         got = await client.games(date, now)
       } catch (err) {
         // BdlError messages carry the HTTP status only, never the key.
+        const status = err instanceof BdlError ? err.status : null
         this.d.log.warn(
-          {
-            date,
-            status: err instanceof BdlError ? err.status : null,
-            error: errorSummary(err).message,
-          },
+          { date, status, error: errorSummary(err).message },
           'second source read failed',
         )
+        // A refused key fails every check until a person fixes it: a CHECK page would only say
+        // balldontlie had no final score.
+        if (status === 401 || status === 403) {
+          await this.d.alerts.send(
+            'second-source-refused',
+            `balldontlie refused BALLDONTLIE_API_KEY (HTTP ${status}): it checks no result until the key in .env.keeper is fixed and the keeper restarted, so every proposal pages CHECK`,
+          )
+        }
         continue
       }
       if (!got) continue
