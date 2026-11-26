@@ -1,0 +1,56 @@
+{
+  "version": 1,
+  "teamWallets": [
+    {
+      "pubkey": "D6CYaG4YPm52oetuEy5yzXPSWsFv7yCWp2YAHeaodviR",
+      "role": "deployer",
+      "addedAt": "2026-11-26"
+    },
+    {
+      "pubkey": "H6kzKfTP6Dq8YQmcGeL2tbNKmRSiXSpB3vpB1cyJ5jgx",
+      "role": "attestor",
+      "addedAt": "2026-11-26"
+    },
+    {
+      "pubkey": "4fPyTjxT2haHHg28M4JRqBjVj4n3dTeEKptgFAz7mY9h",
+      "role": "guardian-1",
+      "addedAt": "2026-11-26"
+    },
+    {
+      "pubkey": "AmqWjy4iVqK5RKF97YXawW7ZbGJo1U63bWF6Mo9vi9iQ",
+      "role": "guardian-2",
+      "addedAt": "2026-11-26"
+    },
+    {
+      "pubkey": "32tQ3JDbnnQSqs51BDNzgcy82dW7AKK2EMKDo9ACBnrc",
+      "role": "sponsor",
+      "addedAt": "2026-11-26"
+    },
+    {
+      "pubkey": "J8npAeSbcmjiYpjQGkw4oLreJFGKRaMCVbMkCRdXi93G",
+      "role": "treasury",
+      "addedAt": "2026-11-26"
+    },
+    {
+      "pubkey": "BpVRxrimzWvLcYr5tPDReybKKLJdgiJXXRRCZhn3f3dc",
+      "role": "spike",
+      "addedAt": "2026-11-26"
+    },
+    {
+      "pubkey": "BqwvXe6H4ZgCgg6D2dSDVFkCrN79X8C6ZC6RDXB5soo",
+      "role": "spike",
+      "addedAt": "2026-11-26"
+    },
+    {
+      "pubkey": "9qbjWVkoA4Z9SSieAcBnzG8K4zj8F3M955w7spAjK2XW",
+      "role": "spike",
+      "addedAt": "2026-11-26"
+    },
+    {
+      "pubkey": "9v2ZmruntFtM4HmUFNq3Nn3rpXhV3uh8FmyRWafVbcHN",
+      "role": "team-burner",
+      "addedAt": "2026-11-26"
+    }
+  ],
+  "excludedMarkets": []
+}
