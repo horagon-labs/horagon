@@ -327,10 +327,15 @@ The database holds ten flags, and every flag starts off: `FLAG_ME`, `FLAG_METRIC
 (`application/problem+json`) while its flag is off, POST routes too, and the API reads the flags
 on every request, so a change applies at once, with no deploy and no restart.
 
-At this commit no route or page reads any flag, so `horagon-ops flag on` and `flag off` change
-nothing a player sees. In particular the Share button and the per-game OG card are not behind a
-flag: if the OG route misbehaves on a night, the switch is a deploy (or a rollback of the web),
-not a flag. A feature that ships with a guard documents its flag here.
+At this commit one flag is read. `FLAG_ME` guards My Game-day: `GET /api/v1/me/{wallet}`
+answers 404 while it is off, and `GET /api/v1/positions/{wallet}` carries the nights field only
+while it is on. The header's night chip and the wallet sheet's "My Game-day" link show only when
+that field is there, so with the flag off no page links `/me`, and `/me` itself says "My
+Game-day is switched off right now." Turning it on is a controller step after the deploy. No
+other route or page reads a flag, so the other nine change nothing a player sees. In particular
+the Share button and the per-game OG card are not behind a flag: if the OG route misbehaves on a
+night, the switch is a deploy (or a rollback of the web), not a flag. A feature that ships with a
+guard documents its flag here.
 
 The command, for a flag that a route does read:
 
