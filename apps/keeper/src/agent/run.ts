@@ -3,9 +3,11 @@
 // anything else. Otherwise: the config, then the disclosure check (its wallet must be a
 // team-burner entry of docs/metrics-wallets.json, or it alerts, logs and returns 0, dry run or
 // not), every RPC's cluster verified (never mainnet), the keeper's database, a TxSender whose
-// payer and only signer is the agent keypair, and one round every AGENT_INTERVAL_SECS until the
-// stop signal. A round fails on its own and is retried on the next; a process silent for
-// KEEPER_STALL_SECS exits so systemd restarts it.
+// payer and only signer is the agent keypair, the markets an unplanned exit left disabled, and one
+// round every AGENT_INTERVAL_SECS until the stop signal, which also ends the round in progress
+// before its next send. A round fails on its own and is retried on the next; a process silent for
+// KEEPER_STALL_SECS exits so systemd restarts it. A clean stop writes a last heartbeat that says
+// so.
 import type { DbHandle } from '@horagon/db'
 import { errorSummary } from '@horagon/sdk'
 import type { Connection } from '@solana/web3.js'
@@ -30,7 +32,10 @@ export interface Connected {
 }
 
 export interface RunOptions {
-  /** Stops the loop after the round in progress (SIGTERM in agent-main.ts). */
+  /**
+   * Stops the loop (SIGTERM in agent-main.ts): the round in progress sends nothing new and ends,
+   * and no round follows.
+   */
   signal?: AbortSignal
   /** Replaces the log (tests). */
   log?: Logger
@@ -46,6 +51,10 @@ export interface RunOptions {
   /** Stops after this many rounds (tests). */
   maxRounds?: number
   repoDir?: string
+  /** Milliseconds: the clock of the stall guard and of the round timing (tests). */
+  nowMs?: () => number
+  /** Replaces the wait between rounds (tests). */
+  sleep?: (ms: number, signal?: AbortSignal) => Promise<void>
 }
 
 /** Telegram when it is configured, else the log; every message starts `[<cluster>] [agent]`. */
@@ -137,7 +146,9 @@ export async function runAgent(
     return 0
   }
   const cfg = loadAgentConfig(env, opts.repoDir ? { repoDir: opts.repoDir } : {})
-  const guard = new StallGuard(cfg.stallSecs)
+  const nowMs = opts.nowMs ?? Date.now
+  const wait = opts.sleep ?? sleep
+  const guard = new StallGuard(cfg.stallSecs, nowMs)
   const log = opts.log ?? createLogger(cfg.logLevel, 'agent', undefined, () => guard.touch())
   const alerts = opts.alerts ?? agentAlerter(cfg, log)
   // The disclosure comes first: no RPC, no database and no send (dry run included) from a
@@ -157,20 +168,23 @@ export async function runAgent(
   try {
     const { deps, close } = await (opts.connect ?? connectAgent)(cfg, log, guard, alerts)
     const agent = new ReferenceAgent(deps)
+    // A crash or a stall exit, restarted by systemd, does not trade again what it had disabled.
+    await agent.resume()
     log.info(
       { wallet: cfg.agent.publicKey.toBase58(), dryRun: cfg.dryRun, cluster: cfg.cluster },
       'agent started',
     )
     let rounds = 0
     while (!opts.signal?.aborted) {
-      const started = Date.now()
-      const res = await runStep(log, 'agent', () => agent.round(), guard)
+      const started = nowMs()
+      const res = await runStep(log, 'agent', () => agent.round(opts.signal), guard)
       if (!res.ok) log.warn({ error: errorSummary(res.error).message }, 'agent round failed')
       rounds++
       if (opts.maxRounds !== undefined && rounds >= opts.maxRounds) break
       guard.touch()
-      await sleep(Math.max(0, cfg.params.intervalSecs * 1000 - (Date.now() - started)), opts.signal)
+      await wait(Math.max(0, cfg.params.intervalSecs * 1000 - (nowMs() - started)), opts.signal)
     }
+    await agent.stop()
     await close()
     log.info({ rounds }, 'agent stopped')
     return 0

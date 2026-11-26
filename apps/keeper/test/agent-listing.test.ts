@@ -55,6 +55,18 @@ describe('teamBurnerListing', () => {
       listed: false,
       reason: 'not in teamWallets',
     })
+    // An entry with no role (or an empty or non-text one) says so.
+    for (const entry of [
+      { pubkey: agent },
+      { pubkey: agent, role: '' },
+      { pubkey: agent, role: 7 },
+    ]) {
+      const path = await file(wallets([entry]))
+      expect(teamBurnerListing(agent, path), JSON.stringify(entry)).toEqual({
+        listed: false,
+        reason: 'listed without a role, not team-burner',
+      })
+    }
   })
 
   it('treats a missing, unreadable or malformed file as not listed', async () => {

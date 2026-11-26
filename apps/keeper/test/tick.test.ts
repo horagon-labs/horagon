@@ -369,9 +369,13 @@ describe('a challenge', () => {
   /** The guardian proposes the pending draft; ops marks the draft proposed. */
   const propose = () => setDraftState(h.db, ID, { state: 'proposed' })
 
-  /** Round one: propose, a challenge before the next tick, then the keeper's redraft. */
+  /**
+   * Round one: propose at end_ts (the program takes no proposal before it), a challenge before
+   * the next tick, then the keeper's redraft.
+   */
   async function firstChallenge(): Promise<void> {
     await toDraft()
+    now = END
     await propose()
     await updateMarket(h.db, program.addresses(marketId).market.toBase58(), { status: 'proposed' })
     settled = {
@@ -500,7 +504,8 @@ describe('a challenge', () => {
 
   it('reminds about a redraft under a key of its own round', async () => {
     await firstChallenge()
-    // The redraft came before end_ts: its 30 min count from end_ts, when proposing opens.
+    // The redraft is of the Final first read at END - 900 (its fetchedAt), before end_ts: its
+    // 30 min count from end_ts, when proposing opened.
     now = END + DEFAULT_TIMINGS.missingSourceSecs - 1
     expect(await keeper.tick()).toEqual([])
     now += 1

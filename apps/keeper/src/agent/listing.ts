@@ -41,8 +41,9 @@ export function teamBurnerListing(pubkey: string, path: string): Listing {
   const mine = wallets.teamWallets.map(entryOf).filter((w) => w.pubkey === pubkey)
   if (mine.some((w) => w.role === AGENT_ROLE)) return { listed: true }
   if (mine.length > 0) {
-    const roles = mine.map((w) => String(w.role)).join(', ')
-    return { listed: false, reason: `listed with role ${roles}, not ${AGENT_ROLE}` }
+    const roles = mine.flatMap((w) => (typeof w.role === 'string' && w.role ? [w.role] : []))
+    const what = roles.length > 0 ? `with role ${roles.join(', ')}` : 'without a role'
+    return { listed: false, reason: `listed ${what}, not ${AGENT_ROLE}` }
   }
   return { listed: false, reason: 'not in teamWallets' }
 }

@@ -33,11 +33,12 @@ export interface SentSwap {
 }
 
 /**
- * After a landed swap, the next read of that market must show the gap the swap was sized to
- * close no larger, on the same side. The gap is measured against the model the swap was sized
- * on: a model that moved with the game in the meantime is not the agent's doing. A gap that grew
- * means the price moved away from the model after the agent pushed it toward it (a wrong side,
- * a swap that did something else, a trade against it): the market is disabled until restart.
+ * After a swap that landed (or may have), the next read of that market must show the gap it was
+ * sized to close no larger, on the same side. The gap is measured against the model the swap was
+ * sized on: a model that moved with the game in the meantime is not the agent's doing. A gap that
+ * grew means the price moved away from the model after the agent pushed it toward it (a wrong
+ * side, a swap that did something else, a trade against it): the market is disabled until a
+ * restart by hand (agent.ts `resume` keeps it disabled across a crash or a stall exit).
  */
 export class AnomalyWatch {
   private readonly pending = new Map<string, SentSwap>()
@@ -72,6 +73,11 @@ export class AnomalyWatch {
   forgetExcept(read: ReadonlySet<string>): void {
     for (const market of [...this.pending.keys()])
       if (!read.has(market)) this.pending.delete(market)
+  }
+
+  /** Disables `market` without a check (the markets a run that did not stop cleanly left off). */
+  disable(market: string): void {
+    this.off.add(market)
   }
 
   disabled(market: string): boolean {

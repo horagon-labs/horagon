@@ -84,7 +84,8 @@ describe('loadAgentConfig', () => {
       minMusdc: 200n * M,
     })
     expect(c.params).toEqual(defaultAgentParams())
-    expect(c.dryRun).toBe(false)
+    // Dry unless AGENT_DRY_RUN=0: AGENT_ENABLED=1 alone never trades.
+    expect(c.dryRun).toBe(true)
     expect(c.agent.publicKey.equals(agent.publicKey)).toBe(true)
     expect(c.rpcs).toEqual([{ url: 'https://api.devnet.solana.com' }])
     expect(c.cluster).toBe('devnet')
@@ -99,7 +100,7 @@ describe('loadAgentConfig', () => {
   it('takes every AGENT_* override, and an empty value as unset', () => {
     const c = loadAgentConfig(
       env({
-        AGENT_DRY_RUN: '1',
+        AGENT_DRY_RUN: '0',
         AGENT_PRACTICE: '1',
         AGENT_INTERVAL_SECS: '30',
         AGENT_FAN_LAG_SECS: '120',
@@ -123,7 +124,7 @@ describe('loadAgentConfig', () => {
         PRIORITY_MICROLAMPORTS: '5000',
       }),
     )
-    expect(c.dryRun).toBe(true)
+    expect(c.dryRun).toBe(false)
     expect(c.params).toMatchObject({
       intervalSecs: 30,
       practice: true,
@@ -146,7 +147,10 @@ describe('loadAgentConfig', () => {
     expect(c.rpcs).toHaveLength(2)
     expect(c.telegram).toEqual({ token: 't', chatId: 'c' })
     expect(c.priorityMicroLamports).toBe(5_000)
-    expect(loadAgentConfig(env({ AGENT_BAND: '', AGENT_DRY_RUN: '' })).params.band).toBe(0.04)
+    const blank = loadAgentConfig(env({ AGENT_BAND: '', AGENT_DRY_RUN: '' }))
+    expect(blank.params.band).toBe(0.04)
+    expect(blank.dryRun).toBe(true)
+    expect(loadAgentConfig(env({ AGENT_DRY_RUN: '1' })).dryRun).toBe(true)
   })
 
   it('resolves a relative AGENT_KEYPAIR from the repo root', () => {

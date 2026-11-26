@@ -73,7 +73,7 @@ the alert table; the key itself is in the keeper's `alert` log line (the last co
 | Web app and API v1                         | Vercel; the sponsor key is its `SPONSOR_SECRET_KEY`                                                                                                                                                                                             |
 | Database                                   | Supabase Postgres (`DATABASE_URL`)                                                                                                                                                                                                              |
 | `keeper_heartbeats` row `keeper`           | Written by the keeper after every round (5 s): `round`, `actions`, `feed` and the failure streaks `failing.tick` and `failing.index`. `status` prints it; `/api/v1/health` reads its age                                                        |
-| `keeper_heartbeats` row `agent`            | Written by the reference agent after every round (20 s), a paused one included: its round count, dry run or not, paused or not (and until when), the markets it looked at, the swaps it sent and the markets it disabled                        |
+| `keeper_heartbeats` row `agent`            | Written by the reference agent after every round (20 s), paused ones too: its round count, dry run or not, paused or not (and until when), the markets it looked at, the swaps it sent, the markets it disabled; `stopped` after a clean stop   |
 | `keeper_heartbeats` row `watchdog`         | The time of the watchdog's last `heartbeat` page (`pagedAt`), so a new watchdog run knows when it paged                                                                                                                                         |
 | `keeper_heartbeats` row `propose:<gameId>` | The `propose` attempts of one game: the evidence hash, the challenge round, and how each send ended. `status` prints the newest one                                                                                                             |
 
@@ -341,8 +341,8 @@ horagon-ops flag on FLAG_SHARE
 ### J. The reference agent
 
 The reference agent is a disclosed team wallet that trades toward the model on live winner
-markets when no fan has traded for 90 s (README, "Reference agent"). It is its own process,
-`apps/keeper/src/agent-main.ts` as the unit `horagon-agent.service`, with its own key
+markets when no other wallet has traded for 90 s (README, "Reference agent"). It is its own
+process, `apps/keeper/src/agent-main.ts` as the unit `horagon-agent.service`, with its own key
 (`~/horagon/.keys/agent.json`), and reads the same `.env.keeper`. Its wallet must be listed as a
 team-burner in `docs/metrics-wallets.json`, in a public commit, before its first swap. Every swap
 carries the horagon:bot memo; its claims carry none. The agent checks that listing itself when
@@ -364,20 +364,26 @@ ssh "$HORAGON_VPS" systemctl --user stop horagon-agent
 ```
 
 - **After a deploy.** `systemctl --user restart horagon-agent` picks up the new revision. A
-  restart also clears the markets its anomaly check stopped and its own spend count (the trades
-  table still holds the spend the indexer has seen), so look at `agent-anomaly:` alerts of the
-  night first.
+  restart by hand also clears the markets its anomaly check stopped and its own spend count (the
+  trades table still holds the spend the indexer has seen), so look at `agent-anomaly:` alerts of
+  the night first.
 
-- **Dry run first.** With `AGENT_DRY_RUN=1` in `.env.keeper` it logs every decision and sends
-  nothing (no swap, no claim, no faucet claim). A line `agent swap` carries the market, the
-  price, the model, the gap, the side, the size in mUSDC and the expected price after it; a line
-  `agent skip` carries the reason. Set `AGENT_DRY_RUN=0` and restart to trade.
-- **Kill switch.** `systemctl --user stop horagon-agent` ends the round in progress (up to
-  120 s) and stops it. Set `AGENT_ENABLED=0` (or remove the line) in `.env.keeper` as well: any
+- **Dry run first.** It runs dry unless `.env.keeper` sets `AGENT_DRY_RUN=0`: with
+  `AGENT_DRY_RUN=1` (the default) it logs every decision and sends nothing (no swap, no claim, no
+  faucet claim). A line `agent swap` carries the market, the price, the model, the gap, the side,
+  the size in mUSDC and the expected price after it; a line `agent skip` carries the reason. Set
+  `AGENT_DRY_RUN=0` and restart to trade.
+- **Kill switch.** `systemctl --user stop horagon-agent` ends the round in progress: a send in
+  flight completes (up to 120 s), no new swap or claim starts, and it stops, writing `stopped` in
+  its heartbeat. Set `AGENT_ENABLED=0` (or remove the line) in `.env.keeper` as well: any
   start then logs `agent disabled` and exits 0, and the unit stays down. The unit is not enabled,
   so a VPS reboot does not start it.
-- **A market disabled by an anomaly** stays disabled until the agent restarts:
-  `systemctl --user restart horagon-agent`. A deploy never restarts it.
+- **A market disabled by an anomaly** stays disabled until the agent is restarted by hand:
+  `systemctl --user restart horagon-agent`. A deploy never restarts it. A crash or a stall exit,
+  which systemd restarts on its own, keeps it disabled: at start the agent reads its last
+  heartbeat, and when that row has no `stopped` it disables the markets listed there again (log
+  line `agent: the markets disabled before an unplanned restart stay disabled`). If a stop by hand
+  took over 120 s and systemd killed it, that row has no `stopped` either: restart it once more.
 - **A pause** (5 failed reads or sends in a row, `agent-paused`) lasts `AGENT_PAUSE_SECS`
   (600 s). It reads and sends nothing meanwhile, but goes on writing its heartbeat every round
   (`paused: true` and `pausedUntil` in the `agent` row) and stays alive: a pause never trips the
@@ -386,7 +392,10 @@ ssh "$HORAGON_VPS" systemctl --user stop horagon-agent
   swaps per market, one swap per market per 20 s round, nothing within 120 s of a market's
   `end_ts` (S + 3h00m) or while the model is over 60 s old. It never sells. Its spend and swaps
   per market come from the trades table and from its own count, whichever is larger, and one
-  round never plans more than the wallet held when the round read it.
+  round never plans more than the wallet held when the round read it. A round decides every
+  market on one read, taken after the hourly faucet and claims; once that read is older than half
+  an interval (10 s, a slow send), the round ends (`agent round cut short`) and the markets left
+  wait for the next round's read.
 
 ## Alerts
 
@@ -425,7 +434,7 @@ transaction: `create <gameId>`, `halt <gameId> (<rule>)`, `finalize <gameId>`, `
 | `fail:<action>:<gameId>`       | `<action> <gameId> rejected: ... error <name>`                                                                                                                                               | 10 min            | The program refused a keeper action (`create`, `halt`, `finalize`, `recycle`). Read the error name and check `status`; the keeper plans it again every round                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `tx:<label>`                   | `Transaction "<label>" failed 4 times (...); 1 attempt left`                                                                                                                                 | 10 min            | Check the RPC (`HORAGON_RPC_URL`). The keeper plans the action again on the next round                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | `tx-unresolved:<label>`        | `<label>: unresolved after 90 s, <signature> may still land`                                                                                                                                 | 10 min            | The transaction may still land: look the signature up before doing anything by hand. The keeper re-plans from chain state; for a `horagon-ops` command, B (propose) or G (`fund-authority`)                                                                                                                                                                                                                                                                                                                                                                    |
-| `agent-anomaly:<gameId>`       | `Reference agent: after its YES swap on AWAY@HOME the price moved away from the model` (or `NO swap`)                                                                                        | 10 min            | The agent no longer trades that market until it restarts; nothing else is affected. Look at the market's last trades: a fan trading the other way explains it. A wrong side or a swap that did something else is a bug: stop the agent (J). Restart it (J) to trade the market again                                                                                                                                                                                                                                                                           |
+| `agent-anomaly:<gameId>`       | `Reference agent: after its YES swap on AWAY@HOME the price moved away from the model` (or `NO swap`)                                                                                        | 10 min            | The agent no longer trades that market until it is restarted by hand (a restart after a crash or a stall keeps it off, J); nothing else is affected. Look at the market's last trades: a fan trading the other way explains it. A wrong side or a swap that did something else is a bug: stop the agent (J). Restart it (J) to trade the market again                                                                                                                                                                                                          |
 | `agent-unlisted`               | `Reference agent not started: its wallet <pubkey> is not listed as team-burner in docs/metrics-wallets.json (<reason>)`                                                                      | once a start      | The agent exited 0 without trading. Add the wallet to `docs/metrics-wallets.json` as a team-burner in a public commit, deploy, then start it (J). A wrong `AGENT_KEYPAIR` shows here too: it must be the agent's own key                                                                                                                                                                                                                                                                                                                                       |
 | `agent-paused`                 | `Reference agent paused 10 min after 5 failed reads or sends in a row`                                                                                                                       | 10 min            | It resumes by itself after the pause. Read the error in its log (J): an RPC or database outage also shows in the keeper (`tick-failing`); a refused swap names the program error                                                                                                                                                                                                                                                                                                                                                                               |
 | `agent-sol`                    | `Reference agent wallet holds <n> SOL; fees need 0.1`                                                                                                                                        | 10 min            | Send devnet SOL to the agent wallet. It pays its own fees and the rent of its YES and NO accounts (claims return that rent)                                                                                                                                                                                                                                                                                                                                                                                                                                    |

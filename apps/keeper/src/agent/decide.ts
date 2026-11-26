@@ -36,7 +36,7 @@ export interface MarketView {
   /** YES price now, from the chain; null when the pool cannot price (halted, past end_ts). */
   price: number | null
   pool: PoolState | null
-  /** Disabled until restart after an anomaly. */
+  /** Disabled after an anomaly, until the agent is restarted by hand. */
   disabled: boolean
 }
 

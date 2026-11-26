@@ -1,11 +1,13 @@
 // The disclosed reference agent: a team wallet, listed in docs/metrics-wallets.json, that trades
-// toward the model on live winner markets when no fan has traded for a while, so prices move
-// with the game and fans find a counterparty. Every swap carries the `horagon:bot` memo, so it
-// never counts as a fan. One round (every AGENT_INTERVAL_SECS): read the keeper's DB and the
+// toward the model on live winner markets when no other wallet has traded for a while, so prices
+// move with the game and fans find a counterparty. Every swap carries the `horagon:bot` memo, so
+// it never counts as a fan. One round (every AGENT_INTERVAL_SECS): read the keeper's DB and the
 // chain, decide per market (decide.ts), send at most one swap per market, check the swaps of the
-// round before, page on low balances. Hourly: the faucet and the claims of settled markets.
+// round before, page on low balances. A round ends early when the stop signal comes or when its
+// snapshot is older than half an interval. Hourly: the faucet and the claims of settled markets.
 import {
   type Db,
+  getHeartbeat,
   heartbeat,
   lastOtherTrades,
   listAgentMarkets,
@@ -69,7 +71,21 @@ export interface RoundReport {
   /** Swaps that landed this round. */
   sent: number
   failures: number
+  /**
+   * Why the round ended before its last market, which then waits for the next round's read:
+   * `stale` when its snapshot grew older than half an interval (a slow send), `stop` when the
+   * stop signal came. Null when it went through every market.
+   */
+  cut: 'stale' | 'stop' | null
 }
+
+const emptyReport = (): RoundReport => ({
+  paused: false,
+  decisions: [],
+  sent: 0,
+  failures: 0,
+  cut: null,
+})
 
 interface Snapshot {
   views: MarketView[]
@@ -93,6 +109,7 @@ export class ReferenceAgent {
   readonly failures: FailureGuard
   private readonly hourlyDue = dueEvery(AGENT_HOURLY_SECS)
   private rounds = 0
+  private last: RoundReport = emptyReport()
 
   constructor(private readonly d: AgentDeps) {
     this.failures = new FailureGuard(d.params.maxFailures, d.params.pauseSecs)
@@ -106,20 +123,63 @@ export class ReferenceAgent {
     return getAssociatedTokenAddressSync(this.d.collateralMint, this.d.wallet)
   }
 
-  async round(): Promise<RoundReport> {
-    const now = this.d.now()
-    const report: RoundReport = { paused: false, decisions: [], sent: 0, failures: 0 }
+  /**
+   * How long the snapshot of a round holds. A send can block for minutes (a dropped attempt,
+   * then the sender's wait for it), and the model age, the fan lag and the end buffer hold only
+   * while the snapshot is fresh.
+   */
+  private get freshSecs(): number {
+    return this.d.params.intervalSecs / 2
+  }
+
+  /**
+   * At start, before the first round: when the last run did not stop cleanly (a crash or a stall
+   * exit, which systemd restarts on its own), the markets it disabled stay disabled. A run
+   * stopped by hand wrote `stopped` in its last heartbeat (stop below), so the next one starts
+   * clean: a restart by hand is how a market is traded again. Returns the markets disabled
+   * again. Throws when the database does not answer: the agent does not start without knowing.
+   */
+  async resume(): Promise<string[]> {
+    const row = await getHeartbeat(this.d.db, 'agent')
+    const info = (row?.info ?? {}) as { stopped?: unknown; disabled?: unknown }
+    if (info.stopped === true || !Array.isArray(info.disabled)) return []
+    const markets = info.disabled.filter((m): m is string => typeof m === 'string')
+    for (const market of markets) this.watch.disable(market)
+    if (markets.length > 0) {
+      this.d.log.warn(
+        { markets },
+        'agent: the markets disabled before an unplanned restart stay disabled',
+      )
+    }
+    return markets
+  }
+
+  /** After the last round of a clean stop: the heartbeat says `stopped` (resume above). */
+  async stop(): Promise<void> {
+    await this.beat(this.last, this.d.now(), true)
+  }
+
+  /**
+   * One round. `signal` is the stop signal: once it aborts, the round sends nothing new (a send
+   * in flight still completes) and ends.
+   */
+  async round(signal?: AbortSignal): Promise<RoundReport> {
+    const report = emptyReport()
     this.rounds++
-    if (this.failures.paused(now)) {
+    const started = this.d.now()
+    if (this.failures.paused(started)) {
       // No read and no send while paused, but the heartbeat goes on: a pause is not a stall.
       const paused = { ...report, paused: true }
-      await this.beat(paused, now)
+      await this.beat(paused, started)
       return paused
     }
-    if (this.hourlyDue(now)) {
+    if (this.hourlyDue(started)) {
       await this.fund()
-      report.failures += await this.claimAll(now)
+      report.failures += await this.claimAll(started, signal)
     }
+    // The clock again: the faucet and the claims may have taken minutes. The snapshot is read
+    // as of `now`, and every decision of the round is made on both.
+    const now = this.d.now()
     let snap: Snapshot
     try {
       snap = await this.read(now)
@@ -134,8 +194,20 @@ export class ReferenceAgent {
     // a send whose result is unknown and one that failed alike, so one round never plans more
     // than the wallet held when it was read.
     let balance = snap.musdc
-    for (const view of snap.views) {
+    for (const [i, view] of snap.views.entries()) {
       if (this.failures.paused(now)) break
+      // Before each decision: a stop signal, or a snapshot that a slow send made old, ends the
+      // round. The markets left are decided on the next round's fresh read.
+      const ageSecs = this.d.now() - now
+      const cut = signal?.aborted ? 'stop' : ageSecs > this.freshSecs ? 'stale' : null
+      if (cut) {
+        report.cut = cut
+        this.d.log.info(
+          { reason: cut, ageSecs, left: snap.views.length - i },
+          'agent round cut short',
+        )
+        break
+      }
       const decision = decide(view, { now, balance, params: this.d.params })
       report.decisions.push(decision)
       this.logDecision(decision)
@@ -205,7 +277,7 @@ export class ReferenceAgent {
         )
         await this.d.alerts.send(
           `agent-anomaly:${row.gameId}`,
-          `Reference agent: after its ${anomaly.side.toUpperCase()} swap on ${row.away}@${row.home} the price moved away from the model (${anomaly.price.toFixed(3)} -> ${price?.toFixed(3)}, model ${anomaly.model.toFixed(3)}); market disabled until the agent restarts`,
+          `Reference agent: after its ${anomaly.side.toUpperCase()} swap on ${row.away}@${row.home} the price moved away from the model (${anomaly.price.toFixed(3)} -> ${price?.toFixed(3)}, model ${anomaly.model.toFixed(3)}); market disabled until the agent is restarted by hand`,
         )
       }
       views.push({
@@ -277,7 +349,7 @@ export class ReferenceAgent {
     else this.d.log.debug(fields, `agent ${d.action}`)
   }
 
-  /** One swap; false when it failed (counted). A swap that may still land is counted as spent. */
+  /** One swap; false when it failed (counted). A swap that may still land counts as sent. */
   private async swap(
     d: Extract<Decision, { action: 'swap' }>,
     account: MarketAccount,
@@ -308,13 +380,7 @@ export class ReferenceAgent {
         computeUnits: SWAP_COMPUTE_UNITS,
         priorityMicroLamports: this.d.priorityMicroLamports,
       })
-      this.book.record(d.market, d.amountIn)
-      this.watch.expect(d.market, {
-        gameId: d.gameId,
-        side: d.side,
-        model: d.model,
-        price: d.price,
-      })
+      this.sentSwap(d)
       this.d.log.info(
         {
           market: d.market,
@@ -327,10 +393,18 @@ export class ReferenceAgent {
       )
       return true
     } catch (err) {
-      if (err instanceof UnresolvedAttempt) this.book.record(d.market, d.amountIn)
+      // It may still land: counted as spent, and checked on the next read like a landed one (a
+      // read that shows no move proves nothing and clears the check).
+      if (err instanceof UnresolvedAttempt) this.sentSwap(d)
       await this.failed(now, 'send', err)
       return false
     }
+  }
+
+  /** A swap that landed or may land: its spend, and the anomaly check of the next read. */
+  private sentSwap(d: Extract<Decision, { action: 'swap' }>): void {
+    this.book.record(d.market, d.amountIn)
+    this.watch.expect(d.market, { gameId: d.gameId, side: d.side, model: d.model, price: d.price })
   }
 
   /** The faucet into the agent wallet; a refusal (rate limit) is expected and only logged. */
@@ -351,7 +425,7 @@ export class ReferenceAgent {
    * claim_winnings on every settled market where the agent holds winning shares (the chain
    * decides: resolved, and a winning balance above 0). Returns the failures.
    */
-  private async claimAll(now: number): Promise<number> {
+  private async claimAll(now: number, signal?: AbortSignal): Promise<number> {
     let failures = 0
     let rows: Array<{ pubkey: string; gameId: string }>
     let infos: Array<AccountInfo<Buffer> | null>
@@ -364,6 +438,8 @@ export class ReferenceAgent {
       return 1
     }
     for (const [i, row] of rows.entries()) {
+      // No new claim after the stop signal: the next run claims the rest.
+      if (signal?.aborted) break
       const info = infos[i]
       if (!info) continue
       try {
@@ -431,9 +507,10 @@ export class ReferenceAgent {
 
   /**
    * The `agent` row of keeper_heartbeats, written after every round, a paused or failed one
-   * included; a failed write is only logged.
+   * included, and once more with `stopped` at a clean stop; a failed write is only logged.
    */
-  private async beat(report: RoundReport, now: number): Promise<void> {
+  private async beat(report: RoundReport, now: number, stopped = false): Promise<void> {
+    this.last = report
     const paused = this.failures.paused(now)
     try {
       await heartbeat(this.d.db, 'agent', {
@@ -444,6 +521,7 @@ export class ReferenceAgent {
         markets: report.decisions.length,
         sent: report.sent,
         disabled: this.watch.disabledMarkets,
+        ...(stopped ? { stopped: true } : {}),
       })
     } catch (err) {
       this.d.log.warn({ error: errorSummary(err).message }, 'agent heartbeat not written')

@@ -68,7 +68,7 @@ async function market(pubkey: string, gameId: string, kind: number, status: stri
     yesMint: `${pubkey}-y`,
     noMint: `${pubkey}-n`,
     initialPriceBps: 6000,
-    endTs: new Date(TIP.getTime() + 7_800_000),
+    endTs: new Date(TIP.getTime() + 10_800_000),
     seedAmount: 300_000_000n,
     status,
   })

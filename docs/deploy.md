@@ -96,7 +96,8 @@ The agent is optional and off by default (`AGENT_ENABLED` unset). Before it ever
    `agent wallet is not listed as team-burner in docs/metrics-wallets.json` and exits 0, dry run
    or not.
 3. **Variables:** add the "Reference agent" part of `.env.example` to `~/horagon/.env.keeper`, with
-   `AGENT_ENABLED=1` and `AGENT_DRY_RUN=1` for the first run.
+   `AGENT_ENABLED=1` and `AGENT_DRY_RUN=1` for the first run. A dry run is also the default: it
+   trades only once the file says `AGENT_DRY_RUN=0`.
 4. **Start** it by hand after a deploy (`docs/runbook.md`, procedure J), read its dry-run
    decisions, then set `AGENT_DRY_RUN=0` and restart it.
 

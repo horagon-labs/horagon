@@ -22,11 +22,13 @@ Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
 Environment=NODE_ENV=production
 ExecStart=%h/horagon/apps/keeper/node_modules/.bin/tsx src/agent-main.ts
 # A crash or a stall exit (KEEPER_STALL_SECS of silence) restarts it; a clean exit (disabled,
-# not listed, or stopped by hand) does not.
+# not listed, or stopped by hand) does not. Such a restart keeps the markets the anomaly check
+# disabled: the agent reads them back from its last heartbeat, which has no `stopped` (runbook J).
 Restart=on-failure
 RestartSec=10
-# On SIGTERM the agent ends the round in progress: at most one swap wait (90 s) plus an RPC
-# timeout. A swap is never sent twice: TxSender looks its signatures up before any retry.
+# On SIGTERM the agent ends the round in progress before its next send: at most the send in
+# flight (a 90 s wait) plus an RPC timeout. A swap is never sent twice: TxSender looks its
+# signatures up before any retry.
 KillSignal=SIGTERM
 TimeoutStopSec=120
 MemoryMax=512M

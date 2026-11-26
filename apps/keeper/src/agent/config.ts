@@ -50,7 +50,7 @@ export interface AgentParams {
 }
 
 export interface AgentConfig {
-  /** Logs every decision and sends nothing. */
+  /** Logs every decision and sends nothing: unless AGENT_DRY_RUN=0. */
   dryRun: boolean
   agent: Keypair
   /**
@@ -75,7 +75,7 @@ const LOG_LEVELS = ['trace', 'debug', 'info', 'warn', 'error'] as const
 
 /** An empty value counts as unset, so a blank line in the env file keeps the default. */
 const blank = (v: unknown) => (v === '' ? undefined : v)
-const flag = z.preprocess(blank, z.enum(['0', '1']).default('0'))
+const flag = (def: '0' | '1') => z.preprocess(blank, z.enum(['0', '1']).default(def))
 const int = (min: number, max: number, def: number) =>
   z.preprocess(blank, z.coerce.number().int().min(min).max(max).default(def))
 const num = (min: number, max: number, def: number) =>
@@ -94,8 +94,9 @@ const musdc = (def: number) =>
 
 /** Every AGENT_* variable but AGENT_ENABLED, with its default. */
 const ParamsSchema = z.object({
-  AGENT_DRY_RUN: flag,
-  AGENT_PRACTICE: flag,
+  // Dry unless AGENT_DRY_RUN=0: trading takes a line of its own, AGENT_ENABLED=1 alone never.
+  AGENT_DRY_RUN: flag('1'),
+  AGENT_PRACTICE: flag('0'),
   AGENT_KEYPAIR: z.preprocess(blank, z.string().min(1).default('.keys/agent.json')),
   AGENT_INTERVAL_SECS: int(5, 60, 20),
   AGENT_FAN_LAG_SECS: int(0, 3_600, 90),

@@ -1,6 +1,8 @@
 // Test doubles for the reference agent: pools at a chosen price, pm-AMM Market account bytes in
 // the program's layout (the inverse of the SDK's `decodeMarket`), SPL token accounts, a fake
-// chain with the RPC methods the agent reads, and a fake sender.
+// chain with the RPC methods the agent reads, a fake sender, and a live market seeded in the
+// keeper's database and on the fake chain.
+import { type Db, updateGameLive, upsertMarket, upsertScheduledGames } from '@horagon/db'
 import {
   DEVNET_MUSDC_MINT,
   decodeMarketAccount,
@@ -8,6 +10,7 @@ import {
   deriveNoMint,
   deriveVault,
   deriveYesMint,
+  HoragonProgram,
   MARKET_ACCOUNT_SPACE,
   MARKET_DISCRIMINATOR,
   PM_AMM_PROGRAM_ID,
@@ -248,4 +251,85 @@ export function recordingConnection(): { conn: Connection; sent: VersionedTransa
     },
   }
   return { conn: conn as unknown as Connection, sent }
+}
+
+/** The keeper's tick writing the game's model, from a feed read at `at` (Unix seconds). */
+export async function writeModel(
+  db: Db,
+  gameId: string,
+  modelProb: number,
+  at: number,
+  status = 'live',
+): Promise<void> {
+  await updateGameLive(db, gameId, {
+    status,
+    homeScore: 50,
+    awayScore: 45,
+    period: 3,
+    clockSecs: 300,
+    periods: [],
+    modelProb,
+    feedUpdatedAt: new Date(at * 1000),
+  })
+}
+
+export interface SeededMarket {
+  key: PublicKey
+  fields: MarketFields
+  gameId: string
+}
+
+/**
+ * A live game `nba-<n>` (tipped off 1 h before `now`, model `model` read at `modelAt`) with its
+ * open winner market in the keeper's database, ending 4,200 s after `now`, and the market account
+ * on `chain` at `price`.
+ */
+export async function seedLiveMarket(
+  db: Db,
+  chain: FakeChain,
+  n: number,
+  o: {
+    now: number
+    modelAt: number
+    price?: number
+    model?: number
+    seed?: number
+    league?: string
+  },
+): Promise<SeededMarket> {
+  const gameId = `nba-${n}`
+  await upsertScheduledGames(db, [
+    {
+      id: gameId,
+      league: o.league ?? 'NBA',
+      externalId: String(n),
+      gameDate: '2026-11-26',
+      home: 'CLE',
+      away: 'MEM',
+      scheduledTipoff: new Date((o.now - 3_600) * 1000),
+      status: 'scheduled',
+      p0: 0.6,
+    },
+  ])
+  await writeModel(db, gameId, o.model ?? 0.7, o.modelAt)
+  const fields: MarketFields = {
+    marketId: BigInt(n),
+    authority: new HoragonProgram({ collateralMint: DEVNET_MUSDC_MINT }).authority,
+    pool: poolAt(o.price ?? 0.6, { now: o.now, remaining: 4_200, seed: o.seed ?? 300 }),
+  }
+  const key = chain.setMarket(fields)
+  await upsertMarket(db, {
+    pubkey: key.toBase58(),
+    gameId,
+    kind: 0,
+    marketId: String(n),
+    gameMarketPda: `gm-${n}`,
+    yesMint: deriveYesMint(key).toBase58(),
+    noMint: deriveNoMint(key).toBase58(),
+    initialPriceBps: 6_000,
+    endTs: new Date((o.now + 4_200) * 1000),
+    seedAmount: BigInt(o.seed ?? 300) * 1_000_000n,
+    status: 'open',
+  })
+  return { key, fields, gameId }
 }

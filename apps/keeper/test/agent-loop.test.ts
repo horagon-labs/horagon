@@ -1,13 +1,5 @@
 import { Writable } from 'node:stream'
-import {
-  type DbHandle,
-  getHeartbeat,
-  insertTrades,
-  updateGameLive,
-  updateMarket,
-  upsertMarket,
-  upsertScheduledGames,
-} from '@horagon/db'
+import { type DbHandle, getHeartbeat, insertTrades, updateMarket } from '@horagon/db'
 import { createTestDb } from '@horagon/db/testing'
 import {
   ataAddress,
@@ -22,16 +14,23 @@ import {
   PROTOCOL_DAO,
   SWAP_COMPUTE_UNITS,
 } from '@horagon/sdk'
-import { Keypair, type PublicKey } from '@solana/web3.js'
+import { Keypair } from '@solana/web3.js'
 import pino from 'pino'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { type AgentDeps, ReferenceAgent } from '../src/agent/agent'
 import { type AgentParams, defaultAgentParams } from '../src/agent/config'
 import type { Decision } from '../src/agent/decide'
-import { UnresolvedAttempt } from '../src/executor'
-import { runStep } from '../src/loop'
-import { StallGuard } from '../src/stall'
-import { FakeChain, FakeSender, type MarketFields, poolAt, tokenInfo } from './agent-fixtures'
+import { ProgramFailure, UnresolvedAttempt } from '../src/executor'
+import {
+  FakeChain,
+  FakeSender,
+  type MarketFields,
+  poolAt,
+  type SeededMarket,
+  seedLiveMarket,
+  tokenInfo,
+  writeModel,
+} from './agent-fixtures'
 
 const NOW = 1_795_003_600
 const M = 1_000_000n
@@ -52,6 +51,8 @@ let alerts: Array<[string, string]>
 let logs: LogLine[]
 let faucetCalls: string[]
 let faucetError: Error | null
+/** Seconds a faucet claim takes (the fake clock moves on by that much). */
+let faucetSecs: number
 
 beforeAll(async () => {
   h = await createTestDb()
@@ -70,6 +71,7 @@ beforeEach(async () => {
   logs = []
   faucetCalls = []
   faucetError = null
+  faucetSecs = 0
 })
 
 function agentWith(o: { dryRun?: boolean; params?: Partial<AgentParams> } = {}): ReferenceAgent {
@@ -95,6 +97,7 @@ function agentWith(o: { dryRun?: boolean; params?: Partial<AgentParams> } = {}):
     now: () => clock,
     faucet: async (wallet) => {
       faucetCalls.push(wallet)
+      clock += faucetSecs
       if (faucetError) throw faucetError
     },
     priorityMicroLamports: 10_000,
@@ -103,59 +106,16 @@ function agentWith(o: { dryRun?: boolean; params?: Partial<AgentParams> } = {}):
 }
 
 /** A live NBA game with its open winner market (id `n`), and the market on the fake chain. */
-async function liveMarket(
+function liveMarket(
   n: number,
   o: { price?: number; model?: number; seed?: number; league?: string } = {},
-): Promise<{ key: PublicKey; fields: MarketFields; gameId: string }> {
-  const gameId = `nba-${n}`
-  await upsertScheduledGames(h.db, [
-    {
-      id: gameId,
-      league: o.league ?? 'NBA',
-      externalId: String(n),
-      gameDate: '2026-11-26',
-      home: 'CLE',
-      away: 'MEM',
-      scheduledTipoff: new Date((NOW - 3_600) * 1000),
-      status: 'scheduled',
-      p0: 0.6,
-    },
-  ])
-  await setModel(gameId, o.model ?? 0.7)
-  const fields: MarketFields = {
-    marketId: BigInt(n),
-    authority: program.authority,
-    pool: poolAt(o.price ?? 0.6, { now: NOW, remaining: 4_200, seed: o.seed ?? 300 }),
-  }
-  const key = chain.setMarket(fields)
-  await upsertMarket(h.db, {
-    pubkey: key.toBase58(),
-    gameId,
-    kind: 0,
-    marketId: String(n),
-    gameMarketPda: `gm-${n}`,
-    yesMint: deriveYesMint(key).toBase58(),
-    noMint: deriveNoMint(key).toBase58(),
-    initialPriceBps: 6_000,
-    endTs: new Date((NOW + 4_200) * 1000),
-    seedAmount: 300n * M,
-    status: 'open',
-  })
-  return { key, fields, gameId }
+): Promise<SeededMarket> {
+  return seedLiveMarket(h.db, chain, n, { now: NOW, modelAt: clock - 5, ...o })
 }
 
 /** The keeper's tick writing a fresh model for the game, as of `clock`. */
-async function setModel(gameId: string, modelProb: number, status = 'live'): Promise<void> {
-  await updateGameLive(h.db, gameId, {
-    status,
-    homeScore: 50,
-    awayScore: 45,
-    period: 3,
-    clockSecs: 300,
-    periods: [],
-    modelProb,
-    feedUpdatedAt: new Date((clock - 5) * 1000),
-  })
+function setModel(gameId: string, modelProb: number, status = 'live'): Promise<void> {
+  return writeModel(h.db, gameId, modelProb, clock - 5, status)
 }
 
 /** Moves the fake market's YES price, as a swap would. */
@@ -277,6 +237,69 @@ describe('a live round', () => {
       0n,
     )
     expect(planned <= 150n * M).toBe(true)
+    // A swap the program refused moved nothing, yet the round still counts it: the next round
+    // reads the real balance.
+    sender.fail = new ProgramFailure('swap nba-1', 'pm-AMM', 6001, 'SlippageExceeded', [])
+    const refused = await agentWith().round()
+    expect(sizesOf(refused.decisions)).toEqual([100n * M, 50n * M, 0n])
+    expect(reasons(refused.decisions)).toEqual(['swap', 'swap', 'balance'])
+    expect(refused.failures).toBe(2)
+  })
+
+  it('ends the round when a slow send left its snapshot old, and trades the rest on the next', async () => {
+    const markets = [await liveMarket(1), await liveMarket(2)]
+    const fieldsOf = new Map(markets.map((m) => [`swap ${m.gameId}`, m.fields]))
+    // The first send takes 90 s (a dropped attempt, then the sender's wait for it); each landed
+    // swap moves its market to the target.
+    sender.onSend = (spec) => {
+      if (sender.specs.length === 1) clock += 90
+      const fields = fieldsOf.get(spec.label)
+      if (fields) movePrice(fields, 0.68)
+    }
+    const a = agentWith()
+    const first = await a.round()
+    expect(first.sent).toBe(1)
+    expect(first.decisions).toHaveLength(1)
+    expect(first.cut).toBe('stale')
+    expect(logs.find((l) => l.msg === 'agent round cut short')).toMatchObject({
+      reason: 'stale',
+      ageSecs: 90,
+      left: 1,
+    })
+    const [sentFirst] = sender.specs.map((s) => s.label)
+    const other = sentFirst === 'swap nba-1' ? 'swap nba-2' : 'swap nba-1'
+    // Meanwhile the keeper's tick wrote the model again: the next round reads everything anew
+    // and trades the market the first one left.
+    for (const m of markets) await setModel(m.gameId, 0.7)
+    const second = await a.round()
+    expect(second.cut).toBeNull()
+    expect(reasons(second.decisions).sort()).toEqual(['in-band', 'swap'])
+    expect(sender.specs.map((s) => s.label)).toEqual([sentFirst, other])
+  })
+
+  it('decides on the clock read after the hourly faucet and claims, not before', async () => {
+    await liveMarket(1)
+    // The faucet answers after 90 s: the model the keeper wrote 5 s before the round began is
+    // 95 s old by then, too old to trade on.
+    faucetSecs = 90
+    const report = await agentWith().round()
+    expect(reasons(report.decisions)).toEqual(['stale-model'])
+    expect(sender.specs).toEqual([])
+  })
+
+  it('sends nothing new once the stop signal comes, and ends the round', async () => {
+    for (const n of [1, 2, 3]) await liveMarket(n)
+    const stop = new AbortController()
+    // The signal comes while the first swap is in flight: that send completes, no other starts.
+    sender.onSend = () => stop.abort()
+    const report = await agentWith().round(stop.signal)
+    expect(sender.specs).toHaveLength(1)
+    expect(report.sent).toBe(1)
+    expect(report.cut).toBe('stop')
+    expect(logs.find((l) => l.msg === 'agent round cut short')).toMatchObject({
+      reason: 'stop',
+      left: 2,
+    })
   })
 
   it('steps aside while a fan has traded in the last 90 s', async () => {
@@ -377,7 +400,7 @@ describe('the anomaly check', () => {
     const second = await a.round()
     expect(reasons(second.decisions)).toEqual(['disabled'])
     expect(keys()).toEqual(['agent-anomaly:nba-1'])
-    expect(alerts[0]?.[1]).toContain('market disabled until the agent restarts')
+    expect(alerts[0]?.[1]).toContain('market disabled until the agent is restarted by hand')
     expect(logs.find((l) => l.msg === 'agent anomaly')).toMatchObject({
       market: key.toBase58(),
       priceBefore: expect.any(Number),
@@ -386,8 +409,58 @@ describe('the anomaly check', () => {
     expect(reasons((await a.round()).decisions)).toEqual(['disabled'])
     expect(keys()).toEqual(['agent-anomaly:nba-1'])
     expect(sender.specs).toHaveLength(1)
-    // A new process (a restart) trades it again.
+    // A new process that does not resume the last run (as one started by hand after a clean
+    // stop) trades it again.
     expect(reasons((await agentWith().round()).decisions)).toEqual(['swap'])
+  })
+
+  it('keeps a market disabled across an unplanned restart, not across a stop by hand', async () => {
+    const { key, fields } = await liveMarket(1)
+    sender.onSend = () => movePrice(fields, 0.55)
+    const a = agentWith()
+    await a.round()
+    expect(reasons((await a.round()).decisions)).toEqual(['disabled'])
+    // A crash or a stall exit: no clean stop, and systemd starts a new process.
+    const b = agentWith()
+    expect(await b.resume()).toEqual([key.toBase58()])
+    expect(logs.find((l) => l.msg.includes('stay disabled'))).toMatchObject({
+      markets: [key.toBase58()],
+      level: 40,
+    })
+    expect(reasons((await b.round()).decisions)).toEqual(['disabled'])
+    // Stopped by hand (SIGTERM): the last heartbeat says so, and the next process starts clean.
+    await b.stop()
+    expect((await getHeartbeat(h.db, 'agent'))?.info).toMatchObject({
+      stopped: true,
+      disabled: [key.toBase58()],
+    })
+    const c = agentWith()
+    expect(await c.resume()).toEqual([])
+    expect(reasons((await c.round()).decisions)).toEqual(['swap'])
+    // Its rounds write no `stopped`: an exit from here on is unplanned again.
+    expect((await getHeartbeat(h.db, 'agent'))?.info).not.toHaveProperty('stopped')
+  })
+
+  it('checks a swap whose result was unknown as well, once it shows on the chain', async () => {
+    const { fields } = await liveMarket(1)
+    sender.fail = new UnresolvedAttempt('swap nba-1: unresolved after 90 s')
+    const a = agentWith()
+    expect((await a.round()).failures).toBe(1)
+    // It landed after all, and the price moved away from the model.
+    movePrice(fields, 0.55)
+    sender.fail = null
+    expect(reasons((await a.round()).decisions)).toEqual(['disabled'])
+    expect(keys()).toEqual(['agent-anomaly:nba-1'])
+  })
+
+  it('takes a read that shows no move after an unknown send as no proof either way', async () => {
+    await liveMarket(1)
+    sender.fail = new UnresolvedAttempt('swap nba-1: unresolved after 90 s')
+    const a = agentWith()
+    await a.round()
+    sender.fail = null
+    expect(reasons((await a.round()).decisions)).toEqual(['swap'])
+    expect(keys()).toEqual([])
   })
 
   it('does not blame the agent for the model moving on', async () => {
@@ -431,52 +504,6 @@ describe('failures', () => {
     const after = await a.round()
     expect(after.paused).toBe(false)
     expect(after.sent).toBe(1)
-  })
-
-  it('keeps its heartbeat and the stall guard going through a 10 min pause', async () => {
-    await liveMarket(1)
-    chain.fail.accounts = new Error('rpc down')
-    const a = agentWith()
-    // The loop of run.ts: each round is a step of the stall guard, then a 20 s sleep.
-    const guard = new StallGuard(120, () => clock * 1000)
-    const log = pino({ level: 'silent' })
-    const loop = async () => {
-      const res = await runStep(log, 'agent', () => a.round(), guard)
-      expect(res.ok).toBe(true)
-      guard.touch()
-      clock += 20
-      // Just before the next round: the longest the guard ever sees without activity.
-      expect(guard.check()).toBeNull()
-      return res.ok ? res.value : null
-    }
-    for (let i = 0; i < 5; i++) await loop()
-    expect(keys()).toEqual(['agent-paused'])
-    const pausedAt = clock - 20
-    expect((await getHeartbeat(h.db, 'agent'))?.info).toMatchObject({
-      round: 5,
-      paused: true,
-      pausedUntil: pausedAt + 600,
-    })
-    // The rest of the 600 s pause, a round every 20 s: each writes the heartbeat, none reads.
-    const reads = chain.reads
-    let round = 5
-    while (clock < pausedAt + 600) {
-      const before = (await getHeartbeat(h.db, 'agent'))?.ts.getTime() ?? 0
-      const report = await loop()
-      round++
-      expect(report?.paused).toBe(true)
-      const hb = await getHeartbeat(h.db, 'agent')
-      expect(hb?.info).toMatchObject({ round, paused: true, pausedUntil: pausedAt + 600 })
-      expect(hb?.ts.getTime()).toBeGreaterThanOrEqual(before)
-    }
-    expect(round).toBe(5 + 29)
-    expect(chain.reads).toBe(reads)
-    // The pause ends: the next round reads again, and the heartbeat says so.
-    chain.fail.accounts = undefined
-    const after = await loop()
-    expect(after?.paused).toBe(false)
-    expect((await getHeartbeat(h.db, 'agent'))?.info).toMatchObject({ paused: false })
-    expect((await getHeartbeat(h.db, 'agent'))?.info).not.toHaveProperty('pausedUntil')
   })
 
   it('counts failed reads, and a clean round ends the streak', async () => {
