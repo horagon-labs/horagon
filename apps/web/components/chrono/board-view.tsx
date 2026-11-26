@@ -107,12 +107,26 @@ export function BoardView(p: BoardViewProps) {
           </button>
         )}
         <ul className="space-y-2">
-          {model.items.map((i) => (
+          {model.list.map((i) => (
             <li key={i.id}>
               <DialRow item={i} lit={p.hoverId === i.id} onHover={p.onHover} />
             </li>
           ))}
         </ul>
+        {model.later.map((night) => (
+          <section key={night.label} className="space-y-2 pt-2" data-later>
+            <h3 className="text-13 font-medium uppercase tracking-[0.2em] text-brass-500">
+              {night.label}
+            </h3>
+            <ul className="space-y-2">
+              {night.items.map((i) => (
+                <li key={i.id}>
+                  <DialRow item={i} lit={p.hoverId === i.id} onHover={p.onHover} />
+                </li>
+              ))}
+            </ul>
+          </section>
+        ))}
       </div>
       <div className="mx-auto w-full max-w-sm lg:sticky lg:top-20 lg:order-first lg:max-w-none">
         <NightDial

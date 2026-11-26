@@ -138,6 +138,31 @@ describe('a night with no game, the next slate under 24 h away (R7 review adv-1,
     expect(m.stopped).toBe('All stopped. Next tip-off Wed 7:00 PM ET.')
   })
 
+  it("heads the next night's games apart when the list also holds the night's own", () => {
+    // Fri, Nov 27, 11:00 PM ET: Friday's game is final, Saturday's 7:30 PM ET game is listed.
+    const fri11 = at('2026-11-28T04:00:00Z')
+    const f1 = scheduled('2026-11-28T00:30:00.000Z', {
+      id: 'f1',
+      status: 'final',
+      homeScore: 100,
+      awayScore: 90,
+    })
+    const t1 = scheduled('2026-11-29T00:30:00.000Z', { id: 't1', home: 'TOR', away: 'BOS' })
+    const m = boardModel([f1, t1], undefined, fri11, [])
+    expect(m.label).toBe('Tonight · Fri Nov 27')
+    expect(m.list.map((i) => i.id)).toEqual(['f1'])
+    expect(m.later).toEqual([
+      { label: 'Next · Sat Nov 28', items: [m.items.find((i) => i.id === 't1')] },
+    ])
+    const html = board({ games: [f1, t1], now: fri11 })
+    const heading = html.indexOf('>Next · Sat Nov 28<')
+    expect(heading).toBeGreaterThan(-1)
+    expect(html.indexOf('/game/f1')).toBeLessThan(heading)
+    expect(html.indexOf('/game/t1')).toBeGreaterThan(heading)
+    // A list of the night's games only has no second heading.
+    expect(boardModel(evening(), undefined, NOW, []).later).toEqual([])
+  })
+
   it("keeps tonight's date while a game of the night is listed", () => {
     expect(boardModel(evening(), undefined, NOW, []).label).toBe('Tonight · Tue Nov 24')
     expect(boardModel(evening(), undefined, NOW, []).dial).toHaveLength(

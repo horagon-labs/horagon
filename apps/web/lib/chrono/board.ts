@@ -203,8 +203,9 @@ export function boardLabel(now: number): string {
 
 /**
  * "Next · Fri Nov 27": the board's heading when every game it lists belongs to a later night (an
- * evening with no game of its own, or after midnight once the night's games left the list), so
- * those games are never headed with tonight's date.
+ * evening with no game of its own, or after midnight once the night's games left the list), and
+ * the subheading of a later night's games listed under the night's own, so those games are never
+ * headed with tonight's date.
  */
 export function nextLabel(tip: number): string {
   return `Next · ${etDayLabel(tip).replace(',', '')}`
@@ -258,6 +259,13 @@ export interface BoardModel {
   teams: string[]
   /** The rows after the follow filter, in list order. */
   items: BoardItem[]
+  /** The rows under `label`: the night's own games, or every row when all are of a later night. */
+  list: BoardItem[]
+  /**
+   * Rows of a later night in a list that also heads the night's own games (the next slate is
+   * often under 24 h away): each night under its own "Next · Sat Nov 28", in list order.
+   */
+  later: Array<{ label: string; items: BoardItem[] }>
   /** The line for an empty board, with the words the board already uses; null with rows. */
   empty: string | null
   /** The follow filter left the board empty: it offers "Show all games". */
@@ -297,6 +305,8 @@ export function boardModel(
     return {
       teams: [],
       items: [],
+      list: [],
+      later: [],
       dial: [],
       empty: 'Loading games…',
       filtered: false,
@@ -318,8 +328,8 @@ export function boardModel(
       ? tonight
       : tonight.filter((g) => follows.includes(g.home) || follows.includes(g.away))
   const items = shown.map((g) => boardItem(g, portfolio, now)).sort(listOrder)
-  const later = upcomingOf(games, now) ?? upcoming
-  const ahead = later && later.tip > now ? later : null
+  const coming = upcomingOf(games, now) ?? upcoming
+  const ahead = coming && coming.tip > now ? coming : null
   const over = nightOver(games, now)
   // The dial rests on a night with no game of its own (R7 review adv-1, finding 1): the 24 h list
   // may already hold the next night's games, which never make tonight a game night. A night whose
@@ -330,9 +340,25 @@ export function boardModel(
   // Every listed game is of a later night: head the list with that night's date, not tonight's.
   const firstListed = Math.min(...tonight.map(tipOf))
   const laterOnly = tonight.length > 0 && !tonight.some((g) => ofNight(g, night))
+  const byNight = new Map<string, BoardItem[]>()
+  if (!laterOnly) {
+    for (const i of items) {
+      if (ofNight(i.game, night)) continue
+      const day = etDay(tipOf(i.game))
+      byNight.set(day, [...(byNight.get(day) ?? []), i])
+    }
+  }
+  const later = [...byNight.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([, rows]) => ({
+      label: nextLabel(Math.min(...rows.map((i) => tipOf(i.game)))),
+      items: rows,
+    }))
   const base = {
     teams,
     items,
+    list: laterOnly ? items : items.filter((i) => ofNight(i.game, night)),
+    later,
     dial: resting ? [] : items,
     chainNow,
     label: laterOnly ? nextLabel(firstListed) : label,
