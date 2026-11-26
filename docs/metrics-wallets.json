@@ -50,6 +50,11 @@
       "pubkey": "9v2ZmruntFtM4HmUFNq3Nn3rpXhV3uh8FmyRWafVbcHN",
       "role": "team-burner",
       "addedAt": "2026-11-26"
+    },
+    {
+      "pubkey": "7Da24CpktL9Cp4st1iQ3U4ZKHgsRYXXEJx5oGbgFWP1Z",
+      "role": "team-burner",
+      "addedAt": "2026-11-26"
     }
   ],
   "excludedMarkets": []

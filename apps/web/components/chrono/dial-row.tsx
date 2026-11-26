@@ -1,11 +1,15 @@
 'use client'
 // One game in the board's list (spec 3.2, L1 style): MiniDial, teams and score, the price, the
-// close in ET and a diamond for your position. The whole row is one link to the game.
+// latest close in ET and a diamond for your position. The whole row is one link to the game.
 import Link from 'next/link'
 import { type BoardItem, itemLabel } from '../../lib/chrono/board'
+import type { DialState } from '../../lib/chrono/state'
 import { etClock } from '../../lib/chrono/time'
 import { cents, gameClock } from '../../lib/format'
 import { MiniDial } from './mini-dial'
+
+/** A market in these states still trades: it closes at the final buzzer, at the latest at end_ts. */
+const TRADING: ReadonlySet<DialState> = new Set(['pre', 'live', 'closing'])
 
 export function DialRow(p: {
   item: BoardItem
@@ -42,9 +46,11 @@ export function DialRow(p: {
           {item.price === null ? '—' : cents(item.price)}
         </span>
         <span className="block font-mono text-11 text-ash-400">
-          {item.market
-            ? `closes ${etClock(item.interval.end)}`
-            : `opens ${etClock(item.interval.start)}`}
+          {!item.market
+            ? `opens ${etClock(item.interval.start)}`
+            : TRADING.has(item.state)
+              ? `latest ${etClock(item.interval.end)}`
+              : 'closed'}
         </span>
       </span>
       {item.held && <span className="text-15 text-lume-300">◆</span>}

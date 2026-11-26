@@ -11,7 +11,7 @@ const BASE: DialProps = {
   modelProb: 0.74,
   timeLeft: 0.5,
   state: 'live',
-  label: 'CLE wins, 77 cents, model 74, closes in 1 hour 2 minutes',
+  label: 'CLE wins, 77 cents, model 74, open until the final buzzer',
   team: 'CLE',
 }
 
@@ -144,7 +144,7 @@ describe('dial words', () => {
 
   it('says one line per state, with the copy the app already uses', () => {
     expect(stateLine('closing', live, 252, NOW)).toBe('closes in 4:12')
-    expect(stateLine('live', live, 3730, NOW)).toBe('closes in 1:02:10')
+    expect(stateLine('live', live, 3730, NOW)).toBe('Open until the final buzzer')
     expect(stateLine('closed', live, 0, NOW)).toBe('Trading closed, waiting for the result')
     expect(stateLine('challenged', live, 0, NOW)).toBe('Result under review')
     expect(stateLine('halted', live, 900, NOW)).toBe('Trading halted')

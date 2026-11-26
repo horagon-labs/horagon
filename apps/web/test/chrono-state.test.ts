@@ -161,7 +161,16 @@ describe('dialLabel (spec 2.6)', () => {
   }
 
   it('reads the whole dial in one sentence', () => {
-    expect(dialLabel(base)).toBe('CLE wins, 77 cents, model 74, closes in 1 hour 2 minutes')
+    expect(dialLabel(base)).toBe('CLE wins, 77 cents, model 74, open until the final buzzer')
+    expect(dialLabel({ ...base, state: 'pre', gameStatus: 'scheduled' })).toMatch(
+      /open until the final buzzer$/,
+    )
+  })
+
+  it('counts down only in the last 5 min before end_ts, when the market closes then', () => {
+    expect(dialLabel({ ...base, state: 'closing', secsLeft: 252 })).toBe(
+      'CLE wins, 77 cents, model 74, closes in 4 minutes',
+    )
   })
 
   it('says when there is no price, model or market yet', () => {

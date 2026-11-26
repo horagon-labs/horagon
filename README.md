@@ -2,7 +2,7 @@
 
 # Horagon
 
-**Game-day prediction markets for the NBA, built on pm-AMM on Solana. Horagon will give each game one market, "will the home team win?". It opens an hour before tip-off and closes 2 h 10 min after the scheduled tip-off, before the final buzzer in 219 of 220 games measured, and while it is open its liquidity shrinks on pm-AMM's √(time left) schedule. A fan will see every position they hold tonight on one screen, and bots and AI agents will trade the same markets through a typed SDK and API.**
+**Game-day prediction markets for the NBA, built on pm-AMM on Solana. Horagon will give each game one market, "will the home team win?". It opens an hour before tip-off and closes at the final buzzer, when the keeper first reads Final, or at the latest 3 h after the scheduled tip-off, which 263 of 268 games measured ended before. While it is open its liquidity shrinks on pm-AMM's √(time left) schedule. A fan will see every position they hold tonight on one screen, and bots and AI agents will trade the same markets through a typed SDK and API.**
 
 [![CI](https://github.com/horagon-labs/horagon/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/horagon-labs/horagon/actions/workflows/ci.yml)
 [![Play money on devnet](https://img.shields.io/badge/money-play%20money%20on%20devnet-b45309?style=flat-square)](#play-money)
@@ -77,8 +77,8 @@ a local fork of devnet:
   games of 2026-11-18 ET were recorded for replay.
 - **S5:** the pm-AMM faucet paid 1,000 mUSDC per wallet to a script, once an hour.
 
-A sixth measurement, end-ts, set when markets close: S + 2 h 10 min, from the play-by-play of
-220 games.
+A sixth measurement, end-ts, set the latest close: S + 3 h, from the play-by-play of 268 games.
+A market closes at the final buzzer before that.
 
 Tier 1 then built the Horagon program, the keeper, API v1 and the web app, with their tests.
 They are not deployed yet: no Horagon market exists on devnet, and the first live NBA night is
@@ -157,10 +157,12 @@ close.
 
 **Where the fit is imperfect.** pm-AMM has no pause and no early resolution:
 
-- **The close comes early.** A market still open after the result is known gets sniped, and
-  `end_ts` is fixed when the market is created. Horagon closes at S + 2 h 10 min (S is the
-  scheduled tip-off): over 220 games, that came before the final buzzer in 219, with a median
-  4.4 of the fourth quarter's 12 minutes played (see [Limits](#limits-stated-plainly)).
+- **The close is a halt.** A market still open after the result is known gets sniped, and
+  `end_ts` is fixed when the market is created. Horagon sets `end_ts` at S + 3 h (S is the
+  scheduled tip-off) and closes each market at the final buzzer by halting it on ESPN's first
+  Final. Over 268 games, 263 ended before S + 3 h; the other 5 (4 of them in overtime) would
+  have closed early. A result can only be proposed from `end_ts` on, so settlement waits for it
+  (see [Limits](#limits-stated-plainly)).
 - **The only stop is withdrawing liquidity.** The one emergency stop is for the sole LP to
   withdraw everything, which makes the next swap fail with `InsufficientLiquidity` (6004). S1
   measured exactly that.
@@ -287,7 +289,7 @@ check). The devnet figures and the recorded night are from commit `a42801b` on `
 | Compute                                    | Swaps used 391,187 to 506,088 CU. The sponsored swap set an 800,000 limit (the validator allows at most 1,000,000); S1's swaps set 1,400,000. Market creation through a program PDA used 577,046 CU, against 1,400,000                                                                                                                                     | S1, S3a, S2                                                                                                                                                                                        |
 | Faucet                                     | 1,000 mUSDC per wallet per hour; no SOL on 2026-11-18, because its SOL reserve was empty                                                                                                                                                                                                                                                                   | S5                                                                                                                                                                                                 |
 | Recorded NBA night                         | 12 games of 2026-11-18 ET, 4,890 raw lines (1.25 GB), from 23:30 UTC to 05:41 UTC, compacted into 12 replay fixtures of 233 to 308 frames                                                                                                                                                                                                                  | S4, [`tests/fixtures/replay`](tests/fixtures/replay)                                                                                                                                               |
-| Market close (`end_ts`)                    | S + 2 h 10 min. Of 220 regular-season games of 2026-10-20 to 2026-11-18, 1 ended before it; by then a median 4.4 of the fourth quarter's 12 minutes had been played. At S + 2 h 20 min, 17 games would have ended first. Measured on 2026-11-19                                                                                                            | [`spikes/src/end-ts.ts`](spikes/src/end-ts.ts), [`spikes/data`](spikes/data)                                                                                                                       |
+| Market close (`end_ts`)                    | The final buzzer, by a halt on ESPN's first Final; `end_ts` = S + 3 h 00 min is the latest close. Of 268 regular-season games of 2026-10-20 to 2026-11-25, 5 (1.9%) were still being played at S + 3 h; at S + 2 h 55 min it would have been 16. Measured on 2026-11-26                                                                                    | [`spikes/src/end-ts.ts`](spikes/src/end-ts.ts), [`spikes/data`](spikes/data)                                                                                                                       |
 | Feed reachability                          | The NBA CDN answered 403 from a home connection, GitHub Actions and a rented Linux server. ESPN answered 200 from all three                                                                                                                                                                                                                                | [`spikes/results`](spikes/results)                                                                                                                                                                 |
 
 ## How a game night works
@@ -305,7 +307,9 @@ sequenceDiagram
     H->>P: initialize_market + deposit_liquidity (the PDA signs)
     F->>P: swap, sponsored, from a wallet with 0 SOL
     Note over P: liquidity shrinks as L₀·√(end_ts − t)
-    Note over P: end_ts = S + 2 h 10 min, trading stops
+    K->>H: halt on the first Final read, at the final buzzer
+    H->>P: withdraw_liquidity (the PDA signs), trading stops
+    Note over P: end_ts = S + 3 h, the latest close, then results can be proposed
     K->>G: draft result and evidence, after the final
     G->>H: propose_result with the evidence hash, after checking the box score
     G-->>H: challenge within 15 min if wrong
@@ -322,20 +326,22 @@ sequenceDiagram
    1,000 mUSDC for a featured game, 300 for the others.
 3. **During the game.** The keeper reads ESPN every 15 seconds and stores score, clock and model
    probability. It halts a market by withdrawing all liquidity in four cases:
-   - the game is final while the market is still open;
+   - the game is final while the market is still open: this is how a market closes at the
+     final buzzer;
    - the game is postponed or canceled;
    - the game has not started 24 hours after S;
    - the feed goes silent for over 10 minutes in the fourth quarter or overtime. After 2 minutes
-     it only alerts the guardian, who can halt by hand, because a halt cannot be undone. In the
-     last 30 minutes before the close it alerts on 2 silent minutes whatever quarter the feed last
-     showed, so an outage that starts in the third quarter cannot hide the fourth.
+     it only alerts the guardian, who can halt by hand, because a halt cannot be undone. From
+     S + 1 h 40 min, before any measured game reached the fourth quarter, it alerts on 2 silent
+     minutes whatever quarter the feed last showed, so an outage that starts in the third
+     quarter cannot hide the fourth.
 4. **After the final.** ESPN must report Final with the same score for at least 60 seconds.
    The keeper then drafts the result and its evidence JSON:
    - the score and the score of each period;
    - the rule and the outcome;
    - the sources, each with a fetch time.
 
-   The guardian checks the draft against the public box score and runs
+   The guardian checks the draft against the public box score and, from `end_ts` on, runs
    `horagon-ops propose <gameId> --box-score <url> --score <home>-<away>`, which publishes the
    JSON and calls `propose_result` with its sha256. Anyone can recompute the hash.
 5. **15 minutes later.** If no guardian has challenged, `finalize` resolves the pm-AMM market
@@ -445,18 +451,23 @@ interfaces it uses are tested.
 - **Devnet and play money only.** mUSDC is free from a faucet, so devnet activity costs little
   to fake. The design answers with engaged-wallet counts and separate reporting for bots, but a
   judge may still weigh devnet numbers below mainnet ones.
-- **Markets close before the end of the fourth quarter.** pm-AMM cannot pause or resolve
-  early, so `end_ts` is fixed at creation, at S + 2 h 10 min. It was set from ESPN's
-  play-by-play wallclock for the 220 regular-season games of 2026-10-20 to 2026-11-18
+- **The close at the buzzer is a halt, and results wait for `end_ts`.** pm-AMM cannot pause or
+  resolve early, so `end_ts` is fixed at creation, at S + 3 h, and the keeper closes a market at
+  the final buzzer by halting it on ESPN's first Final. `end_ts` was set from ESPN's
+  play-by-play wallclock for the 268 regular-season games of 2026-10-20 to 2026-11-25
   ([`spikes/src/end-ts.ts`](spikes/src/end-ts.ts), data in [`spikes/data`](spikes/data)):
-  - 1 game ended before that close, a 37-point blowout. At S + 2 h 20 min, 17 would have.
-  - At the close, 192 of the 220 games were in the fourth quarter and 1 had ended. At the
-    median, 4.4 of the quarter's 12 minutes had been played; the rest of it, and overtime, is
-    not tradable.
-  - The fourth quarter trades on thin liquidity: depth follows √(time left), so with 11
-    minutes to the close it is about a quarter of the opening depth.
-  - A game that ends before the close is halted on ESPN's first Final, which on 2026-11-18
-    came 25 to 148 seconds after the buzzer. Until then the market can be sniped.
+  - 5 games (1.9%), 4 of them in overtime, were still being played at S + 3 h: their markets
+    close before the buzzer. At S + 2 h 45 min it would have been 36, and at S + 2 h 10 min, the
+    close until 2026-11-26, all but 1.
+  - A result can be proposed only from `end_ts` on. A game of median length ends at
+    S + 2 h 32 min, so it settles about 45 minutes after its buzzer: 28 minutes to `end_ts`,
+    then the 15-minute dispute window.
+  - The halt waits for the feed. ESPN showed Final 25 to 148 seconds after the buzzer on
+    2026-11-18, and the keeper reads it every 15 seconds; until the halt lands the market can
+    be sniped. Depth follows √(time left), so at a median buzzer, 28 of the market's 240
+    minutes before `end_ts`, it is about a third of the opening depth.
+  - A feed silent for 10 minutes in the fourth quarter or overtime halts the market before the
+    buzzer.
 - **Sniping between the score and the halt.** A trader who sees the score before the feed does,
   for example at the arena, can trade against the pool until the market closes or is halted.
   The shrinking liquidity limits the loss, and in play money Horagon accepts it.
@@ -503,9 +514,9 @@ Here is the argument against building it:
 - **Devnet traction is easy to discount.** Play-money markets on devnet prove less than real
   money would, and a real-money sports market run by a small team is legally hard almost
   everywhere. So the product may never leave devnet.
-- **The tradable window misses the part fans care about most.** At the median, the close
-  comes with 7.6 minutes of the fourth quarter left, so the final minutes and overtime are
-  not tradable.
+- **Results come slowly.** Markets trade to the final buzzer, but a result can be proposed only
+  from `end_ts` = S + 3 h, so a game of median length settles about 45 minutes after it ends,
+  and a game still being played at S + 3 h closes early.
 - **The integrity of the result rests on one feed and one person.** It depends on an unofficial
   ESPN feed and one guardian until the watcher ships.
 - **There is no proof yet that anyone wants it.** The core loop has not run in front of a user.
@@ -514,8 +525,8 @@ Of these, the design answers some in part:
 
 - the dispute window, the published evidence hash and the second guardian;
 - engaged-wallet metrics, with bot wallets reported apart;
-- an `end_ts` set from 220 games of play-by-play, which the keeper can move by config as more
-  games come in.
+- a close at the final buzzer, with an `end_ts` set from 268 games of play-by-play that the
+  keeper can move by config as more games come in.
 
 Legal status and demand are not answered by code.
 

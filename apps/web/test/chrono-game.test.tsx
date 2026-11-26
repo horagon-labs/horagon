@@ -38,7 +38,7 @@ describe('gameDial (spec 4.2, 4.3)', () => {
       price: 0.77,
       timeLeft: 0.5,
       secsLeft: 3_730,
-      label: 'CLE wins, 77 cents, model 74, closes in 1 hour 2 minutes',
+      label: 'CLE wins, 77 cents, model 74, open until the final buzzer',
     })
   })
 

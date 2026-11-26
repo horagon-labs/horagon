@@ -10,9 +10,11 @@ export interface Timings {
   /** Create the winner market this long before the scheduled tip-off (spec 6.1: S - 60 min). */
   createLeadSecs: number
   /**
-   * Trading ends this long after the scheduled tip-off (spec 6.1: S + 2h10m). Over 220 games
-   * of 2026-10-20 to 2026-11-18, 1 ended before S + 2h10m, and at the median 4.4 of Q4's 12
-   * game minutes were tradable; at S + 2h20m, 17 games ended before the close.
+   * end_ts, this long after the scheduled tip-off: the latest a market can trade (S + 3h00m).
+   * The real close is the final buzzer: a Final read before end_ts halts the market
+   * (`final-before-end`). Over 268 games of 2026-10-20 to 2026-11-25, 5 (1.9%) were still being
+   * played at S + 3h00m and closed early; at S + 2h55m it was 16 (6%). S + 2h10m, the close
+   * until 2026-11-26, came with a median 7.2 of Q4's 12 game minutes left (spikes end-ts).
    */
   endOffsetSecs: number
   /** A game still not live this long after S is skipped instead of created late. */
@@ -26,16 +28,17 @@ export interface Timings {
   feedSilentAlertSecs: number
   /**
    * No feed for this long in Q4 or OT before end_ts halts the market (spec 6.2: 10 min). A halt
-   * cannot be undone and the market now trades into Q4 (a median 11 wall minutes), so a short
+   * cannot be undone and the market trades through Q4 (a median 33 wall minutes), so a short
    * ESPN outage only alerts.
    */
   feedSilentSecs: number
   /**
    * From this long before end_ts, no feed for feedSilentAlertSecs alerts whatever the feed last
    * showed, and a game not read since the keeper started alerts at once, its silence being unknown
-   * (spec 6.2: 30 min, so S + 1h40m). The keeper knows the quarter only from the feed: an outage
-   * that starts in Q3 and runs into Q4 never meets the Q4 rule. Over 220 games, Q4 began at
-   * S + 102.7 min at the earliest. This alert never halts.
+   * (spec 6.2: from S + 1h40m, so endOffsetSecs - 6,000). The keeper knows the quarter only from
+   * the feed: an outage that starts in Q3 and runs into Q4 never meets the Q4 rule, so the watch
+   * must start before any game reaches Q4. Over 268 games, Q4 began at S + 102.7 min at the
+   * earliest. This alert never halts.
    */
   feedSilentWatchSecs: number
   /** Not started this long after S halts the market (spec 6.2: S + 24h). */
@@ -48,12 +51,12 @@ export interface Timings {
 
 export const DEFAULT_TIMINGS: Timings = {
   createLeadSecs: 3_600,
-  endOffsetSecs: 7_800,
+  endOffsetSecs: 10_800,
   createGraceSecs: 1_800,
   finalStableSecs: 60,
   feedSilentAlertSecs: 120,
   feedSilentSecs: 600,
-  feedSilentWatchSecs: 1_800,
+  feedSilentWatchSecs: 4_800,
   notStartedSecs: 86_400,
   postponedResolveSecs: 7 * 86_400,
   missingSourceSecs: 1_800,
