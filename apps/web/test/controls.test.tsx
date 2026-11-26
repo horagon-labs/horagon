@@ -135,12 +135,12 @@ describe('the four control states (review §4.5)', () => {
     expect(contrast(COLORS.line, COLORS['enamel-950'])).toBeGreaterThanOrEqual(3)
   })
 
-  it('spells selected as the sunk fill under a 2 px ink edge', () => {
+  it('spells selected as the sunk fill under a 2 px ink edge, on an enabled control only', () => {
     expect(SELECTED.split(' ').sort()).toEqual(
       [
-        'aria-pressed:bg-enamel-800',
-        'aria-pressed:border-2',
-        'aria-pressed:border-ivory-100',
+        'enabled:aria-pressed:bg-enamel-800',
+        'enabled:aria-pressed:border-2',
+        'enabled:aria-pressed:border-ivory-100',
       ].sort(),
     )
     expect(contrast(COLORS['ivory-100'], COLORS['enamel-800'])).toBeCloseTo(14.9, 1)
@@ -186,6 +186,28 @@ describe('the four control states (review §4.5)', () => {
     expect(read('components', 'chrono', 'crown-panel.tsx')).toMatch(
       /text-15 font-semibold text-enamel-950 \$\{DISABLED\}/,
     )
+  })
+
+  it('draws a halted Pusher side that was picked as disabled, not selected (review v1 #1)', () => {
+    // Desktop passes `selected`, so a halted market has one side aria-pressed and disabled. The
+    // build CSS emits aria-pressed after disabled at the same specificity, so an ungated selected
+    // rule would win: a sunk fill under a 2 px dashed ink edge, neither state.
+    const halted = renderToStaticMarkup(
+      <Pusher
+        mode={{ kind: 'buy', locked: true, note: null }}
+        home="CLE"
+        away="MEM"
+        price={0.77}
+        onPick={noop}
+        selected="home"
+        funding={false}
+        onFaucet={noop}
+      />,
+    )
+    const picked = classAt(halted, 'aria-pressed="true"')
+    expect(picked).toContain('rounded-card border-2')
+    for (const c of DISABLED.split(' ')) expect(picked, c).toContain(c)
+    expect(picked.split(' ').filter((c) => c.startsWith('aria-pressed:'))).toEqual([])
   })
 
   it('keeps the hold ring readable on a disabled button: rule-faint track, ink-muted progress', () => {

@@ -8,9 +8,13 @@ import { usdc } from '../format'
 export const DISABLED =
   'disabled:border disabled:border-dashed disabled:border-line disabled:bg-transparent disabled:text-ash-400'
 
-/** The picked one of a set (`aria-pressed`): the sunk slot and a 2 px ink edge (14.90 inside). */
+/**
+ * The picked one of a set (`aria-pressed`): the sunk slot and a 2 px ink edge (14.90 inside). Only
+ * while enabled: a picked side of a halted market is disabled, and the build emits `aria-pressed:`
+ * after `disabled:` at the same specificity, so an ungated rule would mix the two looks.
+ */
 export const SELECTED =
-  'aria-pressed:border-2 aria-pressed:border-ivory-100 aria-pressed:bg-enamel-800'
+  'enabled:aria-pressed:border-2 enabled:aria-pressed:border-ivory-100 enabled:aria-pressed:bg-enamel-800'
 
 /**
  * A change in mUSDC with its sign printed, "+0.85" or "−1.20" (U+2212): gains and losses weigh the
