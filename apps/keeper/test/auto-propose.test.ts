@@ -285,6 +285,34 @@ describe('the keeper proposes, checks and pages', () => {
     expect(chain.sends).toEqual([`propose ${ID}`])
   })
 
+  it('keeps holding when balldontlie stops reporting the game, and after a restart', async () => {
+    bdl = { status: 'Final', home: 110, away: 106 }
+    const k = keeperWith()
+    await drafted(k)
+    expect(await at(k, END - 840)).toEqual([])
+    expect(await at(k, END)).toEqual(['hold'])
+    // balldontlie no longer lists the game, then is down: silence is no agreement.
+    bdl = 'none'
+    expect(await at(k, END + 300)).toEqual(['hold'])
+    expect(await at(k, END + 660)).toEqual(['hold'])
+    bdl = 'down'
+    expect(await at(k, END + 1_300)).toEqual(['hold'])
+    expect(chain.sends).toEqual([])
+    // A restart forgets the checks in memory, not the hold: balldontlie stays down past the wait.
+    // It reads the Final anew (held 60 s from END + 1,310), then holds past the 600 s wait.
+    const again = keeperWith()
+    expect(await at(again, END + 1_310)).toEqual([])
+    expect(await at(again, END + 1_370)).toEqual(['hold'])
+    expect(await at(again, END + 2_000)).toEqual(['hold', 'alert'])
+    expect(alerts.at(-1)?.[1]).toContain('held: ESPN 106-111 vs balldontlie 106-110')
+    expect(chain.sends).toEqual([])
+    expect(keys().filter((key) => key.startsWith('auto-proposed'))).toEqual([])
+    // Only an answer that agrees with the draft ends the hold.
+    bdl = { status: 'Final', home: 111, away: 106 }
+    expect(await at(again, END + 2_060)).toEqual(['propose'])
+    expect(chain.sends).toEqual([`propose ${ID}`])
+  })
+
   it('a dry run pages once, and sends and writes nothing', async () => {
     const k = keeperWith({
       autoPropose: {

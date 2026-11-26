@@ -9,6 +9,8 @@ import {
   type GameWithMarkets,
   getDraft,
   getEvidence,
+  getHeartbeat,
+  heartbeat,
   insertSnapshot,
   listGames,
   logOps,
@@ -34,6 +36,7 @@ import {
 import { toHex } from '@horagon/sdk/evidence'
 import type { Keypair } from '@solana/web3.js'
 import type { Logger } from 'pino'
+import { z } from 'zod'
 import type { Alerter } from './alerts'
 import type { AutoProposeConfig } from './config'
 import { ProgramFailure, type TxSender } from './executor'
@@ -110,6 +113,17 @@ interface Check {
 }
 
 const sameScore = (a: Score, b: Score) => a.home === b.home && a.away === b.away
+
+/** `keeper_heartbeats.process` of a game's held result, which a restart must not forget. */
+export const heldRecordKey = (gameId: string) => `second-source:${gameId}`
+
+const ScoreSchema = z.object({ home: z.number().int(), away: z.number().int() })
+/** The held result: balldontlie's contradicting final, or null once it agreed with the draft. */
+const HeldRecordSchema = z.object({
+  draft: ScoreSchema,
+  second: ScoreSchema.nullable(),
+  since: z.number(),
+})
 
 interface Observed {
   game: FeedGame
@@ -390,6 +404,8 @@ export class Keeper {
   private readonly proposeErrors = new Map<string, string>()
   /** `<gameId>:<round>` of the dry-run pages already sent. */
   private readonly dryPaged = new Set<string>()
+  /** Games whose held-result record was read since the keeper started. */
+  private readonly holdsRead = new Set<string>()
 
   constructor(private readonly d: KeeperDeps) {}
 
@@ -535,6 +551,7 @@ export class Keeper {
         }
       }),
     )
+    await this.readHolds(states)
     await this.checkSecondSource(now, states, disputeWindowSecs)
     for (const s of states) {
       s.secondSource = this.secondSourceOf(s, now)
@@ -670,6 +687,34 @@ export class Keeper {
     }
   }
 
+  /**
+   * After a restart, the hold of each pending Final draft balldontlie contradicted, read once per
+   * game: without it, a balldontlie that stays silent after the restart would let the keeper
+   * propose that result unchecked once the wait has passed.
+   */
+  private async readHolds(states: readonly GameState[]): Promise<void> {
+    if (this.d.autoPropose?.mode !== 'on' || !this.d.autoPropose.secondSource) return
+    for (const s of states) {
+      const { game: g, draft } = s
+      if (draft?.state !== 'pending' || draft.status !== 'final') continue
+      if (g.league !== 'NBA' || this.checks.has(g.id) || this.holdsRead.has(g.id)) continue
+      const row = await getHeartbeat(this.d.db, heldRecordKey(g.id))
+      this.holdsRead.add(g.id)
+      const held = HeldRecordSchema.safeParse(row?.info)
+      const score = { home: draft.homeScore, away: draft.awayScore }
+      if (!held.success || !held.data.second || !sameScore(held.data.draft, score)) continue
+      const { since, second } = held.data
+      this.checks.set(g.id, {
+        verdict: 'mismatch',
+        since,
+        draft: score,
+        second,
+        bdlId: null,
+        fetchedAt: since,
+      })
+    }
+  }
+
   private async recordCheck(s: GameState, got: DateGames): Promise<void> {
     const { game: g, draft } = s
     if (!draft) return
@@ -682,15 +727,33 @@ export class Keeper {
         ? { home: game.homeScore, away: game.awayScore }
         : null
     const prev = this.checks.get(g.id)
+    const held = prev?.verdict === 'mismatch' && sameScore(prev.draft, score)
+    // A hold ends only when balldontlie agrees with the draft: a game it no longer lists, or no
+    // final from it, is silence, not agreement.
+    if (held && verdict === 'pending') return
     const same = prev !== undefined && prev.verdict === verdict && sameScore(prev.draft, score)
+    const since = same ? prev.since : got.fetchedAt
     this.checks.set(g.id, {
       verdict,
-      since: same ? prev.since : got.fetchedAt,
+      since,
       draft: score,
       second,
       bdlId: game?.id ?? null,
       fetchedAt: got.fetchedAt,
     })
+    // The hold outlives a restart (readHolds): written when it starts or its score changes, and
+    // cleared when balldontlie comes to agree. A dry run proposes nothing, so it keeps none.
+    const moved =
+      verdict === 'mismatch'
+        ? !(same && prev.second && second && sameScore(prev.second, second))
+        : held
+    if (moved && this.d.autoPropose?.mode === 'on') {
+      await heartbeat(this.d.db, heldRecordKey(g.id), {
+        draft: score,
+        second: verdict === 'mismatch' ? second : null,
+        since,
+      })
+    }
     if (same) return
     await logOps(this.d.db, {
       actor: 'keeper',

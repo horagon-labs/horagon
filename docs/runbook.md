@@ -505,7 +505,9 @@ The pages and what to do:
   balldontlie is wrong, nothing to do: the result finalizes when the window closes.
 - `source-held:`: the two sources disagree and nothing was proposed. Check the box score, then
   propose by hand (A): `--score` from the box score, and `--periods` when ESPN is the one that is
-  wrong. If balldontlie comes to agree with ESPN first, the keeper proposes by itself.
+  wrong. If balldontlie comes to agree with ESPN first, the keeper proposes by itself. Only that
+  ends the hold: a balldontlie that stops listing the game, or goes down, keeps it, and so does a
+  keeper restart (the hold is kept in a `keeper_heartbeats` row per game).
 - `unconfirmed:` with a cause (a dry run, a held result, a propose that keeps failing, and so
   on): propose by hand (A) with the command it prints.
 - `fail:` for a propose: the program refused the attestor's proposal. The keeper tries again
