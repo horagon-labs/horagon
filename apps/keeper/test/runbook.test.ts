@@ -300,6 +300,17 @@ describe('docs/runbook.md and the alert keys in the code', () => {
     expect([...NOT_ALERT_WORDS].filter((w) => code.has(w))).toEqual([])
   })
 
+  it('gives every row of the alert table as many cells as its header', () => {
+    // GFM splits a row on every `|` not escaped as `\|`, inside a code span too: a stray one
+    // shifts the row's text into the wrong columns and drops its last cell.
+    const cells = (line: string) => line.split(/(?<!\\)\|/).length
+    const lines = alertsSection()
+      .split('\n')
+      .filter((l) => l.startsWith('|'))
+    const header = cells(lines[0] ?? '')
+    expect(lines.filter((l) => cells(l) !== header)).toEqual([])
+  })
+
   it('says "3 h" for exactly the keys that wait on a person', () => {
     for (const row of tableRows()) {
       for (const key of row.keys) {
