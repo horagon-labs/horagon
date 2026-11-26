@@ -113,3 +113,21 @@ describe('telegramAlerter dedupeFor', () => {
     expect(a.keys).toHaveLength(2)
   })
 })
+
+describe('telegramAlerter delivery', () => {
+  it('says whether the message reached Telegram, until the key is tried again', async () => {
+    let up = false
+    const a = alerter({ ok: () => up })
+    expect(await a.send('auto-proposed:nba-1:0')).toBe(false)
+    // Within the 60 s before a retry, nothing is sent and the message is still not delivered.
+    a.clock.t += 30
+    expect(await a.send('auto-proposed:nba-1:0')).toBe(false)
+    up = true
+    a.clock.t += 30
+    expect(await a.send('auto-proposed:nba-1:0')).toBe(true)
+    // A repeat of a delivered key is dropped as delivered.
+    a.clock.t += 5
+    expect(await a.send('auto-proposed:nba-1:0')).toBe(true)
+    expect(a.keys).toEqual(['auto-proposed:nba-1:0', 'auto-proposed:nba-1:0'])
+  })
+})

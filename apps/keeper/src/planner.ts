@@ -102,6 +102,11 @@ export interface GameState {
   secondSource?: SecondSourceState | null
   /** Why the keeper's last auto-propose of this game did not land, if it failed. */
   proposeError?: string | null
+  /**
+   * The proposal on chain is the keeper's own (its attestor proposed it) and its
+   * `auto-proposed:` page has not been delivered yet (R6). Absent means false.
+   */
+  pageOwed?: boolean
 }
 
 export type AutoProposeMode = 'on' | 'dry' | 'off'
@@ -161,6 +166,11 @@ export type Action =
   | { type: 'hold'; gameId: string; espn: Score; second: Score }
   /** The second source contradicts a proposal still open to challenge. */
   | { type: 'mismatch'; gameId: string; proposed: Score; second: Score; challengeBy: number }
+  /**
+   * The `auto-proposed:` page of the keeper's proposal, while it is open to challenge and not yet
+   * delivered: sent again when it was lost (a failed delivery, a failure after landing, a restart).
+   */
+  | { type: 'announce'; gameId: string; closesAt: number }
 
 export interface PlanInput {
   now: number
@@ -181,9 +191,10 @@ const ORDER: Record<Action['type'], number> = {
   propose: 4,
   create: 5,
   draft: 6,
-  hold: 7,
-  mismatch: 8,
-  alert: 9,
+  announce: 7,
+  hold: 8,
+  mismatch: 9,
+  alert: 10,
 }
 
 export function priceBps(p0: number): number {
@@ -294,6 +305,15 @@ function planGame(s: GameState, input: PlanInput): Action[] {
         })
       }
     }
+  }
+
+  const inWindow = chain.status === 'proposed' && now < chain.proposedAt + input.disputeWindowSecs
+  if ((input.autoPropose ?? 'off') !== 'off' && inWindow && s.pageOwed) {
+    out.push({
+      type: 'announce',
+      gameId: g.id,
+      closesAt: chain.proposedAt + input.disputeWindowSecs,
+    })
   }
 
   const second = s.secondSource

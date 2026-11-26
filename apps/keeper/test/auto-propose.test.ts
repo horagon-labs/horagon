@@ -1,4 +1,12 @@
-import { type DbHandle, getDraft, getEvidence, getGame, listOps } from '@horagon/db'
+import {
+  type DbHandle,
+  getDraft,
+  getEvidence,
+  getGame,
+  listOps,
+  setDraftState,
+  updateMarket,
+} from '@horagon/db'
 import { createTestDb } from '@horagon/db/testing'
 import { parseResolutionEvidence } from '@horagon/sdk'
 import { Keypair } from '@solana/web3.js'
@@ -217,6 +225,81 @@ describe('the keeper proposes, checks and pages', () => {
     expect(chain.sends).toEqual([`propose ${ID}`, `finalize ${ID}`, `recycle ${ID}`])
     expect((await getGame(h.db, ID))?.markets[0]).toMatchObject({ status: 'recycled' })
     expect(keys().filter((key) => key.startsWith('unconfirmed'))).toEqual([])
+    // The proposal was paged once.
+    expect(keys().filter((key) => key.startsWith('auto-proposed'))).toEqual([
+      `auto-proposed:${ID}:0`,
+    ])
+  })
+
+  it('sends the proposal page again until it is delivered', async () => {
+    let refused = 2
+    const k = keeperWith({
+      alerts: {
+        send: async (key, text) => {
+          alerts.push([key, text])
+          if (!key.startsWith('auto-proposed') || refused === 0) return true
+          refused--
+          return false
+        },
+      },
+    })
+    await drafted(k)
+    await at(k, END - 840)
+    expect(await at(k, END)).toEqual(['propose'])
+    expect(await at(k, END + 5)).toEqual(['announce'])
+    expect(await at(k, END + 60)).toEqual(['announce'])
+    expect(await at(k, END + 65)).toEqual([])
+    const pages = alerts.filter(([key]) => key === `auto-proposed:${ID}:0`)
+    expect(pages).toHaveLength(3)
+    expect(new Set(pages.map(([, text]) => text)).size).toBe(1)
+    expect(pages[0]?.[1]).toContain(`closes at ${utcAndEt(END + 900)}`)
+    expect(chain.sends).toEqual([`propose ${ID}`])
+  })
+
+  it('pages a proposal whose page or writes after landing failed, on a later tick', async () => {
+    let broken = true
+    const k = keeperWith({
+      autoPropose: {
+        mode: 'on',
+        evidenceUri: (id) => evidenceUri('https://www.horagon.xyz', 'devnet', id),
+        secondSource: null,
+      },
+      alerts: {
+        send: async (key, text) => {
+          if (key.startsWith('auto-proposed') && broken) throw new Error('page lost')
+          alerts.push([key, text])
+        },
+      },
+    })
+    await drafted(k)
+    expect(await at(k, END)).toEqual(['propose'])
+    expect(keys().filter((key) => key.startsWith('auto-proposed'))).toEqual([])
+    broken = false
+    expect(await at(k, END + 5)).toEqual(['announce'])
+    expect(alerts.at(-1)).toEqual([
+      `auto-proposed:${ID}:0`,
+      `CHECK: proposed YES for MEM@CLE, Final 106-111 (ESPN), with no second source: BALLDONTLIE_API_KEY is not set. Check the box score: ${BOX}. If wrong, challenge before ${utcAndEt(END + 900)}: horagon-ops challenge ${ID}`,
+    ])
+    expect(await at(k, END + 10)).toEqual([])
+
+    // The writes after landing failed (the draft still pending, the row still halted), then the
+    // keeper restarted: it syncs the row, marks the draft proposed and pages the proposal again.
+    await setDraftState(h.db, ID, { state: 'pending' })
+    const pubkey = (await getGame(h.db, ID))?.markets[0]?.pubkey ?? ''
+    await updateMarket(h.db, pubkey, { status: 'halted', proposedAt: null })
+    const again = keeperWith({
+      autoPropose: {
+        mode: 'on',
+        evidenceUri: (id) => evidenceUri('https://www.horagon.xyz', 'devnet', id),
+        secondSource: null,
+      },
+    })
+    expect(await at(again, END + 30)).toEqual(['sync', 'announce'])
+    expect((await getDraft(h.db, ID))?.state).toBe('proposed')
+    expect((await getGame(h.db, ID))?.markets[0]).toMatchObject({ status: 'proposed' })
+    expect(alerts.filter(([key]) => key === `auto-proposed:${ID}:0`)).toHaveLength(2)
+    expect(await at(again, END + 35)).toEqual([])
+    expect(chain.sends).toEqual([`propose ${ID}`])
   })
 
   it('without a balldontlie key, proposes unchecked and pages CHECK', async () => {

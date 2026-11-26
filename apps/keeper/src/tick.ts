@@ -31,6 +31,7 @@ import {
   marketIdFor,
   marketName,
   outcomeFor,
+  parseResolutionEvidence,
   winProbability,
 } from '@horagon/sdk'
 import { toHex } from '@horagon/sdk/evidence'
@@ -406,6 +407,8 @@ export class Keeper {
   private readonly dryPaged = new Set<string>()
   /** Games whose held-result record was read since the keeper started. */
   private readonly holdsRead = new Set<string>()
+  /** `<gameId>:<round>:<evidence hash>` of the keeper's proposals whose page was delivered. */
+  private readonly paged = new Set<string>()
 
   constructor(private readonly d: KeeperDeps) {}
 
@@ -556,6 +559,7 @@ export class Keeper {
     for (const s of states) {
       s.secondSource = this.secondSourceOf(s, now)
       s.proposeError = this.proposeErrors.get(s.game.id) ?? null
+      s.pageOwed = this.pageOwed(s)
     }
     const planned = plan({
       now,
@@ -612,9 +616,14 @@ export class Keeper {
       case 'propose':
         return this.propose(a, s, now)
       case 'hold':
-        return this.d.alerts.send(`source-held:${a.gameId}`, heldText(s.game, a))
+        await this.d.alerts.send(`source-held:${a.gameId}`, heldText(s.game, a))
+        return
       case 'mismatch':
-        return this.d.alerts.send(`source-mismatch:${a.gameId}`, mismatchText(s.game, a))
+        await this.d.alerts.send(`source-mismatch:${a.gameId}`, mismatchText(s.game, a))
+        return
+      case 'announce':
+        if (s.onchain) await this.page(s, s.onchain, a.closesAt)
+        return
       case 'alert': {
         const unconfirmed = a.key.startsWith('unconfirmed:')
         await this.d.alerts.send(unconfirmed ? `${a.key}:${roundOf(s)}` : a.key, a.text)
@@ -866,19 +875,51 @@ export class Keeper {
       return
     }
     this.proposeErrors.delete(g.id)
-    // The row gets proposed_at and the evidence check at once, not a tick later.
+    // The row gets proposed_at and the evidence check at once, not a tick later. If this read or
+    // the page fails, the planner's `announce` sends the page on a later tick.
     const gm = await this.sync(s)
-    const closesAt = (gm?.proposedAt || now) + (await this.disputeWindowSecs(now))
-    await this.d.alerts.send(
-      `auto-proposed:${g.id}:${round}`,
-      autoProposedText(g, draft, {
-        check: a.check,
-        reason: a.reason,
-        hashHex: out.sealed.hashHex,
+    if (gm?.status === 'proposed')
+      await this.page(s, gm, gm.proposedAt + (await this.disputeWindowSecs(now)))
+  }
+
+  private pagedKey(gameId: string, gm: GameMarketAccount): string {
+    return `${gameId}:${gm.challengeCount}:${toHex(gm.evidenceHash)}`
+  }
+
+  /** A proposal on chain that the keeper's attestor made, whose page was not delivered yet. */
+  private pageOwed(s: GameState): boolean {
+    const gm = s.onchain
+    if (this.d.autoPropose?.mode !== 'on' || gm?.status !== 'proposed') return false
+    if (!gm.proposer.equals(this.d.attestor.publicKey)) return false
+    return !this.paged.has(this.pagedKey(s.game.id, gm))
+  }
+
+  /**
+   * The `auto-proposed:` page of the keeper's proposal on chain, built from the evidence whose
+   * hash is on chain: checked when it cites balldontlie too, else CHECK. Kept as delivered once
+   * the alerter says so; until then the planner asks for it again each tick (`announce`).
+   */
+  private async page(s: GameState, gm: GameMarketAccount, closesAt: number): Promise<void> {
+    const g = s.game
+    const key = this.pagedKey(g.id, gm)
+    if (this.paged.has(key)) return
+    const hashHex = toHex(gm.evidenceHash)
+    const stored = await getEvidence(this.d.db, g.id, 0)
+    // Other evidence than the chain's is `evidence-mismatch:` (sync), not a page to build.
+    if (stored?.hash !== hashHex) return
+    const ev = parseResolutionEvidence(JSON.parse(stored.json))
+    const checked = ev.sources.length > 1
+    const delivered = await this.d.alerts.send(
+      `auto-proposed:${g.id}:${gm.challengeCount}`,
+      autoProposedText(g, ev, {
+        check: checked ? 'match' : 'unchecked',
+        reason: checked ? 'match' : this.d.autoPropose?.secondSource ? 'pending' : 'off',
+        hashHex,
         closesAt,
-        waitSecs,
+        waitSecs: this.d.timings.secondSourceWaitSecs,
       }),
     )
+    if (delivered !== false) this.paged.add(key)
   }
 
   /** The first salted market id that is free or already ours (spec 5.1). */
@@ -1145,15 +1186,17 @@ export class Keeper {
   /**
    * The API serves the stored evidence (kind 0): it must be the one whose hash is on chain, or
    * nobody can verify the result. Read only when a sync sees a hash on chain, never per tick.
+   * True when the stored evidence is the chain's.
    */
-  private async checkEvidence(s: GameState, chainHash: string): Promise<void> {
+  private async checkEvidence(s: GameState, chainHash: string): Promise<boolean> {
     const stored = await getEvidence(this.d.db, s.game.id, 0)
-    if (stored?.hash === chainHash) return
+    if (stored?.hash === chainHash) return true
     await this.d.alerts.send(
       `evidence-mismatch:${s.game.id}`,
       `Evidence mismatch: ${s.game.away}@${s.game.home} has sha256 ${chainHash} on chain, but the ` +
         `API serves ${stored ? `sha256 ${stored.hash}` : 'no evidence'}. Check it before the dispute window closes.`,
     )
+    return false
   }
 
   /** Copy the GameMarket's status, outcome and times into the DB row; returns what it read. */
@@ -1175,7 +1218,11 @@ export class Keeper {
       await setDraftState(this.d.db, s.game.id, { state: 'rejected' })
     const evidenceHash = gm.evidenceHash.some((b) => b !== 0) ? toHex(gm.evidenceHash) : null
     // Checked before the row is synced: if the read fails, the next tick syncs (and checks) again.
-    if (evidenceHash) await this.checkEvidence(s, evidenceHash)
+    const ours = evidenceHash !== null && (await this.checkEvidence(s, evidenceHash))
+    // A proposal of the stored evidence whose writes after landing failed (or a crash before
+    // them) leaves its draft pending: the second-source check of the window needs it proposed.
+    if (ours && gm.status === 'proposed' && s.draft?.state === 'pending')
+      await setDraftState(this.d.db, s.game.id, { state: 'proposed' })
     const settled = gm.status === 'finalized' || gm.status === 'recycled'
     await updateMarket(this.d.db, s.market.pubkey, {
       status: gm.status,

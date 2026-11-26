@@ -498,6 +498,9 @@ The pages and what to do:
   final from balldontlie 10 min after the propose time). Open the basketball-reference box score
   it links and compare the final score. If the proposal is wrong:
   `horagon-ops challenge <gameId>` before the time it gives, then C.
+- An `auto-proposed:` page that Telegram did not take is sent again every minute while the
+  window is open, also after a failure once the proposal landed, and once more after a keeper
+  restart. Its check is the one its evidence on chain carries.
 - `auto-proposed:` that begins `DRY RUN`: nothing was sent. Check the box score and propose by
   hand (A) with the command it prints.
 - `source-mismatch:`: balldontlie's final differs from a proposal still inside its window.

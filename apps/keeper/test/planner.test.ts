@@ -648,6 +648,7 @@ describe('auto-propose (R6)', () => {
       ],
       ['a postponed draft', ready({ draft: { ...pending, status: 'postponed' } as DraftRow })],
       ['a proposed draft', ready({ draft: { ...pending, state: 'proposed' } as DraftRow })],
+      ['a rejected draft', ready({ draft: { ...pending, state: 'rejected' } as DraftRow })],
       ['a feed no longer Final', ready({ feed: feed({ ...finalFeed, status: 'live' }) })],
       [
         'periods that no longer add up',
@@ -702,6 +703,27 @@ describe('auto-propose (R6)', () => {
     expect(types(auto(proposedAt + 900, 'on', proposed))).toEqual(['finalize'])
     expect(auto(proposedAt + 60, 'on', { ...proposed, secondSource: match })).toEqual([])
     expect(auto(proposedAt + 60, 'off', proposed)).toEqual([])
+  })
+
+  it('pages the keeper proposal until its page is delivered, inside the window', () => {
+    const proposedAt = END + 100
+    const owed = ready({
+      market: market('proposed'),
+      onchain: chain('proposed', { proposedAt }),
+      draft: { ...pending, state: 'proposed' } as DraftRow,
+      pageOwed: true,
+    })
+    const announce = { type: 'announce', gameId: ID, closesAt: proposedAt + 900 }
+    expect(auto(proposedAt, 'on', owed)).toEqual([announce])
+    expect(auto(proposedAt + 899, 'on', owed)).toEqual([announce])
+    // Its draft may still read pending when the writes after landing failed.
+    expect(auto(proposedAt + 5, 'on', { ...owed, draft: pending })).toEqual([announce])
+    expect(types(auto(proposedAt + 900, 'on', owed))).toEqual(['finalize'])
+    expect(auto(proposedAt + 5, 'on', { ...owed, pageOwed: false })).toEqual([])
+    expect(auto(proposedAt + 5, 'off', owed)).toEqual([])
+    expect(auto(proposedAt + 5, 'on', { ...owed, onchain: chain('halted') })).not.toContainEqual(
+      announce,
+    )
   })
 
   describe('the 30-min reminder names why nothing was proposed', () => {
