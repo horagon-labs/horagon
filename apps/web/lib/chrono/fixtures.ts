@@ -2,6 +2,7 @@
 // 9:08 PM ET with a game minutes from its close, two live games and two not open yet.
 import type {
   Game,
+  GameActivity,
   GameDetail,
   GameHistory,
   MarketSummary,
@@ -58,6 +59,20 @@ export function detail(over: Partial<GameDetail> = {}): GameDetail {
     ...game(),
     rules: ['Winner market: YES if CLE (home) wins, overtime included. Buy MEM = buy NO.'],
     resolutions: [],
+    activity: activity(),
+    ...over,
+  }
+}
+
+/** Who traded the game (R2b): nobody by default; the agent is REFERENCE_AGENT_WALLET. */
+export function activity(over: Partial<GameActivity> = {}): GameActivity {
+  const none = { swaps: 0, wallets: 0, volumeUsdc: '0' }
+  return {
+    agent: { ...none, wallet: '7Da24CpktL9Cp4st1iQ3U4ZKHgsRYXXEJx5oGbgFWP1Z' },
+    fans: none,
+    others: none,
+    lastFanTradeTs: null,
+    lastAgentTradeTs: null,
     ...over,
   }
 }

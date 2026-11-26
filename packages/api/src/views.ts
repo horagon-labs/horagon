@@ -7,6 +7,7 @@ import {
   etToday,
   formatAmount,
   type Game,
+  type GameActivity,
   type GameDetail,
   type GameHistory,
   type GameStatus,
@@ -99,6 +100,7 @@ export function toGameDetail(
   g: GameWithMarkets,
   prices: PriceIndex,
   publicUrl: string,
+  activity: GameActivity,
 ): GameDetail {
   return {
     ...toGame(g, prices),
@@ -107,6 +109,7 @@ export function toGameDetail(
       g.markets.map((m) => m.kind),
     ),
     resolutions: g.markets.map((m) => toResolution(m, publicUrl)),
+    activity,
   }
 }
 

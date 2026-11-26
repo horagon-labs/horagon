@@ -372,16 +372,22 @@ NO. `redeem_pair` (1 YES + 1 NO →
 market that fans leave quiet still follows the game. It starts in dry run (it decides and sends nothing) and goes live only after `main` is public. It is off unless enabled, and runs as its own process beside the keeper (a separate systemd unit, started by hand) ([`apps/keeper/src/agent`](apps/keeper/src/agent)) and pays its own
 fees, never through the sponsor. Every 20 seconds it looks at each live NBA winner market. It
 trades one only when the game has tipped off, more than 2 minutes remain before its `end_ts`,
-the model was updated in the last 60 seconds and no other wallet has traded that market for 90
-seconds. If the pool price is more than 0.04 from the model, it buys YES or NO (it never sells)
-to bring the price to 0.02 short of the model. It caps a swap at 100 mUSDC, and a market at
-2,000 mUSDC and 40 swaps; a gap one capped swap cannot close takes several rounds.
+the clock does not read 0:00 in the 4th quarter or overtime (the horn), the model was updated
+in the last 60 seconds and no other wallet has traded that market for 90 seconds. If the pool
+price is more than 0.04 from the model, it buys YES or NO (it never sells) to bring the price to
+0.02 short of the model. It caps a swap at 100 mUSDC, and a market at 2,000 mUSDC and 40 swaps;
+a gap one capped swap cannot close takes several rounds. If the gap grows on the same side after
+one of its swaps and no trade by another wallet is stored since, it holds that market for 2
+minutes; if the gap is still wider then, it stops trading that market and pages.
 
 Its wallet, `7Da24CpktL9Cp4st1iQ3U4ZKHgsRYXXEJx5oGbgFWP1Z`, is listed in
 [`docs/metrics-wallets.json`](docs/metrics-wallets.json) as `team-burner`, in a public commit
 made before its first swap, and the agent refuses to start unless the copy it ships with lists
-it so. Every swap it sends carries the `horagon:bot` memo, so it never counts as a fan, and its swaps are counted as team, not as fans. Reporting fan volume apart from agent volume is
-planned (R2b, due 2026-11-28); today `scripts/count-fans.mjs` reports wallets and swaps per class. Apart from it, no team wallet swaps on a live
+it so. Every swap it sends carries the `horagon:bot` memo, so it never counts as a fan, and its swaps are counted as team, not as fans. The game page shows the agent's swaps and volume
+apart from the fans' (and from other team or bot wallets), right under the dial, and the site's
+`/agent` page ([`apps/web/app/agent/page.tsx`](apps/web/app/agent/page.tsx)) explains how it
+trades and how that count is made. `scripts/count-fans.mjs` stays the official count of wallets
+and swaps per class. Apart from it, no team wallet swaps on a live
 market except in smoke tests and rehearsals, and every team wallet is listed and left out of the
 metrics.
 

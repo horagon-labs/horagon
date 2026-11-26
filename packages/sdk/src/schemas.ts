@@ -116,10 +116,33 @@ export const ResolutionSchema = z.object({
   externalLp: z.boolean(),
 })
 
+const CountSchema = z.number().int().nonnegative()
+/** Swaps on a game's markets, the wallets that sent them and their USDC volume. */
+export const TradeTallySchema = z.object({
+  swaps: CountSchema,
+  wallets: CountSchema,
+  /** The absolute USDC leg of every buy and sell; a YES<->NO swap adds 0. */
+  volumeUsdc: AmountSchema,
+})
+
+/**
+ * Who traded a game (R2b): the reference agent is its wallet exactly; `others` holds the other
+ * team wallets and the bots (the `horagon:bot` memo on any market, or 20 swaps on this game
+ * within 300 s); everyone else is a fan. A live display: `scripts/count-fans.mjs` is the count.
+ */
+export const GameActivitySchema = z.object({
+  agent: TradeTallySchema.extend({ wallet: PubkeySchema }),
+  fans: TradeTallySchema,
+  others: TradeTallySchema,
+  lastFanTradeTs: UnixSecondsSchema.nullable(),
+  lastAgentTradeTs: UnixSecondsSchema.nullable(),
+})
+
 export const GameDetailSchema = GameSchema.extend({
   /** The "Market rules" text, one rule per item (spec section 6.2). */
   rules: z.array(z.string()),
   resolutions: z.array(ResolutionSchema),
+  activity: GameActivitySchema,
 })
 
 export const GamesQuerySchema = z.strictObject({
@@ -320,6 +343,8 @@ export type Outcome = z.infer<typeof OutcomeSchema>
 export type MarketSummary = z.infer<typeof MarketSummarySchema>
 export type Game = z.infer<typeof GameSchema>
 export type GameDetail = z.infer<typeof GameDetailSchema>
+export type GameActivity = z.infer<typeof GameActivitySchema>
+export type TradeTally = z.infer<typeof TradeTallySchema>
 export type Resolution = z.infer<typeof ResolutionSchema>
 export type GameHistory = z.infer<typeof HistorySchema>
 export type MarketState = z.infer<typeof MarketStateSchema>

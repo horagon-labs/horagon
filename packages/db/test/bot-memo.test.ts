@@ -7,6 +7,7 @@ import {
   listMarketTrades,
   setTradeBotMemo,
   tradeSigsWithoutBotMemo,
+  walletsWithBotMemo,
 } from '../src'
 import { createTestDb } from '../src/testing'
 
@@ -75,5 +76,30 @@ describe('trades.bot_memo', () => {
       ['B', 2, false],
     ])
     expect(await countTradesWithoutBotMemo(h.db)).toBe(0)
+  })
+
+  it('lists the wallets in a list with a true memo, on any market, never false or null', async () => {
+    const on = (sig: string, wallet: string, market: string, botMemo?: boolean) => ({
+      ...trade(sig, 2, 1, botMemo),
+      wallet,
+      market,
+    })
+    await insertTrades(h.db, [
+      on('A', 'W1', 'M1', true),
+      on('B', 'W1', 'M2', true),
+      on('C', 'W2', 'M1', false),
+      on('D', 'W3', 'M1'),
+      on('E', 'W4', 'M9', true),
+      on('F', 'W5', 'M1', true),
+    ])
+    // W4's memo is on another market: still a bot wherever it trades. W5 is not asked for.
+    expect(await walletsWithBotMemo(h.db, ['W1', 'W2', 'W3', 'W4', 'W6'])).toEqual(
+      new Set(['W1', 'W4']),
+    )
+  })
+
+  it('answers an empty list with an empty set, without a query', async () => {
+    const noDb = {} as DbHandle['db']
+    expect(await walletsWithBotMemo(noDb, [])).toEqual(new Set())
   })
 })
