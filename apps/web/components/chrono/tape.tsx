@@ -26,6 +26,7 @@ import {
   type PeriodStart,
   periodStarts,
   runMarkers,
+  TAPE_FRAME,
   tapeCents,
   tapeTime,
 } from '../../lib/chrono/tape'
@@ -72,8 +73,8 @@ class QuarterLines implements ISeriesPrimitive<Time> {
     // biome-ignore lint/correctness/useHookAtTopLevel: fancy-canvas's drawing scope, not a hook
     target.useMediaCoordinateSpace(({ context, mediaSize }) => {
       context.save()
-      context.strokeStyle = COLORS['brass-700']
-      context.fillStyle = COLORS['ash-400']
+      context.strokeStyle = TAPE_FRAME.crosshair
+      context.fillStyle = TAPE_FRAME.text
       context.font = `11px ${this.font}`
       context.setLineDash([3, 3])
       for (const s of this.starts) {
@@ -130,26 +131,26 @@ export function Tape(props: {
       autoSize: true,
       layout: {
         background: { color: 'transparent' },
-        textColor: COLORS['ash-400'],
+        textColor: TAPE_FRAME.text,
         fontFamily: font,
       },
-      grid: { vertLines: { visible: false }, horzLines: { color: COLORS.line } },
+      grid: { vertLines: { visible: false }, horzLines: { color: TAPE_FRAME.grid } },
       crosshair: {
-        vertLine: { color: COLORS['brass-700'] },
-        horzLine: { color: COLORS['brass-700'] },
+        vertLine: { color: TAPE_FRAME.crosshair, labelBackgroundColor: TAPE_FRAME.crosshairLabel },
+        horzLine: { color: TAPE_FRAME.crosshair, labelBackgroundColor: TAPE_FRAME.crosshairLabel },
       },
       localization: { timeFormatter: (t: Time) => etClock(tapeTime(t)) },
       timeScale: {
         timeVisible: true,
         secondsVisible: false,
-        borderColor: COLORS.line,
+        borderColor: TAPE_FRAME.grid,
         rightOffsetPixels: RIGHT_OFFSET_PX,
         // The one fit holds across a resize (a rotated phone, a wider window), and so does a
         // range the user panned or zoomed to.
         lockVisibleTimeRangeOnResize: true,
         tickMarkFormatter: (t: Time) => etClock(tapeTime(t)),
       },
-      rightPriceScale: { borderColor: COLORS.line, scaleMargins: { top: 0.05, bottom: 0.05 } },
+      rightPriceScale: { borderColor: TAPE_FRAME.grid, scaleMargins: { top: 0.05, bottom: 0.05 } },
     })
     const line = { priceFormat, autoscaleInfoProvider: fullRange }
     const market = chart.addSeries(LineSeries, { ...line, ...MARKET_LINE })

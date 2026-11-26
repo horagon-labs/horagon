@@ -30,7 +30,7 @@ import { CrownPanel } from './crown-panel'
 import { CrownSheet } from './crown-sheet'
 import { Dial } from './dial'
 import { stateLine } from './dial-look'
-import { GameLoading, GameScreen, NoGame } from './game-screen'
+import { GameLoading, GameScreen, NoGame, StateLine } from './game-screen'
 import { MiniDial } from './mini-dial'
 import { PositionCard } from './position-card'
 import { Pusher } from './pusher'
@@ -250,7 +250,6 @@ export function Gallery() {
                   state={state}
                   caption={dialCaption(state, s.game, state === 'resolved' ? 'yes' : null)}
                   liveDot={s.game.status === 'live'}
-                  detail={stateLine(state, s.game, s.secsLeft, NOW)}
                   label={dialLabel({
                     game: s.game,
                     outcome: state === 'resolved' ? 'yes' : null,
@@ -260,6 +259,7 @@ export function Gallery() {
                     secsLeft: s.secsLeft,
                   })}
                 />
+                <StateLine>{stateLine(state, s.game, s.secsLeft, NOW)}</StateLine>
                 <figcaption className="text-center font-mono text-12 text-ash-400">
                   {state}
                 </figcaption>

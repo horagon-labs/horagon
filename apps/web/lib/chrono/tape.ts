@@ -9,6 +9,17 @@ import { COLORS } from './tokens'
 /** The market line: live, 2 px, the one solid line (light branding review §4.6). */
 export const MARKET_LINE = { color: COLORS.live, lineWidth: 2 } as const
 
+/**
+ * The chart's frame (review §4.6): axis words ink-muted, grid and borders in rule-faint (structure,
+ * no data), the crosshair in brass with an ink label (not the library's own dark default).
+ */
+export const TAPE_FRAME = {
+  text: COLORS['ash-400'],
+  grid: COLORS['rule-faint'],
+  crosshair: COLORS['brass-700'],
+  crosshairLabel: COLORS['ivory-100'],
+} as const
+
 /** Below this distance from 0 or 1, a chart price is float noise from the axis arithmetic. */
 const NOISE = 1e-9
 
@@ -60,7 +71,9 @@ export interface TapeMarker {
 }
 
 /**
- * One marker per run, at its last basket, in its side's color: "CLE 8–0". Markers sit on the
+ * One marker per run, at its last basket, in ink-muted for either side: the words say whose run,
+ * "CLE 8–0" (teams have no colour, review §4.6), and the marker stays apart from the ink model
+ * line it sits on. Markers sit on the
  * model line, which has a point at every snapshot with a model price; a run whose end has no
  * such point is left out rather than misplaced.
  */
@@ -75,7 +88,7 @@ export function runMarkers(
       time: r.to,
       position: 'aboveBar',
       shape: 'circle',
-      color: r.team === 'home' ? COLORS['lume-300'] : COLORS['brass-500'],
+      color: COLORS['ash-400'],
       text: `${teams[r.team]} ${r.points}–0`,
     }))
 }

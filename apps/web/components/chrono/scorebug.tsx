@@ -40,7 +40,7 @@ export function Scorebug({ game, run }: { game: Game; run: Run | null }) {
         {MODEL_HINT}
       </p>
       {run && (
-        <p className="mt-2 text-center font-mono text-12 text-amber-400" data-run>
+        <p className="mt-2 text-center font-mono text-12 text-ash-400" data-run>
           {runLine(run, game)}
         </p>
       )}

@@ -36,6 +36,18 @@ export function Reconnecting({ stale }: { stale: boolean }) {
   ) : null
 }
 
+/**
+ * The dial's state line, under the face rather than in it, so the caption keeps one line clear of
+ * 0 and 100 (light branding review §4.2).
+ */
+export function StateLine({ children }: { children: string }) {
+  return (
+    <p className="mt-2 text-center text-13 text-ash-400" data-state-line>
+      {children}
+    </p>
+  )
+}
+
 export function GameScreen(p: GameScreenProps) {
   const { game, dial } = p
   const winner = winnerOf(game)
@@ -46,19 +58,21 @@ export function GameScreen(p: GameScreenProps) {
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_24rem] lg:items-start">
         <div className="space-y-6" data-column="left">
           <Scorebug game={game} run={run} />
-          <Dial
-            price={dial.price}
-            modelProb={game.modelProb}
-            timeLeft={dial.timeLeft}
-            state={dial.state}
-            caption={dialCaption(dial.state, game, winner?.outcome ?? null)}
-            label={dial.label}
-            detail={stateLine(dial.state, game, dial.secsLeft, p.now)}
-            liveDot={game.status === 'live'}
-            stale={p.stale}
-            runKey={runKeyOf(p.history, run)}
-            className="mx-auto max-w-md"
-          />
+          <div>
+            <Dial
+              price={dial.price}
+              modelProb={game.modelProb}
+              timeLeft={dial.timeLeft}
+              state={dial.state}
+              caption={dialCaption(dial.state, game, winner?.outcome ?? null)}
+              label={dial.label}
+              liveDot={game.status === 'live'}
+              stale={p.stale}
+              runKey={runKeyOf(p.history, run)}
+              className="mx-auto max-w-md"
+            />
+            <StateLine>{stateLine(dial.state, game, dial.secsLeft, p.now)}</StateLine>
+          </div>
           {winner && (
             <Tape history={p.history} market={winner.pubkey} home={game.home} away={game.away} />
           )}
@@ -105,15 +119,17 @@ export function GameLoading({ stale }: { stale: boolean }) {
 export function NoGame() {
   return (
     <div className="space-y-4 text-center">
-      <Dial
-        price={null}
-        modelProb={null}
-        timeLeft={0}
-        state="void"
-        detail="No game here"
-        label="No game here"
-        className="mx-auto max-w-md"
-      />
+      <div>
+        <Dial
+          price={null}
+          modelProb={null}
+          timeLeft={0}
+          state="void"
+          label="No game here"
+          className="mx-auto max-w-md"
+        />
+        <StateLine>No game here</StateLine>
+      </div>
       <Link
         href="/"
         className="inline-flex min-h-11 items-center text-15 text-lume-300 underline-offset-4 hover:underline"

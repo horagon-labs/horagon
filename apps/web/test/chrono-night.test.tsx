@@ -120,7 +120,9 @@ describe('NightDial (spec 3.2, 4.1)', () => {
 
   it('draws one arc per segment on its ring, open markets live and the rest muted', () => {
     const html = night()
-    expect(html).toMatch(/class="stroke-live opacity-35"/)
+    // The past is thin (1.5), never faded (review §4.4).
+    expect(html).toMatch(/stroke-width="1.5" class="stroke-live"/)
+    expect(html).not.toContain('opacity-')
     expect(html).toMatch(/stroke-dasharray="2 2.5" class="stroke-ash-400"/)
     expect(html).not.toContain('lume')
     expect(html).toMatch(/data-id="nba-401810001" data-ring="1"/)

@@ -13,6 +13,7 @@ import {
   needleClass,
   priceDigits,
   rimClass,
+  rimWidth,
   ringClass,
   ringDash,
   ringShare,
@@ -22,6 +23,15 @@ import { RollingNumber } from './rolling-number'
 
 const C = 100
 const TICKS = Array.from({ length: 11 }, (_, i) => i / 10)
+/**
+ * The scale's numbers, [price, radius, angle]: 0 and 100 sit at r70, 142° out, below the ends of
+ * the scale and clear of the caption; 50 at r69 (light branding review §4.2).
+ */
+const NUMBERS = [
+  [0, 70, -142],
+  [0.5, 69, 0],
+  [1, 70, 142],
+] as const
 
 export interface DialProps {
   /** The home side's price (YES), or null for no needle. */
@@ -101,11 +111,11 @@ export function Dial(p: DialProps) {
           cy={C}
           r={97}
           fill="none"
-          strokeWidth={p.state === 'challenged' ? 2 : 1}
+          strokeWidth={rimWidth(p.state)}
           className={rimClass(p.state)}
           data-rim
         />
-        <circle cx={C} cy={C} r={93} fill="none" strokeWidth={0.75} className="stroke-brass-700" />
+        <circle cx={C} cy={C} r={93} fill="none" strokeWidth={0.75} className="stroke-rule-faint" />
         {p.stale && (
           <path
             d={arcPath(C, C, 95, -40, 40)}
@@ -115,11 +125,13 @@ export function Dial(p: DialProps) {
             data-stale
           />
         )}
-        <circle cx={C} cy={C} r={89} fill="none" strokeWidth={3} className="stroke-line" />
+        <circle cx={C} cy={C} r={89} fill="none" strokeWidth={3} className="stroke-rule-faint" />
         <path
           d={arcPath(C, C, 89, 0, 360 * ringShare(p.state, p.timeLeft))}
           fill="none"
-          strokeWidth={3}
+          // Closing shares live's hue: it is told apart by width, the blinking ticks and
+          // "closes in" (review §3.5).
+          strokeWidth={p.state === 'closing' ? 4.5 : 3}
           strokeLinecap="round"
           strokeDasharray={ringDash(p.state)}
           className={ringClass(p.state, price !== null)}
@@ -143,8 +155,8 @@ export function Dial(p: DialProps) {
             )
           })}
         </g>
-        {[0, 0.5, 1].map((t) => {
-          const at = polar(C, C, 67, priceToAngle(t))
+        {NUMBERS.map(([t, r, a]) => {
+          const at = polar(C, C, r, a)
           return (
             <text
               key={t}
@@ -160,10 +172,11 @@ export function Dial(p: DialProps) {
         })}
         {p.modelProb !== null && (
           <polygon
+            // Base at r86, 1.5 inside the ring's inner edge (87.5), tip at r78.5 (review §4.2).
             points={pts(
-              polar(C, C, 88, priceToAngle(p.modelProb) - 3),
-              polar(C, C, 88, priceToAngle(p.modelProb) + 3),
-              polar(C, C, 81, priceToAngle(p.modelProb)),
+              polar(C, C, 86, priceToAngle(p.modelProb) - 3.8),
+              polar(C, C, 86, priceToAngle(p.modelProb) + 3.8),
+              polar(C, C, 78.5, priceToAngle(p.modelProb)),
             )}
             className="fill-brass-500"
             data-model={Math.round(p.modelProb * 100)}
@@ -180,7 +193,7 @@ export function Dial(p: DialProps) {
             )}
             fill="none"
             strokeWidth={4}
-            className="stroke-amber-400/70"
+            className="stroke-line"
             data-impact
           />
         )}
@@ -200,15 +213,22 @@ export function Dial(p: DialProps) {
           </Needle>
         )}
         {!p.loading && price !== null && (
-          <Needle
-            angle={priceToAngle(price)}
-            kind="price"
-            className={`${needleClass(p.state)} ${p.state === 'proposed' ? 'opacity-40' : ''}`}
-          >
-            <line x1={C} y1={C + 12} x2={C} y2={C - 72} strokeWidth={2.5} strokeLinecap="round" />
+          <Needle angle={priceToAngle(price)} kind="price" className={needleClass(p.state)}>
+            {/* A proposal dashes the needle instead of fading it (review §3.4: 7.10, not 1.90). */}
+            <line
+              x1={C}
+              y1={C + 8}
+              x2={C}
+              y2={C - 72}
+              strokeWidth={2.5}
+              strokeLinecap="round"
+              strokeDasharray={p.state === 'proposed' ? '6 4' : undefined}
+            />
           </Needle>
         )}
+        {/* The ink hub with a paper pin (review §4.2). */}
         <circle cx={C} cy={C} r={5} className="fill-brass-500" />
+        <circle cx={C} cy={C} r={1.6} className="fill-enamel-900" />
         {!reduced && flash > 0 && (
           <m.circle
             key={`run-${flash}`}
@@ -229,10 +249,12 @@ export function Dial(p: DialProps) {
             key={`settle-${settle}`}
             cx={C}
             cy={C}
-            r={12}
-            className="fill-lume-300"
-            initial={{ opacity: 0.8, scale: 1.8 }}
-            animate={{ opacity: 0, scale: 1 }}
+            fill="none"
+            strokeWidth={1.5}
+            className="stroke-ivory-100"
+            // An ink ring closing on the hub, r12 to r5 (review §4.2).
+            initial={{ r: 12, opacity: 1 }}
+            animate={{ r: 5, opacity: 0 }}
             transition={{ duration: 0.6 }}
             data-beat="settle"
           />
@@ -243,7 +265,7 @@ export function Dial(p: DialProps) {
         className="absolute inset-x-0 top-[54%] flex flex-col items-center gap-1 text-center"
       >
         {p.loading ? (
-          <span className="block h-10 w-20 rounded-card bg-line/60" data-skeleton />
+          <span className="block h-10 w-20 rounded-card bg-enamel-800" data-skeleton />
         ) : (
           // Resolved: the caption says who won; a locked 100 or 0 beside it would read as the
           // home side's number next to an away win.

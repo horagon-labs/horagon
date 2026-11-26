@@ -33,6 +33,20 @@ function arcClass(item: BoardItem): string {
   return 'stroke-ash-400'
 }
 
+/**
+ * Width carries what alpha used to (review §4.4): the past thin (1.5) instead of faded, the time
+ * ahead 3.5, a closing arc 4.5, and a lit one (hovered or selected) 1.5 more: darker by weight,
+ * never lighter.
+ */
+function arcWidth(item: BoardItem, past: boolean, lit: boolean): number {
+  const base = past ? 1.5 : item.state === 'closing' ? 4.5 : 3.5
+  return lit ? base + 1.5 : base
+}
+
+/** A halt is hatched `3 3`, like its dial ring; the stretch before tip-off is dotted `2 2.5`. */
+const arcDash = (item: BoardItem, pre: boolean): string | undefined =>
+  item.state === 'halted' ? '3 3' : pre ? '2 2.5' : undefined
+
 export function NightDial(p: {
   items: readonly BoardItem[]
   now: number
@@ -99,7 +113,14 @@ export function NightDial(p: {
       className={`relative aspect-square w-full rounded-full ${p.className ?? ''}`}
     >
       <svg viewBox="0 0 200 200" aria-hidden="true" className="absolute inset-0 size-full">
-        <circle cx={C} cy={C} r={97} strokeWidth={1} className="fill-enamel-800 stroke-line" />
+        {/* A white face in a brass case (light branding review §4.4). */}
+        <circle
+          cx={C}
+          cy={C}
+          r={97}
+          strokeWidth={1.5}
+          className="fill-enamel-900 stroke-brass-700"
+        />
         {p.stale && (
           <path
             d={arcPath(C, C, 97, -40, 40)}
@@ -134,9 +155,9 @@ export function NightDial(p: {
                 <path
                   d={d}
                   fill="none"
-                  strokeWidth={lit ? 5 : 3.5}
-                  strokeDasharray={s.pre ? '2 2.5' : undefined}
-                  className={[arcClass(t.item), s.past && 'opacity-35'].filter(Boolean).join(' ')}
+                  strokeWidth={arcWidth(t.item, s.past, lit)}
+                  strokeDasharray={arcDash(t.item, s.pre)}
+                  className={arcClass(t.item)}
                   pointerEvents="none"
                 />
                 {/* A full ring pitch wide, so a thumb can hit it (neighbours never overlap). */}
@@ -178,7 +199,7 @@ export function NightDial(p: {
           r={HUB}
           fill="none"
           strokeWidth={0.75}
-          className="stroke-line"
+          className="stroke-rule-faint"
           data-hub
         />
         <line

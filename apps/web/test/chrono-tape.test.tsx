@@ -33,14 +33,14 @@ describe('tape (spec 3.2)', () => {
     expect(tapeCents(0.5)).toBe('50¢')
   })
 
-  it('marks a run at its last basket on the model line, in its side’s color', () => {
+  it('marks a run at its last basket on the model line, in ink-muted: the words say whose', () => {
     const runs = findRuns(history(), MKT)
     expect(runMarkers(runs, TEAMS, new Set([t + 240]))).toEqual([
       {
         time: t + 240,
         position: 'aboveBar',
         shape: 'circle',
-        color: COLORS['lume-300'],
+        color: COLORS['ash-400'],
         text: 'CLE 8–0',
       },
     ])

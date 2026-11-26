@@ -14,8 +14,8 @@ import { cents, countdown, gameClock } from '../../lib/format'
 export const RING: Record<DialState, string> = {
   resolved: 'stroke-ash-400',
   challenged: 'stroke-red-400',
-  proposed: 'stroke-brass-500',
-  void: 'stroke-ash-400/40',
+  proposed: 'stroke-ash-400',
+  void: 'stroke-line',
   halted: 'stroke-amber-400',
   closed: 'stroke-ash-400',
   closing: 'stroke-live',
@@ -23,21 +23,28 @@ export const RING: Record<DialState, string> = {
   pre: 'stroke-ash-400',
 }
 
+/** States whose ring is a status, drawn whole, not the time left (light branding review §4.2). */
+const STATUS_RING: readonly DialState[] = ['halted', 'proposed', 'challenged']
+
 /**
- * How much of the time ring is drawn: the time left, except for a halt while the game is still on
- * the court (`halted`; a final game reads `closed`), which no time left describes. Its ring is a
- * status, the full amber hatched ring of spec 4.3, so a halt never looks like a normal close.
+ * How much of the time ring is drawn: the time left, except for a status no time left describes:
+ * a halt while the game is still on the court (`halted`; a final game reads `closed`), the ink
+ * hatched ring of spec 4.3, so a halt never looks like a normal close; a proposed result (dotted)
+ * and one under review (error), so the face says where the result stands (review §4.2).
  */
 export const ringShare = (state: DialState, timeLeft: number): number =>
-  state === 'halted' ? 1 : timeLeft
+  STATUS_RING.includes(state) ? 1 : timeLeft
 
-/** The ring's hatching: only a halt is drawn dashed (spec 4.3). */
+/** The ring's dash: a halt hatched `3 3`, a proposed result dotted `1.5 3` (review §4.2). */
 export const ringDash = (state: DialState): string | undefined =>
-  state === 'halted' ? '3 3' : undefined
+  state === 'halted' ? '3 3' : state === 'proposed' ? '1.5 3' : undefined
 
-/** The rim: red while the result is under review, the plain line otherwise. */
+/** The case: brass, 1.5; while the result is under review a 2 px error rim takes its place. */
 export const rimClass = (state: DialState): string =>
-  state === 'challenged' ? 'stroke-red-400' : 'stroke-line'
+  state === 'challenged' ? 'stroke-red-400' : 'stroke-brass-700'
+
+/** The case's width: 1.5 for brass, 2 for the error rim that replaces it (review §4.2). */
+export const rimWidth = (state: DialState): number => (state === 'challenged' ? 2 : 1.5)
 
 /**
  * The ring's color on a face: `open` is "this face has a price", and a market opens 60 min before

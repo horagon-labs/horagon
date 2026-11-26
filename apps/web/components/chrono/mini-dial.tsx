@@ -4,7 +4,7 @@
 // position is the row's ◆, never the rim (light branding review §4.3).
 import { arcPath, priceToAngle } from '../../lib/chrono/geometry'
 import type { DialState } from '../../lib/chrono/state'
-import { needleClass, rimClass, ringClass, ringDash, ringShare } from './dial-look'
+import { needleClass, rimClass, rimWidth, ringClass, ringDash, ringShare } from './dial-look'
 import { Needle } from './needle'
 
 export function MiniDial(p: {
@@ -24,15 +24,16 @@ export function MiniDial(p: {
         cx={50}
         cy={50}
         r={48}
-        strokeWidth={1}
-        className={`fill-enamel-800 ${rimClass(p.state)}`}
+        strokeWidth={rimWidth(p.state)}
+        className={`fill-enamel-900 ${rimClass(p.state)}`}
         data-rim
       />
-      <circle cx={50} cy={50} r={42} fill="none" strokeWidth={4} className="stroke-line" />
+      <circle cx={50} cy={50} r={42} fill="none" strokeWidth={4} className="stroke-rule-faint" />
       <path
         d={arcPath(50, 50, 42, 0, 360 * ringShare(p.state, p.timeLeft))}
         fill="none"
-        strokeWidth={4}
+        // Closing: wider (6 against 4), the same live hue (review §4.3).
+        strokeWidth={p.state === 'closing' ? 6 : 4}
         strokeDasharray={ringDash(p.state)}
         className={ringClass(p.state, p.price !== null)}
         data-ring
@@ -48,6 +49,7 @@ export function MiniDial(p: {
         </Needle>
       )}
       <circle cx={50} cy={50} r={4} className="fill-brass-500" />
+      <circle cx={50} cy={50} r={1.3} className="fill-enamel-900" />
     </svg>
   )
 }

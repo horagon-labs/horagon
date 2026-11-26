@@ -89,10 +89,13 @@ describe('Dial (spec 3.2, 4.3)', () => {
     expect(dial({ state: 'live' })).not.toContain('animate-blink')
   })
 
-  it('dims the needle of a proposal and keeps its angle', () => {
+  it('dashes the needle of a proposal (no fading) and keeps its angle', () => {
     const html = dial({ state: 'proposed', price: 1 })
     expect(needle(html)).toBe('rotate(135 100 100)')
-    expect(html).toMatch(/class="stroke-ash-400 opacity-40" data-needle="price"/)
+    expect(html).toMatch(
+      /class="stroke-ash-400" data-needle="price"><line [^>]*stroke-dasharray="6 4"/,
+    )
+    expect(html).not.toContain('opacity-')
   })
 
   it('draws the ghost needle and the impact arc between the two prices (spec 5.5)', () => {
@@ -147,7 +150,7 @@ describe('MiniDial (spec 3.2)', () => {
   })
 
   it('keeps one rim whatever you hold: yours is the row’s ◆ (review §4.3)', () => {
-    expect(mini()).toMatch(/fill-enamel-800 stroke-line" data-rim/)
+    expect(mini()).toMatch(/fill-enamel-900 stroke-brass-700" data-rim/)
     expect(mini()).not.toContain('lume')
   })
 })

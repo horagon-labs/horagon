@@ -178,7 +178,7 @@ export function Bezel(p: {
             width={5}
             height={18}
             rx={1.5}
-            className="fill-brass-500"
+            className="fill-brass-700"
             data-crown
           />
         </svg>
