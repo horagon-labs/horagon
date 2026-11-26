@@ -225,13 +225,16 @@ const PUSHER_BASE: PusherInput = {
   failedAction: 'buy',
   secsLeft: 3_730,
 }
-const PUSHER_SAMPLES: [string, Partial<PusherInput>][] = [
+/** The third entry is the side the crown is on (desktop): picked, then halted, reads disabled. */
+const PUSHER_SAMPLES: [string, Partial<PusherInput>, Side?][] = [
   ['live', {}],
   ['closing', { state: 'closing', secsLeft: 252 }],
   ['halted', { state: 'halted' }],
   ['no wallet', { ready: 'no-wallet', balance: undefined }],
   ['empty wallet', { balance: '0' }],
   ['closed', { state: 'closed', secsLeft: 0 }],
+  ['live, CLE picked (desktop)', {}, 'home'],
+  ['halted, CLE picked (desktop)', { state: 'halted' }, 'home'],
 ]
 
 export function Gallery() {
@@ -332,10 +335,11 @@ export function Gallery() {
       </Section>
       <Section title="Pusher (spec 3.2, 4.3)">
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {PUSHER_SAMPLES.map(([name, over]) => (
+          {PUSHER_SAMPLES.map(([name, over, selected]) => (
             <figure key={name} className="space-y-1">
               <Pusher
                 mode={pusherMode({ ...PUSHER_BASE, ...over })}
+                selected={selected}
                 home="CLE"
                 away="MEM"
                 price={0.77}
