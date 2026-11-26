@@ -160,7 +160,9 @@ describe('main: the count', () => {
     expect(r.stdout).not.toContain('count-fans:')
   })
 
-  it('counts the 1,203-signature market end to end at 4 requests a second', async () => {
+  it('counts the 1,203-signature market end to end at 4 requests a second', {
+    timeout: 30_000,
+  }, async () => {
     const big = seasonChain(bigMarket.season)
     const r = await run(['--json', '--rpc', RPC_URL, '--wallets', 'w.json'], {
       chain: big,

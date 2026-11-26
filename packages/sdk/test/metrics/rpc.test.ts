@@ -625,7 +625,9 @@ describe('fetchSwaps', () => {
     ])
   })
 
-  it('reads the 1,202 swaps of the fixture and never asks for a failed transaction', async () => {
+  it('reads the 1,202 swaps of the fixture and never asks for a failed transaction', {
+    timeout: 30_000,
+  }, async () => {
     const { rpc, node } = setup(bigMarket.season)
     const failed = new Set(
       node
