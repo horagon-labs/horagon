@@ -485,18 +485,29 @@ async function indexMarket(
   const skipped: Array<{ sig: string; ixIndex: number }> = []
   scan: for (let i = 0; i < ordered.length; i += 50) {
     const chunk = ordered.slice(i, i + 50)
-    const txs = inRequestOrder(
-      chunk,
-      await deps.connection.getTransactions(chunk, {
+    let answer: Array<VersionedTransactionResponse | null>
+    try {
+      answer = await deps.connection.getTransactions(chunk, {
         maxSupportedTransactionVersion: 0,
         commitment: 'confirmed',
-      }),
-    )
+      })
+    } catch (err) {
+      // web3.js fails the whole batch on one error entry (a rate limit, a node hiccup). Read it
+      // as nothing available: the scan stops at the chunk's first signature, the cursor keeps
+      // what earlier chunks read, and a market that keeps failing reaches index-stuck.
+      deps.log.warn(
+        { market: m.pubkey, error: errorSummary(err).message },
+        'transaction batch read failed',
+      )
+      answer = []
+    }
+    const txs = inRequestOrder(chunk, answer)
     for (const [j, sig] of chunk.entries()) {
       const tx = txs[j]
       // Not yet available (missing from the answer, or the node has not got it), or no block
       // time or meta: stop here and leave the rest for the next tick. Inserts are idempotent, so
-      // reading a later transaction again is harmless.
+      // reading a later transaction again is harmless. The signature check cannot fail after
+      // inRequestOrder; it stays as a guard on what gets written under `sig`.
       if (
         !tx ||
         tx.blockTime === null ||

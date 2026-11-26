@@ -311,6 +311,23 @@ describe('backfillBotMemo', () => {
     ])
   })
 
+  it('reads the null in an out-of-order answer as the missing signature, keeping what it wrote', async () => {
+    await insertTrades(h.db, [row('s1', 2, 1), row('s2', 2, 2), row('s3', 2, 3)])
+    onChain('s1', true)
+    chain.set('s2', null)
+    onChain('s3', false)
+    reversed = true
+    // Answer [s3, null, s1]: s1 is written, s2 stops the run, s3 waits for the next one.
+    await expect(backfillBotMemo(deps())).rejects.toThrow(
+      'transaction s2 is not available from the RPC; run again later',
+    )
+    expect(await memos()).toEqual([
+      ['s1', 2, true],
+      ['s2', 2, null],
+      ['s3', 2, null],
+    ])
+  })
+
   it('reads in batches of the size it is given, logging each', async () => {
     await insertTrades(
       h.db,
