@@ -114,3 +114,16 @@ export function runLine(run: Run, teams: { home: string; away: string }): string
 
 /** The newest run, for the Scorebug's line and the Dial's amber flash key. */
 export const latestRun = (runs: readonly Run[]): Run | null => runs.at(-1) ?? null
+
+/** How long after its last basket a run still counts as news: two run windows of real time. */
+export const RUN_FRESH_SECS = RUN_SECS * 2
+
+/**
+ * The run while it is still news, for the Scorebug's present-tense line: its last basket is
+ * within RUN_FRESH_SECS of the newest snapshot. An old run (a Q1 streak in Q4) is null.
+ */
+export function freshRun(run: Run | null, history: GameHistory): Run | null {
+  if (!run) return null
+  const newest = Math.max(...history.snapshots.map((s) => s.ts))
+  return run.to >= newest - RUN_FRESH_SECS ? run : null
+}

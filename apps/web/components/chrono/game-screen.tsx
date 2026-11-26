@@ -7,9 +7,9 @@ import type { GameDetail, GameHistory } from '@horagon/sdk'
 import Link from 'next/link'
 import type { ReactNode } from 'react'
 import { winnerOf } from '../../lib/chrono/board'
-import { faceCaption } from '../../lib/chrono/copy'
+import { faceCaption, liveNumber } from '../../lib/chrono/copy'
 import { canTrade, type GameDial } from '../../lib/chrono/game'
-import { findRuns, latestRun } from '../../lib/chrono/runs'
+import { findRuns, freshRun, latestRun } from '../../lib/chrono/runs'
 import { AgentLine } from './agent-line'
 import { Dial } from './dial'
 import { runKeyOf, stateLine } from './dial-look'
@@ -41,7 +41,11 @@ export function Reconnecting({ stale }: { stale: boolean }) {
 export function GameScreen(p: GameScreenProps) {
   const { game, dial } = p
   const winner = winnerOf(game)
-  const run = p.history && winner ? latestRun(findRuns(p.history, winner.pubkey)) : null
+  const latest = p.history && winner ? latestRun(findRuns(p.history, winner.pubkey)) : null
+  // The Scorebug says "on an 8–0 run" in the present tense, so only while the game is live, the
+  // number still moves and the run is recent. The flash key keeps the unfiltered run.
+  const live = game.status === 'live' && liveNumber(dial.state)
+  const run = live && p.history ? freshRun(latest, p.history) : null
   return (
     <div className="space-y-6">
       <Reconnecting stale={p.stale} />
@@ -58,7 +62,7 @@ export function GameScreen(p: GameScreenProps) {
             detail={stateLine(dial.state, game, dial.secsLeft, p.now)}
             liveDot={game.status === 'live'}
             stale={p.stale}
-            runKey={runKeyOf(p.history, run)}
+            runKey={runKeyOf(p.history, latest)}
             className="mx-auto max-w-md"
           />
           {winner && <AgentLine activity={game.activity} trading={canTrade(dial.state)} />}

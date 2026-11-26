@@ -2,7 +2,14 @@ import type { GameHistory } from '@horagon/sdk'
 import { describe, expect, it } from 'vitest'
 import { runKeyOf } from '../components/chrono/dial-look'
 import { history, market, NOW } from '../lib/chrono/fixtures'
-import { findRuns, latestRun, type Run, runLine } from '../lib/chrono/runs'
+import {
+  findRuns,
+  freshRun,
+  latestRun,
+  RUN_FRESH_SECS,
+  type Run,
+  runLine,
+} from '../lib/chrono/runs'
 
 const MKT = market().pubkey
 const TEAMS = { home: 'CLE', away: 'MEM' }
@@ -204,5 +211,22 @@ describe('runLine (spec 3.2)', () => {
   it('takes the newest run', () => {
     expect(latestRun([])).toBeNull()
     expect(latestRun([run, { ...run, from: 500 }])?.from).toBe(500)
+  })
+})
+
+describe('freshRun (spec 3.2)', () => {
+  it('keeps a run up to RUN_FRESH_SECS after its last basket, by the newest snapshot', () => {
+    const h = history()
+    const run = latestRun(findRuns(h, MKT))
+    const first = h.snapshots[0]
+    if (!run || !first) throw new Error('fixture')
+    const at = (ts: number): GameHistory => ({
+      ...h,
+      snapshots: [...h.snapshots, { ...first, ts }],
+    })
+    expect(freshRun(null, h)).toBeNull()
+    expect(freshRun(run, h)).toBe(run)
+    expect(freshRun(run, at(run.to + RUN_FRESH_SECS))).toBe(run)
+    expect(freshRun(run, at(run.to + RUN_FRESH_SECS + 1))).toBeNull()
   })
 })

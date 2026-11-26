@@ -304,6 +304,41 @@ describe('the run flash on page open (spec 2.4)', () => {
   })
 })
 
+describe('the Scorebug run line (spec 3.2)', () => {
+  const render = (status: 'live' | 'final', h = history(), ended: 'no' | 'yes' | null = null) => {
+    const g = game({ status })
+    const m = status === 'final' ? market({ status: 'proposed' }) : market()
+    return renderToStaticMarkup(
+      <GameScreen
+        game={detail({ status })}
+        history={h}
+        dial={gameDial(g, m, NOW - 3_730, ended, NOW)}
+        now={NOW}
+        stale={false}
+        right={null}
+      />,
+    )
+  }
+
+  it('shows a fresh run while the game is live', () => {
+    expect(render('live')).toContain('data-run')
+  })
+
+  it('drops the run once the game is final, though history still holds it', () => {
+    expect(render('final', history(), 'no')).not.toContain('data-run')
+    expect(render('final', history(), 'no')).not.toContain('8–0 run')
+  })
+
+  it('drops an old run from a live game once newer snapshots have moved on', () => {
+    const h = history()
+    const last = h.snapshots.at(-1)
+    if (!last) throw new Error('fixture')
+    const later = { ...last, ts: last.ts + 1_800, period: 4, homeScore: 90, awayScore: 92 }
+    const old = { ...h, snapshots: [...h.snapshots, later] }
+    expect(render('live', old)).not.toContain('data-run')
+  })
+})
+
 describe('GameLoading reconnecting (spec 4.4)', () => {
   it('says Reconnecting only while the poll is failing', () => {
     expect(renderToStaticMarkup(<GameLoading stale={false} />)).not.toContain('Reconnecting…')
