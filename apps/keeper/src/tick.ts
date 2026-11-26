@@ -660,13 +660,21 @@ export class Keeper {
         s.proposed = known.score
         continue
       }
-      const stored = await getEvidence(this.d.db, s.game.id, 0)
-      if (stored?.hash !== hash) continue
-      const ev = parseResolutionEvidence(JSON.parse(stored.json))
-      if (ev.status !== 'final') continue
-      const score = { home: ev.homeScore, away: ev.awayScore }
-      this.proposals.set(s.game.id, { hash, score })
-      s.proposed = score
+      // One game's unreadable row skips its check; it never stops the tick (and every halt).
+      try {
+        const stored = await getEvidence(this.d.db, s.game.id, 0)
+        if (stored?.hash !== hash) continue
+        const ev = parseResolutionEvidence(JSON.parse(stored.json))
+        if (ev.status !== 'final') continue
+        const score = { home: ev.homeScore, away: ev.awayScore }
+        this.proposals.set(s.game.id, { hash, score })
+        s.proposed = score
+      } catch (err) {
+        this.d.log.warn(
+          { gameId: s.game.id, error: errorSummary(err).message },
+          'proposed evidence unreadable',
+        )
+      }
     }
   }
 

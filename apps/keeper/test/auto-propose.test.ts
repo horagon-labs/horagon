@@ -4,6 +4,7 @@ import {
   getEvidence,
   getGame,
   listOps,
+  putEvidence,
   setDraftState,
   updateMarket,
   upsertDraft,
@@ -303,6 +304,21 @@ describe('the keeper proposes, checks and pages', () => {
     expect(alerts.filter(([key]) => key === `auto-proposed:${ID}:0`)).toHaveLength(2)
     expect(await at(again, END + 35)).toEqual([])
     expect(chain.sends).toEqual([`propose ${ID}`])
+  })
+
+  it('an unreadable stored evidence skips the window check, never the whole tick', async () => {
+    const k = keeperWith()
+    await drafted(k)
+    await at(k, END - 840)
+    expect(await at(k, END)).toEqual(['propose'])
+    const stored = await getEvidence(h.db, ID, 0)
+    await putEvidence(h.db, { gameId: ID, kind: 0, json: '{not json', hash: stored?.hash ?? '' })
+    // A restarted keeper has no cached score, so it reads the row again: the tick still runs.
+    const again = keeperWith()
+    await expect(at(again, END + 60)).resolves.toBeInstanceOf(Array)
+    expect(logs.some((l) => l.msg === 'proposed evidence unreadable')).toBe(true)
+    expect(keys()).not.toContain(`source-mismatch:${ID}`)
+    expect(await at(again, END + 900)).toEqual(['finalize'])
   })
 
   it('without a balldontlie key, proposes unchecked and pages CHECK', async () => {
