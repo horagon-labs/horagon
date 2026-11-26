@@ -27,6 +27,8 @@ export function TonightBoard({ initial }: { initial: InitialBoard }) {
   // 0 while hydrating (lib/chrono/now.ts): the server's clock, so both renders match.
   const now = useNow() || initial.now
   const [follows, setFollows] = useState<string[]>([])
+  // "Show all games" turns the follow filter off for this view only; a chip turns it back on.
+  const [showAll, setShowAll] = useState(false)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [hoverId, setHoverId] = useState<string | null>(null)
   useEffect(() => setFollows(loadFollows(storage())), [])
@@ -39,7 +41,12 @@ export function TonightBoard({ initial }: { initial: InitialBoard }) {
       now={now}
       health={pollHealth(games)}
       follows={follows}
-      onToggleFollow={(t) => setFollows(toggleFollow(storage(), t))}
+      onToggleFollow={(t) => {
+        setFollows(toggleFollow(storage(), t))
+        setShowAll(false)
+      }}
+      showAll={showAll}
+      onShowAll={() => setShowAll(true)}
       selectedId={selectedId}
       onSelect={setSelectedId}
       hoverId={hoverId}

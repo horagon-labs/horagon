@@ -182,6 +182,8 @@ export interface BoardModel {
   items: BoardItem[]
   /** The line for an empty board, with the words the board already uses; null with rows. */
   empty: string | null
+  /** The follow filter left the board empty: it offers "Show all games". */
+  filtered: boolean
   /** On an empty board with no follow filter: when the next games are, if known. */
   next: string | null
   /** The Night dial's clock (spec 5.4): `now` moved up to the newest winner `priceTs` the board has seen. */
@@ -200,7 +202,14 @@ export function boardModel(
   upcoming: Upcoming | null = null,
 ): BoardModel {
   if (games === undefined) {
-    return { teams: [], items: [], empty: 'Loading games…', next: null, chainNow: now }
+    return {
+      teams: [],
+      items: [],
+      empty: 'Loading games…',
+      filtered: false,
+      next: null,
+      chainNow: now,
+    }
   }
   // Every endTs comparison on the Night dial uses chain time (spec 5.4), like each row does.
   const newest = Math.max(0, ...games.map((g) => winnerOf(g)?.priceTs ?? 0))
@@ -212,12 +221,28 @@ export function boardModel(
       ? tonight
       : tonight.filter((g) => follows.includes(g.home) || follows.includes(g.away))
   const items = shown.map((g) => boardItem(g, portfolio, now)).sort(listOrder)
-  if (items.length > 0) return { teams, items, empty: null, next: null, chainNow }
+  if (items.length > 0) return { teams, items, empty: null, filtered: false, next: null, chainNow }
   if (follows.length > 0) {
     const empty = 'No games for the teams you follow in the next 24 hours.'
-    return { teams, items, empty, next: null, chainNow }
+    return { teams, items, empty, filtered: true, next: null, chainNow }
   }
   const later = upcomingOf(games, now) ?? upcoming
   const next = later && later.tip > now ? nextLine(later) : null
-  return { teams, items, empty: 'No NBA games in the next 24 hours.', next, chainNow }
+  const empty = 'No NBA games in the next 24 hours.'
+  return { teams, items, empty, filtered: false, next, chainNow }
+}
+
+/**
+ * The follow chips (R5 review finding 6): tonight's teams, then every followed team with no game
+ * tonight, so a follow can always be cleared where it is shown.
+ */
+export function followChips(teams: readonly string[], follows: readonly string[]): string[] {
+  const away = follows.filter((t) => !teams.includes(t))
+  return [...teams, ...[...new Set(away)].sort()]
+}
+
+/** The follow toggle's summary, from every stored follow: "★ Following MEM, TOR". */
+export function followSummary(follows: readonly string[], showAll = false): string {
+  if (follows.length === 0) return '☆ Follow teams'
+  return `★ Following ${follows.join(', ')}${showAll ? ' · all games shown' : ''}`
 }

@@ -40,10 +40,17 @@ describe('the first frame of / (R5)', () => {
     expect(html.indexOf('data-hero')).toBeLessThan(html.indexOf('href="/game/'))
   })
 
-  it('puts the rows before the Night dial on a phone, and folds the follow chips', () => {
+  it('puts the rows before the Night dial in the DOM, and folds the follow chips', () => {
     const html = page({ games: evening(), upcoming: null, now: NOW })
-    expect(html).toContain('order-1 ')
-    expect(html).toContain('order-2 ')
+    // Focus and screen readers meet the rows first, as a phone shows them (WCAG 2.4.3); only the
+    // desktop grid moves the dial column first.
+    const rows = html.indexOf('href="/game/')
+    const dial = html.indexOf('role="listbox"')
+    expect(rows).toBeGreaterThan(0)
+    expect(dial).toBeGreaterThan(rows)
+    expect(html.indexOf('data-board-list')).toBeLessThan(dial)
+    expect(html).toMatch(/<div class="[^"]*lg:order-first[^"]*"><div role="listbox"/)
+    expect(html).not.toMatch(/\border-[12]\b/)
     expect(html).toMatch(/<details[^>]*data-follow[^>]*><summary[^>]*>☆ Follow teams/)
     expect(html).toContain('Tonight&#x27;s games')
   })
