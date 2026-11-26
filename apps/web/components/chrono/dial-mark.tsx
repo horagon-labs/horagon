@@ -24,3 +24,33 @@ export function DialMark(p: {
     </svg>
   )
 }
+
+/**
+ * A home-screen icon (R5): the dial mark on the enamel, filling 82% of a `px` square. Drawn by
+ * next/og (Satori: inline styles, a flex box) for the apple touch icon and the manifest's PNGs.
+ */
+export function HomeIcon(p: {
+  px: number
+  colors: Record<'bg' | 'face' | 'ring' | 'needle', string>
+}) {
+  return (
+    <div
+      style={{
+        width: '100%',
+        height: '100%',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        background: p.colors.bg,
+      }}
+      data-home-icon={p.px}
+    >
+      <DialMark
+        size={Math.round(p.px * 0.82)}
+        face={p.colors.face}
+        ring={p.colors.ring}
+        needle={p.colors.needle}
+      />
+    </div>
+  )
+}

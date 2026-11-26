@@ -3,15 +3,18 @@ import { join } from 'node:path'
 import { PLAY_MONEY_NOTICE } from '@horagon/sdk'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
+import { dynamicParams, GET, generateStaticParams } from '../app/icons/[file]/route'
 import manifest from '../app/manifest'
 import { AgeDialog } from '../components/age-dialog'
-import { MARK_NEEDLE } from '../components/chrono/dial-mark'
+import { HomeIcon, MARK_NEEDLE } from '../components/chrono/dial-mark'
 import { FeelForm } from '../components/chrono/feel-toggles'
 import { Wordmark } from '../components/chrono/wordmark'
 import { YourHour } from '../components/chrono/your-hour'
 import { PlayMoneyBanner } from '../components/play-money-banner'
 import { DEFAULT_FEEL } from '../lib/chrono/feel'
 import { portfolio, position } from '../lib/chrono/fixtures'
+import { COLORS } from '../lib/chrono/tokens'
+import { ICON_COLORS, ICON_SIZES, iconSize } from '../lib/icons'
 
 const noop = () => {}
 
@@ -31,7 +34,39 @@ describe('app shell (spec 2.7, 3.2)', () => {
     expect(m.short_name).toBe('Horagon')
     expect(m.start_url).toBe('/')
     expect(m.display).toBe('standalone')
-    expect(m.icons?.map((i) => i.src)).toEqual(['/icon.svg', '/apple-icon'])
+    expect(m.icons?.map((i) => i.src)).toEqual([
+      '/icon.svg',
+      '/apple-icon',
+      '/icons/icon-192.png',
+      '/icons/icon-512.png',
+    ])
+    // Android's install prompt asks for 192 and 512 px PNGs (R5 review finding 12).
+    expect(m.icons?.slice(2)).toEqual([
+      { src: '/icons/icon-192.png', sizes: '192x192', type: 'image/png' },
+      { src: '/icons/icon-512.png', sizes: '512x512', type: 'image/png' },
+    ])
+  })
+
+  it('draws the manifest PNGs in the dial mark, one file per size, built once', () => {
+    expect(ICON_SIZES).toEqual([192, 512])
+    expect(iconSize('icon-192.png')).toBe(192)
+    expect(iconSize('icon-512.png')).toBe(512)
+    expect(iconSize('icon-180.png')).toBeNull()
+    expect(iconSize('../icon.svg')).toBeNull()
+    expect(generateStaticParams()).toEqual([{ file: 'icon-192.png' }, { file: 'icon-512.png' }])
+    expect(dynamicParams).toBe(false)
+    const html = renderToStaticMarkup(<HomeIcon px={512} colors={ICON_COLORS} />)
+    expect(html).toContain('data-home-icon="512"')
+    expect(html).toContain(`d="${MARK_NEEDLE}"`)
+    expect(html).toContain('width="420"')
+    expect(html).toContain(COLORS['lume-300'])
+  })
+
+  it('answers 404 for an icon size it does not draw', async () => {
+    const res = await GET(new Request('http://x/icons/icon-64.png'), {
+      params: Promise.resolve({ file: 'icon-64.png' }),
+    })
+    expect(res.status).toBe(404)
   })
 
   const root = join(import.meta.dirname, '..')
