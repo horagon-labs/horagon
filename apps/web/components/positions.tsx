@@ -1,11 +1,19 @@
 'use client'
 // Positions of the wallet (all, or one game's). The Claim all run is the wallet's
 // (WalletProvider): every copy of this list shows the same run, and one run at a time.
+import type { MarketStatus } from '@horagon/sdk'
 import Link from 'next/link'
 import { positionStatus } from '../lib/chrono/copy'
 import { explorerTx, sideLabel, usdc } from '../lib/format'
+import { WALLET_PREPARING } from '../lib/wallet-copy'
 import { ErrorText } from './error-text'
 import { useWallet } from './wallet'
+
+/** " · trading closed" after the value, or nothing for a market that still trades. */
+function statusPart(status: MarketStatus): string {
+  const words = positionStatus(status)
+  return words === null ? '' : ` · ${words}`
+}
 
 export function Positions({
   gameId,
@@ -15,7 +23,7 @@ export function Positions({
   /** The game's teams, when this list is one game's: the portfolio carries no team names. */
   teams?: { home: string; away: string }
 }) {
-  const { portfolio, startClaims, claiming, claimed, claimError } = useWallet()
+  const { portfolio, startClaims, claiming, claimed, claimError, preparing } = useWallet()
 
   const rows = (portfolio?.positions ?? []).filter((p) => !gameId || p.gameId === gameId)
   const claimable = rows.some((p) => p.claimable)
@@ -36,8 +44,8 @@ export function Positions({
                   {sideLabel(p.side, teams)} · {usdc(p.shares)} shares
                 </Link>
                 <p className="font-mono text-ash-400 tabular-nums">
-                  cost {usdc(p.costUsdc)} · value {usdc(p.valueUsdc)} ·{' '}
-                  {positionStatus(p.marketStatus)}
+                  cost {usdc(p.costUsdc)} · value {usdc(p.valueUsdc)}
+                  {statusPart(p.marketStatus)}
                 </p>
               </div>
               <span
@@ -53,11 +61,11 @@ export function Positions({
       {(claimable || claiming) && (
         <button
           type="button"
-          disabled={claiming}
+          disabled={claiming || preparing}
           onClick={startClaims}
           className="min-h-11 w-full rounded-card bg-lume-300 py-2 font-semibold text-enamel-950 disabled:opacity-50"
         >
-          {claiming ? 'Claiming…' : 'Claim all'}
+          {claiming ? 'Claiming…' : preparing ? WALLET_PREPARING : 'Claim all'}
         </button>
       )}
       {claimed.map((sig) => (

@@ -3,15 +3,7 @@
 import type { Game, MarketSummary, Outcome } from '@horagon/sdk'
 import { effectiveTime } from '@horagon/sdk/math'
 import { percent } from '../format'
-import {
-  dialCaption,
-  finalWords,
-  NO_MARKET,
-  started,
-  type Verdict,
-  type VerdictGame,
-  verdict,
-} from './copy'
+import { dialCaption, NO_MARKET, started, type Verdict, type VerdictGame, verdict } from './copy'
 import { spokenDuration } from './time'
 
 export type DialState =
@@ -50,6 +42,14 @@ export const isTrading = (state: DialState): boolean =>
 
 type GameFields = Pick<Game, 'status'>
 type MarketFields = Pick<MarketSummary, 'status' | 'endTs' | 'priceTs'>
+
+/**
+ * The game trades now or still will: a trading state, except a game that started with no market
+ * (R5c refix). That one reads `pre`, the only state without a market, but no market opens once
+ * the game has started, so it has no time left, no open arc and no place among the live games.
+ */
+export const stillTrades = (state: DialState, game: GameFields, hasMarket: boolean): boolean =>
+  isTrading(state) && (hasMarket || !started(game))
 
 /**
  * Rows 1-3 (a result on the market) come before row 4 (a void game) on purpose: a game
@@ -147,20 +147,15 @@ function stateWords(i: DialLabelInput, kind: Verdict['kind']): string {
 
 /**
  * The caption as a label says it: "Final, CLE lost, result pending". A result that is proposed
- * or under review is said by the state words, so the caption stops at the score then and a label
- * never says "result pending" next to "result proposed" (R5c).
+ * or under review is said by the state words: the caption stops at the score then (dialCaption),
+ * so a label never says "result pending" next to "result proposed" (R5c).
  */
 function spokenCaption(i: Pick<DialLabelInput, 'state' | 'game' | 'outcome'>): {
   words: string
   kind: Verdict['kind']
 } {
-  const v = verdict(i.state, i.game, i.outcome)
-  const waiting = i.state === 'proposed' || i.state === 'challenged'
-  const caption =
-    v.kind === 'final' && waiting
-      ? finalWords(i.game, v.homeWon)
-      : dialCaption(i.state, i.game, i.outcome)
-  return { words: caption.replaceAll(' · ', ', '), kind: v.kind }
+  const { kind } = verdict(i.state, i.game, i.outcome)
+  return { words: dialCaption(i.state, i.game, i.outcome).replaceAll(' · ', ', '), kind }
 }
 
 /**

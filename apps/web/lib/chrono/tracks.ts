@@ -51,7 +51,16 @@ export interface Placeable {
   interval: Interval
   /** The game's dial state, when known: a game that stopped trading never takes the centre. */
   state?: DialState
+  /**
+   * It trades now or still will (lib/chrono/board.ts, `stillTrades`): false also for a game that
+   * started with no market, whose state still reads `pre`.
+   */
+  trading?: boolean
 }
+
+/** Trades now or still will, as far as the item says; an item with neither counts as trading. */
+const trades = (i: Placeable): boolean =>
+  i.trading !== false && (i.state === undefined || isTrading(i.state))
 
 export interface Track<T extends Placeable> {
   item: T
@@ -69,7 +78,10 @@ export interface Packed<T extends Placeable> {
 
 /**
  * Greedy rings: sorted by start, each game takes the first ring whose last arc has ended
- * (touching is fine). A game wholly outside the window is in neither list.
+ * (touching is fine). A game wholly outside the window is in neither list. The ring is held to
+ * the interval's end, but a game that stopped trading draws only up to now (R5c refix): no arc
+ * ahead of the now hand reads as time still to trade. One that never began (a postponed game
+ * ahead) keeps its arc.
  */
 export function packTracks<T extends Placeable>(items: readonly T[], now: number): Packed<T> {
   const w = nightWindow(now)
@@ -87,12 +99,9 @@ export function packTracks<T extends Placeable>(items: readonly T[], now: number
       continue
     }
     ends[ring] = item.interval.end
-    tracks.push({
-      item,
-      ring,
-      from: Math.max(item.interval.start, w.from),
-      to: Math.min(item.interval.end, w.to),
-    })
+    const from = Math.max(item.interval.start, w.from)
+    const to = Math.min(item.interval.end, w.to)
+    tracks.push({ item, ring, from, to: !trades(item) && now > from ? Math.min(to, now) : to })
   }
   return { tracks, overflow }
 }
@@ -133,10 +142,11 @@ export const segmentAngles = (s: Pick<Segment, 'from' | 'to'>, now: number) => (
  * Labels stay few (spec 3.1): the selected arc, the hovered or focused one, and the one that
  * closes soonest, in that order, without repeats. The first is the Night dial's centre.
  *
- * "Closes soonest" counts only games that still trade (`isTrading`): a game halted at the final
- * buzzer, or closed, or waiting for or holding its result, never holds the centre while another
- * still trades; with none trading, the soonest end_ts ahead stands. A stopped game's arc still
- * runs to its end_ts: the summary carries no halt time to end it at.
+ * "Closes soonest" counts only games that still trade (`trading`, else `isTrading`): a game
+ * halted at the final buzzer, or closed, or waiting for or holding its result, or started with no
+ * market, never holds the centre while another still trades; with none trading, the soonest
+ * end_ts ahead stands. A stopped game's arc ends at now (packTracks): the summary carries no halt
+ * time to end it at.
  */
 export function labelIds(
   tracks: readonly Track<Placeable>[],
@@ -146,7 +156,7 @@ export function labelIds(
   const ahead = tracks
     .filter((t) => t.item.interval.end > opts.now)
     .sort((a, b) => a.item.interval.end - b.item.interval.end)
-  const next = ahead.find((t) => t.item.state === undefined || isTrading(t.item.state)) ?? ahead[0]
+  const next = ahead.find((t) => trades(t.item)) ?? ahead[0]
   const ids = [opts.selectedId, opts.hoverId, next?.item.id ?? null]
   return [...new Set(ids.filter((id): id is string => id !== null && placed.has(id)))]
 }

@@ -71,8 +71,18 @@ interface WalletState {
    * when the wallet's key code cannot load (the caller shows it).
    */
   withAge: (send: Send, action?: GateAction, affirmedHere?: boolean) => Promise<void>
-  /** Shows the 18+ gate; ticking it creates the burner. */
-  openGate: () => void
+  /**
+   * Shows the 18+ gate; ticking it creates the burner. Rejects when the wallet's key code cannot
+   * load: the header button that asked shows it, not the faucet's line (R5c refix).
+   */
+  openGate: () => Promise<void>
+  /**
+   * An action waits for the wallet's key code to load (R5c refix): its set-up and faucet buttons
+   * say so instead of looking dead on a slow link.
+   */
+  preparing: boolean
+  /** Starts loading the key code on a sign of intent, never on a page load (walletLoader). */
+  prepare: () => void
   /** Starts Claim all (through the gate); does nothing while a run is in flight. */
   startClaims: () => void
   /** A Claim all run is in flight: every Claim all button is disabled. */
@@ -110,6 +120,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   const [gateOpen, setGateOpen] = useState(false)
   const [gateError, setGateError] = useState<string>()
   const [walletsCreated, setWalletsCreated] = useState(0)
+  const [preparing, setPreparing] = useState(false)
   const [claimRun, setClaimRun] = useState<ClaimRun>({
     claiming: false,
     claimed: [],
@@ -131,6 +142,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       },
       closeGate: () => setGateOpen(false),
       created: () => setWalletsCreated((n) => n + 1),
+      setPreparing,
     }),
   )
   const claimFlight = useMemo(() => singleFlight(), [])
@@ -207,10 +219,6 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       .catch((error: unknown) => setClaimRun({ claiming: false, claimed: [], error }))
   }, [claimFlight, core, runClaims])
 
-  const openGate = useCallback(() => {
-    core.ask().catch((error: unknown) => setFund({ busy: false, error }))
-  }, [core])
-
   const value = useMemo<WalletState>(
     () => ({
       loaded: opened !== null,
@@ -223,7 +231,9 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       exportKey: () => (burner ? exportSecret(burner.secretKey) : ''),
       importKey: core.importKey,
       withAge: core.withAge,
-      openGate,
+      openGate: core.ask,
+      preparing,
+      prepare: core.prepare,
       startClaims,
       claiming: claimRun.claiming,
       claimed: claimRun.claimed,
@@ -242,7 +252,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       portfolio.data,
       refreshPortfolio,
       core,
-      openGate,
+      preparing,
       startClaims,
       claimRun,
       requestFaucet,

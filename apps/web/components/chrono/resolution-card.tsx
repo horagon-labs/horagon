@@ -2,7 +2,7 @@
 // and the market account. The status line comes from the dial's state (R5), so it never says
 // "open" next to a dial that says trading closed.
 import type { GameDetail } from '@horagon/sdk'
-import { haltLinkLabel, resolutionStatus } from '../../lib/chrono/copy'
+import { externalLpNote, haltLinkLabel, resolutionStatus } from '../../lib/chrono/copy'
 import { milestones } from '../../lib/chrono/resolution'
 import type { DialState } from '../../lib/chrono/state'
 import { explorerAddress, explorerTx } from '../../lib/format'
@@ -39,12 +39,7 @@ export function ResolutionCard({ game, state }: { game: GameDetail; state: DialS
           </li>
         ))}
       </ol>
-      {r.externalLp && (
-        <p className="text-amber-400">
-          Someone besides Horagon also provides liquidity here. A halt withdraws only Horagon's
-          share, so this market can still trade after a halt.
-        </p>
-      )}
+      {r.externalLp && <p className="text-amber-400">{externalLpNote(game)}</p>}
       {r.evidenceUrl && (
         <p>
           <a

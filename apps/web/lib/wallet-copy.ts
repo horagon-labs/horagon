@@ -21,6 +21,23 @@ export const WALLET_READY = 'Your play wallet is ready. Get play mUSDC from the 
  */
 export const FAUCET_BUTTON = 'Get 1,000 play mUSDC'
 
+/** Any failure with no words of its own: never a stack, a chunk name or an RPC URL. */
+export const SOMETHING_WRONG = 'Something went wrong. Try again.'
+
+/**
+ * A wallet button while its action waits for the wallet's key code to load (R5c refix): the
+ * first set-up, faucet request or Import of a page fetches it, which takes a moment on a slow link.
+ */
+export const WALLET_PREPARING = 'Preparing…'
+
+/**
+ * What a failed Import says. The key's own problem (not base58, wrong length, mismatched halves)
+ * is a plain Error with words for the player; anything else (a ChunkLoadError, a TypeError, a
+ * refused save) says nothing about the key, so a working key is never called bad.
+ */
+export const importErrorText = (err: unknown): string =>
+  err instanceof Error && err.name === 'Error' ? err.message : SOMETHING_WRONG
+
 /** The crown's wallet line before the browser storage has opened (server render, first render). */
 export const WALLET_LOADING = 'Loading your balance…'
 

@@ -22,7 +22,7 @@ export function GamePositions(p: {
   canSell: boolean
   onSell: (side: Side) => void
 }) {
-  const { address, portfolio, startClaims, claiming, claimed, claimError } = useWallet()
+  const { address, portfolio, startClaims, claiming, claimed, claimError, preparing } = useWallet()
   return (
     <PositionCard
       gameId={p.game.id}
@@ -31,6 +31,7 @@ export function GamePositions(p: {
       canSell={p.canSell}
       onSell={p.onSell}
       claiming={claiming}
+      preparing={preparing}
       claimed={claimed}
       claimError={claimError}
       onClaim={startClaims}
@@ -50,7 +51,7 @@ export function MarketBlock(p: {
   onMarketStale: () => void
 }) {
   const t = useTrade(p.game, p.market, { onMarketStale: p.onMarketStale })
-  const { requestFaucet, funding, fundNote } = useWallet()
+  const { requestFaucet, funding, fundNote, preparing, prepare } = useWallet()
   const wide = useMedia(WIDE)
   const [open, setOpen] = useState(false)
   const trading = canTrade(p.dial.state)
@@ -82,6 +83,8 @@ export function MarketBlock(p: {
       timeLeft={p.dial.timeLeft}
       now={p.now}
       funding={funding}
+      preparing={preparing}
+      onIntent={prepare}
       fundNote={fundNote}
       onFaucet={requestFaucet}
       stale={p.stale}
@@ -99,6 +102,7 @@ export function MarketBlock(p: {
           onPick={pick}
           selected={wide ? (t.action === 'buy' ? t.side : null) : undefined}
           funding={funding}
+          preparing={preparing}
           onFaucet={requestFaucet}
         />
         {wide && shown && crown}

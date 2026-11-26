@@ -18,6 +18,18 @@ export const RING: Record<DialState, string> = {
   pre: 'stroke-ash-400',
 }
 
+/**
+ * How much of the time ring is drawn: the time left, except for a halt while the game is still on
+ * the court (`halted`; a final game reads `closed`), which no time left describes. Its ring is a
+ * status, the full amber hatched ring of spec 4.3, so a halt never looks like a normal close.
+ */
+export const ringShare = (state: DialState, timeLeft: number): number =>
+  state === 'halted' ? 1 : timeLeft
+
+/** The ring's hatching: only a halt is drawn dashed (spec 4.3). */
+export const ringDash = (state: DialState): string | undefined =>
+  state === 'halted' ? '3 3' : undefined
+
 /** The rim: red while the result is under review, the plain line otherwise. */
 export const rimClass = (state: DialState): string =>
   state === 'challenged' ? 'stroke-red-400' : 'stroke-line'

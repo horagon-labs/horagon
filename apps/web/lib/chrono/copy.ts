@@ -53,7 +53,8 @@ export const started = (g: Pick<Game, 'status'>): boolean => g.status !== 'sched
  * The line under the dial's number: "MEM to win", "Final · CHA lost · result pending",
  * "Resolved: MEM won", or nothing for a void game (its own line says postponed or canceled).
  * A final game with no market (`pre`, the only state a final game without one has) has no result
- * to wait for: "Final · CHA lost".
+ * to wait for: "Final · CHA lost". Neither does a result that is proposed or under review (R5c
+ * refix): the state line under it says so, never next to "result pending".
  */
 export function dialCaption(state: DialState, g: VerdictGame, outcome: Outcome | null): string {
   const v = verdict(state, g, outcome)
@@ -61,7 +62,7 @@ export function dialCaption(state: DialState, g: VerdictGame, outcome: Outcome |
     case 'resolved':
       return resolvedWords(g, v.homeWon)
     case 'final':
-      return state === 'pre'
+      return state === 'pre' || state === 'proposed' || state === 'challenged'
         ? finalWords(g, v.homeWon)
         : `${finalWords(g, v.homeWon)} · result pending`
     case 'void':
@@ -74,10 +75,25 @@ export function dialCaption(state: DialState, g: VerdictGame, outcome: Outcome |
 /**
  * A position's market status in the wallet sheet (R5c, review finding 2): the keeper's halt is
  * the normal close at the final buzzer, so `halted` reads "trading closed". A Position carries no
- * game status to tell that from a halt mid-game; the game page says which one it was.
+ * game status to tell that from a halt mid-game; the game page says which one it was. An `open`
+ * market says nothing (null, R5c refix): in the seconds between the final buzzer and the halt
+ * reaching the index it is no longer open, and the sheet cannot tell.
  */
-export const positionStatus = (status: MarketStatus): string =>
-  status === 'halted' ? 'trading closed' : status
+export const positionStatus = (status: MarketStatus): string | null =>
+  status === 'open' ? null : status === 'halted' ? 'trading closed' : status
+
+/**
+ * The ResolutionCard's note when someone besides Horagon provides liquidity: the keeper's halt
+ * withdraws only Horagon's share, so the market can still trade on chain. On a final game that
+ * halt is the close at the final buzzer (R5c refix), so the note never says "halt" under a dial
+ * that says trading closed.
+ */
+export function externalLpNote(g: Pick<Game, 'status'>): string {
+  const who = 'Someone besides Horagon also provides liquidity here.'
+  return g.status === 'final'
+    ? `${who} The close at the final buzzer withdraws only Horagon's share, so this market can still trade outside Horagon.`
+    : `${who} A halt withdraws only Horagon's share, so this market can still trade after a halt.`
+}
 
 /** The ResolutionCard's link to the halt transaction: at the final buzzer it is the close. */
 export const haltLinkLabel = (g: Pick<Game, 'status'>): string =>

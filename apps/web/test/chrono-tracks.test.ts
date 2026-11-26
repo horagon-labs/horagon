@@ -189,8 +189,10 @@ describe('labels (spec 3.1)', () => {
       const one = items().map((i) => (i.id === 'nba-401810003' ? { ...i, state } : i))
       expect(labelIds(packTracks(one, NOW).tracks, opts), state).toEqual(['nba-401810001'])
     }
-    // The arc itself still runs to end_ts: the summary has no halt time.
-    expect(tracks.find((t) => t.item.id === 'nba-401810003')?.to).toBe(NOW + 130)
+    // Its arc ends at now (R5c refix): the summary has no halt time, and nothing ahead of the now
+    // hand may read as time still to trade. Its ring is still held to end_ts.
+    expect(tracks.find((t) => t.item.id === 'nba-401810003')?.to).toBe(NOW)
+    expect(tracks.find((t) => t.item.id === 'nba-401810003')?.item.interval.end).toBe(NOW + 130)
     // With nothing trading, the soonest end_ts ahead still holds the centre.
     const none = items().map((i) => ({ ...i, state: 'closed' as const }))
     expect(labelIds(packTracks(none, NOW).tracks, opts)).toEqual(['nba-401810003'])

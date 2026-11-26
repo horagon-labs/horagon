@@ -6,6 +6,10 @@
 // Sell wait, so a Buy is never checked against an unknown balance. With no wallet yet, the
 // first send sets one up (R5): the crown's own 18+ box, then a new burner and the faucet, while
 // the side and the amount on screen stay for the Buy that follows.
+//
+// The first send of a page loads the wallet's key code and the signer (R5c). The crown is pending
+// from the hold on, and the trade is checked again, with the game as it is then, just before it
+// is built: a final buzzer during the load stops it (R5c refix).
 import type { GameDetail, MarketSummary, Position, Quote, Side, TradeAction } from '@horagon/sdk'
 import { parseAmount } from '@horagon/sdk/amount'
 import { effectiveTime } from '@horagon/sdk/math'
@@ -16,7 +20,7 @@ import { api } from './api'
 import { clearedByFaucet, errorEffect, quoteError } from './chrono/errors'
 import { awaitFill, createFillTracker, fillLine, holding } from './fill'
 import { checkTrade, type TradeCheck, tradeReady } from './trade-form'
-import { DEFAULT_SLIPPAGE_BPS, type TradeStage } from './trade-shared'
+import { DEFAULT_SLIPPAGE_BPS, type TradeStage, whenStillOk } from './trade-shared'
 import {
   BUY_AMOUNT,
   freshQuote,
@@ -148,16 +152,23 @@ export function useTrade(game: GameDetail, market: MarketSummary, opts: TradeOpt
   const ready = tradeReady(address, portfolio)
   const positionOn = (s: Side) => heldOn(portfolio?.positions, market.pubkey, s)
   const held = positionOn(side)
-  const check = checkTrade({
-    action,
-    amount,
-    balance: portfolio?.usdcBalance,
-    shares: held?.shares,
-    marketStatus: market.status,
-    gameStatus: game.status,
-    endTs: market.endTs,
-    nowSecs: effectiveTime(Date.now() / 1000, market.priceTs ?? 0),
-  })
+  // The check of a trade against the wallet, the market and the game of this render.
+  const checkOf = (a: TradeAction, amt: string, s: Side): TradeCheck =>
+    checkTrade({
+      action: a,
+      amount: amt,
+      balance: portfolio?.usdcBalance,
+      shares: positionOn(s)?.shares,
+      marketStatus: market.status,
+      gameStatus: game.status,
+      endTs: market.endTs,
+      nowSecs: effectiveTime(Date.now() / 1000, market.priceTs ?? 0),
+    })
+  const check = checkOf(action, amount, side)
+  // As of the latest render: a send that waited (the signer's load, the 18+ dialog) checks again
+  // with the game and the market as they are when it would build, never as they were at the hold.
+  const latestCheck = useRef(checkOf)
+  latestCheck.current = checkOf
   const quoted = useDebounced(check.quote ? amount.trim() : null, QUOTE_DEBOUNCE_MS)
   const key = quoteKey(market.pubkey, side, action, quoted)
   const poll = usePoll(
@@ -187,8 +198,10 @@ export function useTrade(game: GameDetail, market: MarketSummary, opts: TradeOpt
   onScreenQuoteNow.current = (fresh ?? lastQuote)?.now ?? Number.NEGATIVE_INFINITY
 
   async function submit(keypair: Keypair) {
-    if (busy.current || !check.ok) return
+    const stillOk = () => alive.current && latestCheck.current(action, amount, side).ok
+    if (busy.current || !stillOk()) return
     busy.current = true
+    setStage('building')
     setError(undefined)
     setDone(null)
     shown.current = null
@@ -196,19 +209,26 @@ export function useTrade(game: GameDetail, market: MarketSummary, opts: TradeOpt
     const before = holding(portfolio, keypair.publicKey.toBase58(), market.pubkey, side)
     try {
       // The signer loads with the first send (R5c): web3.js is not part of any page's first load.
-      const { executeTrade } = await import('./trade')
-      const r = await executeTrade(
-        api,
-        keypair,
-        {
-          market: market.pubkey,
-          side,
-          action,
-          amount: amount.trim(),
-          wallet: keypair.publicKey.toBase58(),
-        },
-        setStage,
+      // Checked again once it has loaded: the poll may have closed trading meanwhile (R5c refix).
+      const r = await whenStillOk(
+        () => import('./trade'),
+        stillOk,
+        ({ executeTrade }) =>
+          executeTrade(
+            api,
+            keypair,
+            {
+              market: market.pubkey,
+              side,
+              action,
+              amount: amount.trim(),
+              wallet: keypair.publicKey.toBase58(),
+            },
+            setStage,
+          ),
       )
+      // Nothing was built: the crown's check line says why (the final buzzer, a halt).
+      if (r === null) return
       const quotedOut = r.quote?.amountOut
       const line = (exact: bigint | null) => fillLine(action, team, { quoted: quotedOut, exact })
       shown.current = r.signature
@@ -288,13 +308,21 @@ export function useTrade(game: GameDetail, market: MarketSummary, opts: TradeOpt
       if (ready === 'no-wallet') return requestFaucet(ticked)
       // The button's own rule, kept here for callers that skip the button (a hold gesture).
       if (sendDisabled(ready, check.ok, stage)) return
-      // The wallet's key code loads with the first send (R5c): a load that fails shows here,
-      // and nothing was signed or sent.
-      withAge((kp) => void submit(kp), 'trade', ticked).catch((err: unknown) => {
-        setError(err)
-        setErrorAt(Date.now() / 1000)
-        setFailedAction(action)
-      })
+      // The wallet's key code loads with the first send (R5c): the crown is pending from the hold
+      // (R5c refix) until the send has started, or the 18+ dialog asks instead. A load that fails
+      // shows here, and nothing was signed or sent.
+      setStage('building')
+      withAge((kp) => void submit(kp), 'trade', ticked).then(
+        () => {
+          if (!busy.current) setStage(null)
+        },
+        (err: unknown) => {
+          setStage(null)
+          setError(err)
+          setErrorAt(Date.now() / 1000)
+          setFailedAction(action)
+        },
+      )
     },
   }
 }

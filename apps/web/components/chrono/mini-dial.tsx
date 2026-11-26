@@ -3,7 +3,7 @@
 // The row around it carries the words, so the picture stays hidden from screen readers.
 import { arcPath, priceToAngle } from '../../lib/chrono/geometry'
 import type { DialState } from '../../lib/chrono/state'
-import { needleClass, RING, rimClass } from './dial-look'
+import { needleClass, RING, rimClass, ringDash, ringShare } from './dial-look'
 import { Needle } from './needle'
 
 export function MiniDial(p: {
@@ -31,10 +31,10 @@ export function MiniDial(p: {
       />
       <circle cx={50} cy={50} r={42} fill="none" strokeWidth={4} className="stroke-line" />
       <path
-        d={arcPath(50, 50, 42, 0, 360 * p.timeLeft)}
+        d={arcPath(50, 50, 42, 0, 360 * ringShare(p.state, p.timeLeft))}
         fill="none"
         strokeWidth={4}
-        strokeDasharray={p.state === 'halted' ? '3 3' : undefined}
+        strokeDasharray={ringDash(p.state)}
         className={RING[p.state]}
         data-ring
       />

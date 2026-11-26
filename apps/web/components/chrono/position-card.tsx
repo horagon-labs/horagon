@@ -5,6 +5,7 @@
 import type { PositionsResponse, Side } from '@horagon/sdk'
 import { parseAmount } from '@horagon/sdk/amount'
 import { explorerTx, usdc } from '../../lib/format'
+import { WALLET_PREPARING } from '../../lib/wallet-copy'
 import { ErrorText } from '../error-text'
 import { HoldButton } from './hold-button'
 
@@ -16,6 +17,8 @@ export interface PositionCardProps {
   canSell: boolean
   onSell: (side: Side) => void
   claiming: boolean
+  /** Claim all waits for the wallet's key code to load (WalletState.preparing). */
+  preparing?: boolean
   claimed: string[]
   claimError: unknown
   onClaim: () => void
@@ -77,8 +80,8 @@ export function PositionCard(p: PositionCardProps) {
       )}
       {(claimable || p.claiming) && (
         <HoldButton
-          label={p.claiming ? 'Claiming…' : 'Claim all'}
-          pending={p.claiming}
+          label={p.claiming ? 'Claiming…' : p.preparing ? WALLET_PREPARING : 'Claim all'}
+          pending={p.claiming || p.preparing}
           onConfirm={p.onClaim}
         />
       )}

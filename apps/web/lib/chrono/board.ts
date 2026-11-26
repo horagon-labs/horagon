@@ -13,6 +13,7 @@ import {
   isTrading,
   needlePrice,
   secsToClose,
+  stillTrades,
 } from './state'
 import { etClock, etDay, etDayLabel } from './time'
 import { gameInterval, type Interval } from './tracks'
@@ -26,6 +27,8 @@ export interface BoardItem {
   price: number | null
   /** Share of the market's life still ahead, 0-1. */
   timeLeft: number
+  /** It trades now or still will (`stillTrades`): never a game that started with no market. */
+  trading: boolean
   /** Seconds of trading left; null without a market. */
   secsLeft: number | null
   /** The wallet holds shares of this game's winner market. */
@@ -50,6 +53,7 @@ export function boardItem(
   const market = winnerOf(game)
   const state = deriveDialState(game, market, now)
   const interval = gameInterval(game, market)
+  const trading = stillTrades(state, game, market !== undefined)
   return {
     id: game.id,
     game,
@@ -57,12 +61,14 @@ export function boardItem(
     state,
     price: needlePrice(state, market),
     // MarketSummary has no startTs: tip-off - 60 min stands in for it (spec 4.1). Once trading
-    // stopped no time is left (R5c): a close at the final buzzer leaves no ring up to end_ts.
-    timeLeft: !isTrading(state)
+    // stopped no time is left (R5c): a close at the final buzzer leaves no ring up to end_ts, and
+    // a game that started with no market has none either (R5c refix).
+    timeLeft: !trading
       ? 0
       : market
         ? timeLeftFraction(interval.start, market.endTs, effectiveTime(now, market.priceTs ?? 0))
         : 1,
+    trading,
     secsLeft: secsToClose(market, now),
     held: holds(portfolio, game.id),
     interval,
@@ -71,10 +77,13 @@ export function boardItem(
 
 const AFTER_TRADING: readonly DialState[] = ['closed', 'halted', 'proposed', 'challenged']
 
-/** 0 trading now, 1 not started, 2 waiting for a result, 3 resolved or void. */
+/**
+ * 0 trading now, 1 not started, 2 waiting for a result (or started with no market, which will
+ * not trade), 3 resolved or void.
+ */
 function group(i: BoardItem): number {
   if (i.state === 'resolved' || i.state === 'void') return 3
-  if (AFTER_TRADING.includes(i.state)) return 2
+  if (AFTER_TRADING.includes(i.state) || !i.trading) return 2
   return i.game.status === 'scheduled' ? 1 : 0
 }
 

@@ -11,6 +11,7 @@ import {
   isTrading,
   needlePrice,
   secsToClose,
+  stillTrades,
 } from './state'
 import { PRE_OPEN_SECS } from './tracks'
 
@@ -43,8 +44,8 @@ export function gameDial(
   const secsLeft = secsToClose(market, now)
   const tip = Math.floor(Date.parse(game.scheduledTipoff) / 1000)
   // No time is left once trading stopped (R5c): a close at the final buzzer, before end_ts,
-  // leaves no ring that reads as time still to trade.
-  const timeLeft = !isTrading(state)
+  // leaves no ring that reads as time still to trade; nor for a game that started with no market.
+  const timeLeft = !stillTrades(state, game, market !== undefined)
     ? 0
     : market
       ? timeLeftFraction(

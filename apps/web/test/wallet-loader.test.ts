@@ -32,6 +32,7 @@ function ui() {
     openGate: vi.fn<LoaderUi['openGate']>(),
     closeGate: vi.fn<LoaderUi['closeGate']>(),
     created: vi.fn<LoaderUi['created']>(),
+    setPreparing: vi.fn<LoaderUi['setPreparing']>(),
   }
 }
 
@@ -201,6 +202,76 @@ describe('walletLoader actions: the core loads with the first one, once', () => 
     expect(f.order).toEqual(['ask', 'confirm', 'cancel'])
   })
 
+  it('says an action waits while the core loads, once for many, and not once it has loaded', async () => {
+    const { s } = store()
+    const u = ui()
+    const f = fakeCore()
+    const module = await f.load()
+    let arrive: (m: CoreModule) => void = () => {}
+    const load = vi.fn(() => new Promise<CoreModule>((r) => (arrive = r)))
+    const w = walletLoader(u, load)
+    w.mount(() => s)
+    expect(u.setPreparing).not.toHaveBeenCalled()
+    const send = vi.fn()
+    const first = w.withAge(send, 'faucet', true)
+    const second = w.importKey('key', true)
+    expect(u.setPreparing.mock.calls).toEqual([[true]])
+    arrive(module)
+    await Promise.all([first, second])
+    // Off only after the last waiting action ran, so its button goes straight to its own state.
+    expect(u.setPreparing.mock.calls).toEqual([[true], [false]])
+    expect(f.order).toEqual(['withAge:faucet', 'importKey'])
+    await w.withAge(send)
+    expect(u.setPreparing).toHaveBeenCalledTimes(2)
+  })
+
+  it('a failed load clears the waiting state too', async () => {
+    const { s } = store()
+    const u = ui()
+    const w = walletLoader(u, () => Promise.reject(new Error('ChunkLoadError')))
+    w.mount(() => s)
+    await expect(w.ask()).rejects.toThrow('ChunkLoadError')
+    expect(u.setPreparing.mock.calls).toEqual([[true], [false]])
+  })
+
+  it('prepare warms the load on intent: one load, nothing run, no waiting state (R5c refix)', async () => {
+    const { s, writes } = store()
+    const u = ui()
+    const f = fakeCore()
+    const w = walletLoader(u, f.load)
+    w.prepare()
+    expect(f.load).not.toHaveBeenCalled()
+    w.mount(() => s)
+    w.prepare()
+    w.prepare()
+    await vi.waitFor(() => expect(w.loaded()).toBe(true))
+    expect(f.load).toHaveBeenCalledTimes(1)
+    expect(f.order).toEqual([])
+    expect(u.openGate).not.toHaveBeenCalled()
+    expect(u.setPreparing).not.toHaveBeenCalled()
+    expect(writes).toEqual([])
+    await w.withAge(vi.fn(), 'trade')
+    expect(f.load).toHaveBeenCalledTimes(1)
+  })
+
+  it('a warm-up that fails is forgotten: the action loads again', async () => {
+    const { s } = store()
+    const f = fakeCore()
+    const module = await f.load()
+    const load = vi
+      .fn<() => Promise<CoreModule>>()
+      .mockRejectedValueOnce(new Error('ChunkLoadError'))
+      .mockResolvedValue(module)
+    const w = walletLoader(ui(), load)
+    w.mount(() => s)
+    w.prepare()
+    await vi.waitFor(() => expect(load).toHaveBeenCalledTimes(1))
+    await Promise.resolve()
+    await w.ask()
+    expect(load).toHaveBeenCalledTimes(2)
+    expect(f.order).toEqual(['ask'])
+  })
+
   it('sync reads the store again before the load, and hands over to the core after it', async () => {
     const { s, map } = store()
     const u = ui()
@@ -268,6 +339,18 @@ describe('walletLoader with the real core (lib/wallet-core.ts through its dynami
     expect(u.setBurner.mock.lastCall?.[0]?.address).toBeTruthy()
     expect(u.openGate).not.toHaveBeenCalled()
     expect(u.created).toHaveBeenCalledTimes(1)
+  })
+
+  it('a warm-up on a first visit reads only: no write, no dialog and no burner', async () => {
+    const { s, writes } = store()
+    const u = ui()
+    const w = walletLoader(u)
+    w.mount(() => s)
+    w.prepare()
+    await vi.waitFor(() => expect(w.loaded()).toBe(true))
+    expect(writes).toEqual([])
+    expect(u.openGate).not.toHaveBeenCalled()
+    expect(u.setBurner).toHaveBeenLastCalledWith(null)
   })
 
   it('"Set up wallet" on a first visit opens the dialog and creates nothing', async () => {

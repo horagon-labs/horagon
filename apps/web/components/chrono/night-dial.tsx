@@ -21,12 +21,14 @@ const C = 100
 const HUB = 33
 const HOURS = Array.from({ length: 12 }, (_, h) => h)
 
-/** Your games glow lume; amber near the close; brass while open; ash once trading stopped. */
+/**
+ * Your games glow lume; amber near the close; brass while open; ash once trading stopped, and for
+ * a game that started with no market (`trading`, R5c refix).
+ */
 function arcClass(item: BoardItem, lit: boolean): string {
   if (item.held) return 'stroke-lume-300'
   if (item.state === 'closing' || item.state === 'halted') return 'stroke-amber-400'
-  if (item.state === 'live' || item.state === 'pre')
-    return lit ? 'stroke-brass-400' : 'stroke-brass-500'
+  if (item.trading) return lit ? 'stroke-brass-400' : 'stroke-brass-500'
   return 'stroke-ash-400'
 }
 

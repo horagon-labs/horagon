@@ -7,7 +7,7 @@ import type { Side } from '@horagon/sdk'
 import type { PusherMode } from '../../lib/chrono/pusher'
 import { cents } from '../../lib/format'
 import { sidePrice } from '../../lib/trade-view'
-import { FAUCET_BUTTON } from '../../lib/wallet-copy'
+import { FAUCET_BUTTON, WALLET_PREPARING } from '../../lib/wallet-copy'
 
 export function Pusher(p: {
   mode: PusherMode
@@ -19,6 +19,8 @@ export function Pusher(p: {
   /** Desktop: the side the crown is on. */
   selected?: Side | null
   funding: boolean
+  /** The faucet waits for the wallet's key code to load (WalletState.preparing). */
+  preparing?: boolean
   onFaucet: () => void
 }) {
   const { mode } = p
@@ -30,11 +32,11 @@ export function Pusher(p: {
     return (
       <button
         type="button"
-        disabled={p.funding}
+        disabled={p.funding || p.preparing}
         onClick={() => p.onFaucet()}
         className="min-h-14 w-full rounded-card border border-lume-300/50 text-15 font-semibold text-lume-300 disabled:opacity-50"
       >
-        {p.funding ? 'Requesting…' : FAUCET_BUTTON}
+        {p.funding ? 'Requesting…' : p.preparing ? WALLET_PREPARING : FAUCET_BUTTON}
       </button>
     )
   }

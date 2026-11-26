@@ -2,6 +2,7 @@ import { isHoragonError } from '@horagon/sdk/errors'
 import { BUZZER_CLOSED } from '../lib/chrono/copy'
 import { explorerTx, shortKey } from '../lib/format'
 import { failedSignature } from '../lib/trade-shared'
+import { SOMETHING_WRONG } from '../lib/wallet-copy'
 
 /**
  * How the words are shown: `countdown`, a live countdown of a RATE_LIMITED wait is on screen;
@@ -26,7 +27,7 @@ export function errorText(err: unknown, opts: ErrorTextOptions = {}): string {
     if (err.code === 'MARKET_HALTED' && opts.gameFinal) return BUZZER_CLOSED
     return err.hint ? `${err.message} ${err.hint}` : err.message
   }
-  return 'Something went wrong. Try again.'
+  return SOMETHING_WRONG
 }
 
 /**

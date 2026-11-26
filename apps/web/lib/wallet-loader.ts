@@ -22,6 +22,12 @@ import type { Opened, WalletCore, WalletUi } from './wallet-core'
 /** The provider's side: WalletUi, with the burner as the page shows it (no Keypair). */
 export interface LoaderUi extends Omit<WalletUi, 'setKeypair'> {
   setBurner: (burner: StoredBurner | null) => void
+  /**
+   * An action waits for the key code to load (R5c refix): true from the first such action until
+   * the last of them ran or failed, so its button can say so. A warm-up (`prepare`) waits for
+   * nothing and never sets it.
+   */
+  setPreparing: (busy: boolean) => void
 }
 
 /** What the dynamic import of lib/wallet-core.ts gives. */
@@ -69,10 +75,22 @@ export function walletLoader(ui: LoaderUi, load: () => Promise<CoreModule> = loa
     return loading
   }
 
+  /** Actions waiting for the core to load. */
+  let waiting = 0
+  const wait = (step: 1 | -1): void => {
+    const was = waiting > 0
+    waiting += step
+    if (waiting > 0 !== was) ui.setPreparing(waiting > 0)
+  }
+
   /** `act` once the core has loaded, in the order the actions came; `none` before the mount. */
   function run<T>(act: (c: WalletCore) => T, none: T): Promise<T> {
     if (!opened) return Promise.resolve(none)
-    return rules(opened).then(act)
+    if (core) return rules(opened).then(act)
+    wait(1)
+    return rules(opened)
+      .then(act)
+      .finally(() => wait(-1))
   }
 
   return {
@@ -90,6 +108,15 @@ export function walletLoader(ui: LoaderUi, load: () => Promise<CoreModule> = loa
     },
     /** The key code has loaded (after the first action). */
     loaded: (): boolean => core !== null,
+    /**
+     * Starts loading the key code on a sign of intent (a press on Buy, the crown's 18+ box), so
+     * the action that follows waits less; never on a page load. It runs nothing: the core only
+     * reads the store as it opens (a device that ticked the box before gets its missing burner
+     * back, as on any first action). A load that fails here is forgotten, and the action retries.
+     */
+    prepare(): void {
+      if (opened) rules(opened).catch(() => {})
+    },
     /**
      * "Set up wallet": the dialog, with nothing waiting behind it. A device that ticked the box
      * before but lost its burner gets it back as the core opens the store (loadWallet), as its

@@ -3,7 +3,13 @@
 // Loaded on the first open (components/wallet-button.tsx), so it is not part of a page's first
 // load. Closing the sheet unmounts it, which also hides a shown secret key again.
 import { useEffect, useRef, useState } from 'react'
-import { FAUCET_BUTTON, readyHint, replacePrompt } from '../lib/wallet-copy'
+import {
+  FAUCET_BUTTON,
+  importErrorText,
+  readyHint,
+  replacePrompt,
+  WALLET_PREPARING,
+} from '../lib/wallet-copy'
 import { AgeCheckbox } from './age-dialog'
 import { FeelToggles } from './chrono/feel-toggles'
 import { ErrorText } from './error-text'
@@ -27,11 +33,13 @@ export default function WalletSheet(p: {
     fundError,
     exportKey,
     importKey,
+    preparing,
   } = useWallet()
   const [shown, setShown] = useState<string>()
   const [importText, setImportText] = useState('')
   const [importAge, setImportAge] = useState(false)
   const [importError, setImportError] = useState<string>()
+  const [importing, setImporting] = useState(false)
   const [note, setNote] = useState<string>()
   const positions = useRef<HTMLElement>(null)
 
@@ -42,18 +50,19 @@ export default function WalletSheet(p: {
   async function onImport() {
     if (!window.confirm(replacePrompt(ephemeral))) return
     setImportError(undefined)
+    setImporting(true)
     try {
-      // The key code loads with the first import (R5c), so this waits for it.
+      // The key code loads with the first import (R5c), so this waits for it, and says so.
       if (!(await importKey(importText, importAge))) return
       setImportText('')
       setImportAge(false)
       setShown(undefined)
       setNote('Wallet imported.')
     } catch (err) {
-      // The key's own problem (not base58, wrong length, mismatched halves), in words; a key
-      // code that failed to load (a ChunkLoadError, a TypeError) gets no raw message.
-      const own = err instanceof Error && err.name === 'Error'
-      setImportError(own ? err.message : 'This key could not be imported.')
+      // The key's own problem in words; a load that failed never calls the key bad.
+      setImportError(importErrorText(err))
+    } finally {
+      setImporting(false)
     }
   }
 
@@ -84,11 +93,11 @@ export default function WalletSheet(p: {
       {hint && <p className="text-13 font-medium">{hint}</p>}
       <button
         type="button"
-        disabled={funding}
+        disabled={funding || preparing}
         onClick={() => requestFaucet()}
         className="min-h-11 w-full rounded-card bg-lume-300 py-2 font-semibold text-enamel-950 disabled:opacity-50"
       >
-        {funding ? 'Requesting…' : FAUCET_BUTTON}
+        {funding ? 'Requesting…' : preparing ? WALLET_PREPARING : FAUCET_BUTTON}
       </button>
       {note && <p className="text-13 text-lume-300">{note}</p>}
       {fundNote && <p className="text-13 text-lume-300">{fundNote}</p>}
@@ -125,11 +134,11 @@ export default function WalletSheet(p: {
           {ageNeeded && <AgeCheckbox checked={importAge} onChange={setImportAge} />}
           <button
             type="button"
-            disabled={!importText.trim() || (ageNeeded && !importAge)}
+            disabled={importing || !importText.trim() || (ageNeeded && !importAge)}
             onClick={() => void onImport()}
             className="inline-flex min-h-11 items-center underline disabled:opacity-50"
           >
-            Import
+            {importing ? 'Importing…' : 'Import'}
           </button>
           {importError && (
             <p role="alert" className="text-red-400">

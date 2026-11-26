@@ -15,6 +15,8 @@ export function HoldButton(p: {
   disabled?: boolean
   /** A send is in flight: the only optimistic part of a trade (spec 5.5). */
   pending?: boolean
+  /** A hold or a first press began: the caller may start loading what the send needs. */
+  onPressStart?: () => void
   tone?: 'lume' | 'brass'
   className?: string
 }) {
@@ -78,6 +80,7 @@ export function HoldButton(p: {
         disabled={off}
         onPointerDown={(e) => {
           if (off || e.button !== 0) return
+          p.onPressStart?.()
           apply('down')
           timer.current = setTimeout(() => apply('held'), HOLD_MS)
         }}
