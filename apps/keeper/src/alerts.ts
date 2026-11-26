@@ -47,6 +47,7 @@ const PERSON_ALERT_KEYS = [
   'tick-failing',
   'index-failing',
   'evidence-mismatch',
+  'source-held',
 ] as const
 
 /** `dedupeFor` for the keeper and ops: 3 h for the keys that need a person, else the default. */

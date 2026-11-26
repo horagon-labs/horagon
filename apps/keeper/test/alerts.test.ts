@@ -44,6 +44,7 @@ describe('personAlertWindow', () => {
       'tick-failing',
       'index-failing',
       'evidence-mismatch:nba-1',
+      'source-held:nba-1',
     ]) {
       expect(personAlertWindow(key), key).toBe(PERSON_ALERT_SECS)
     }
@@ -56,6 +57,9 @@ describe('personAlertWindow', () => {
       'challenge:nba-1:1',
       'draft:nba-1:0',
       'unconfirmed:nba-1:0',
+      'source-mismatch:nba-1',
+      'auto-proposed:nba-1:0',
+      'auto-propose-off',
       'treasury-low',
       'tx:create nba-1',
       'archived',

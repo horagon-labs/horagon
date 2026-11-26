@@ -131,13 +131,24 @@ started (`feed-silent:`): an outage that begins in Q3 would otherwise hide Q4. T
 halts.
 
 Once ESPN has shown Final with the same score for 60 s, the keeper drafts the result and sends
-`draft:`. You confirm it against a public box score and propose it (procedure A). The keeper
-finalizes once the dispute window (15 min with the default `--window 900`) has passed, then
-recycles. `status` then shows `market:finalized`, then `market:recycled`.
+`draft:`. With auto-propose on (`KEEPER_AUTO_PROPOSE`, procedure K), the keeper asks balldontlie
+for the same game and, from the later of Final held 60 s and `end_ts`, the attestor proposes the
+draft itself: `draft:` then says `Auto-propose from <time>` and there is nothing to do unless a
+page comes. It holds a result balldontlie contradicts (`source-held:`), proposes without a
+second source when balldontlie has no final 10 min after that time or no key is set (a `CHECK`
+page), and pages `source-mismatch:` when balldontlie contradicts a proposal still inside its
+window. A guardian proposes by hand (procedure A) only a held result, a postponed game, a game
+after a challenge, or every game while auto-propose is off or dry. The keeper finalizes once
+the dispute window (15 min with the default `--window 900`) has passed, then recycles. `status`
+then shows `market:finalized`, then `market:recycled`.
 
 ## Procedures
 
 ### A. Propose a Final
+
+The fallback: with auto-propose on, the keeper proposes a Final itself (K). Propose by hand a
+result it held (`source-held:`), a game after a challenge (C), any game an `unconfirmed:` page
+names, and every game while auto-propose is off or dry (its `draft:` then prints the command).
 
 1. On `draft:<gameId>:<count>`, open the game's box score on nba.com or basketball-reference.com
    (espn.com is accepted with a warning: it is the feed itself) and check the final score
@@ -148,7 +159,8 @@ recycles. `status` then shows `market:finalized`, then `market:recycled`.
    `horagon-ops propose <gameId> --box-score <url> --score <home>-<away>`.
    - It refuses before `end_ts`: `proposing opens at end_ts <time>`. Run it again after that
      time. This is the usual case: markets close at the buzzer, and a game of median length ends
-     about 28 min before `end_ts` (S + 3h00m). Its market stays halted meanwhile.
+     about 28 min before `end_ts` (S + 3h00m). Its market stays halted meanwhile. A `draft:`
+     sent before `end_ts` already gives that time, in UTC and ET (`proposing opens at ...`).
    - It refuses a score that differs from the draft (`box score <h>-<a> differs from the draft
      ...`). When the box score is right and ESPN is wrong, add
      `--periods <home>-<away>,<home>-<away>,...` (each period, overtime included, 4 to 12; they
@@ -207,7 +219,8 @@ read when it ended unresolved (about a minute); 5 min after it ended when no hei
    your `challenge` or another guardian's). The keeper marks the draft rejected and drafts again
    from the feed: a new `draft:<gameId>:<count>` follows once ESPN's Final has held 60 s.
 2. Check the box score again, then propose: as in A with the keeper's new draft, or right away
-   with your own `--periods`.
+   with your own `--periods`. After a challenge the keeper never proposes the game itself, so
+   this step is always yours.
 3. `<gameId>: no pending final draft to propose; run status` (or `postponed`): the draft is
    still marked proposed because the keeper has not seen the challenge yet. Run `status` until
    the game shows `draft:final/rejected` or a new `draft:final/pending`, then propose again. (On
@@ -274,15 +287,18 @@ ssh "$HORAGON_VPS" systemctl --user restart horagon-keeper
   several sends can take longer and is then killed. A second SIGTERM exits at once.
 - Avoid restarting from S + 1h40m until a game's market is halted at the buzzer (or its
   `end_ts`, S + 3h00m, has passed): a stop holds back halts until the new process runs, and the
-  new process alerts `feed-silent:` until its first feed read (below).
+  new process alerts `feed-silent:` until its first feed read (below). A deploy checks this
+  itself: `ops/deploy-keeper.sh` runs `horagon-ops deploy-check` on the VPS and refuses while a
+  game is between tip-off - 60 min and its market's close, unless given `--force`.
 - The next start checks every RPC's cluster, then re-plans every action from chain state: work
   that landed is seen on chain and not repeated. (`isDone` is asked only between the retries of
   one send, not across a restart.) A transaction in flight when the keeper stopped may land
   after the new process read the chain, which then sends the same action again: the chain
-  refuses one of the two (create, halt, finalize, recycle), and when it refuses the new one it
-  arrives as `fail:<action>:<gameId>`. That is expected once `status` shows the effect. A
-  treasury top-up can land twice (accepted: play money, inside the project's own accounts). The
-  keeper keeps no attempt records of its own sends; only `horagon-ops propose` does.
+  refuses one of the two (create, halt, propose, finalize, recycle), and when it refuses the new
+  one it arrives as `fail:<action>:<gameId>`. That is expected once `status` shows the effect. A
+  treasury top-up can land twice (accepted: play money, inside the project's own accounts). Of
+  the keeper's own sends, only an auto-propose keeps an attempt record, as `horagon-ops propose`
+  does (B); a retry after the restart sends the evidence it stored.
 - The first round after a start also runs the hourly steps (schedule, treasury, archive
   retention), and the alerter has forgotten what it sent, so open alerts come again.
 - From S + 1h40m until its market closes, a game the keeper has not read since the start (ESPN
@@ -444,6 +460,62 @@ ssh "$HORAGON_VPS" systemctl --user stop horagon-agent
   most every 10 min). Nothing is wrong with the markets: check the RPC and the database, which
   the keeper uses too; the agent goes on by itself once the reads are fast again.
 
+### K. Auto-propose and its pages
+
+The keeper's attestor proposes a Final itself, checked against balldontlie, a second score
+source. A guardian then only answers its pages. The settings, in `~/horagon/.env.keeper`
+(restart the keeper after a change, G):
+
+- `KEEPER_AUTO_PROPOSE`: `on` (the default), `dry` or `off`. A dry run decides as `on` does and
+  pages `DRY RUN: would propose ...` once per game and challenge round; it sends nothing and
+  writes no evidence, draft state or attempt record. Run the first night after the deploy that
+  brings auto-propose as `dry`, check its pages against your own box-score checks, then set
+  `on`.
+- `HORAGON_PUBLIC_URL`: the https site the evidence URI points to (the one `horagon-ops propose`
+  uses). Unset, or not usable for a URI of at most 128 characters, the mode is `off` whatever
+  `KEEPER_AUTO_PROPOSE` says: the keeper still starts and pages `auto-propose-off`.
+- `BALLDONTLIE_API_KEY`: the free-tier key, sent in a header only and never logged. Unset or
+  blank, there is no second source and every proposal is a `CHECK` page.
+- Without `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID`, the keeper logs a warning at start: its
+  pages reach the journal only.
+- `KEEPER_TIMINGS` may set `secondSourceWaitSecs` (default 600): how long it waits past the
+  propose time for a silent balldontlie before it proposes without it.
+
+It proposes an NBA game whose draft is a pending Final of challenge round 0, on a market open or
+halted on chain, while ESPN still shows Final at the draft's score with periods that add up. The
+propose time is the later of Final held 60 s and `end_ts`; a chain clock still before `end_ts`
+is a skip, tried again next round, never a `fail:` page. It asks balldontlie at most once a
+minute per ET date, and not for 120 s after an HTTP 429, and only for games with such a draft or
+with a proposal still inside its window. Each change of balldontlie's verdict on a game writes
+one `ops_events` line (actor `keeper`, action `second-source`), and a proposal writes action
+`propose` with actor `keeper`.
+
+The pages and what to do:
+
+- `auto-proposed:` that says `ESPN and balldontlie agree. Nothing to do.`: nothing to do. It
+  gives the time the challenge window closes and the start and end of the evidence sha256.
+- `auto-proposed:` that begins `CHECK`: no second source checked the result (no key, or no
+  final from balldontlie 10 min after the propose time). Open the basketball-reference box score
+  it links and compare the final score. If the proposal is wrong:
+  `horagon-ops challenge <gameId>` before the time it gives, then C.
+- `auto-proposed:` that begins `DRY RUN`: nothing was sent. Check the box score and propose by
+  hand (A) with the command it prints.
+- `source-mismatch:`: balldontlie's final differs from a proposal still inside its window.
+  Check the box score. If the proposal is wrong, challenge before the time it gives, then C. If
+  balldontlie is wrong, nothing to do: the result finalizes when the window closes.
+- `source-held:`: the two sources disagree and nothing was proposed. Check the box score, then
+  propose by hand (A): `--score` from the box score, and `--periods` when ESPN is the one that is
+  wrong. If balldontlie comes to agree with ESPN first, the keeper proposes by itself.
+- `unconfirmed:` with a cause (a dry run, a held result, a propose that keeps failing, and so
+  on): propose by hand (A) with the command it prints.
+- `fail:` for a propose: the program refused the attestor's proposal. The keeper tries again
+  every round and names the error in `unconfirmed:` 30 min after the propose time.
+
+The keeper seals the evidence once and records its attempt as `horagon-ops propose` does, so a
+retry sends the stored evidence unchanged. After an auto-propose that did not land, a hand
+propose with other inputs is refused because the stored evidence was sealed from other inputs:
+follow B.
+
 ## Alerts
 
 One row per alert key. "Repeats" is the shortest gap between two messages with the same key
@@ -451,15 +523,20 @@ from one process: 10 min by default, and 3 h for the keys that wait on a person.
 forgets what was sent, each `horagon-ops` run is a process of its own, and a message that
 Telegram did not take is tried again after 60 s. `<count>` is the market's on-chain challenge
 count (0 before any challenge), so a new challenge round is never held back. `<label>` names the
-transaction: `create <gameId>`, `halt <gameId> (<rule>)`, `finalize <gameId>`, `recycle
-<gameId>`, `treasury top-up`, and from `horagon-ops`: `propose <gameId>`, `challenge <gameId>`,
-`halt <gameId> (guardian)`, `initialize_config`, `pause creation`, `resume creation`,
-`fund authority`, and from the reference agent: `swap <gameId>`, `claim <gameId>`.
+transaction: `create <gameId>`, `halt <gameId> (<rule>)`, `propose <gameId>` (auto-propose),
+`finalize <gameId>`, `recycle <gameId>`, `treasury top-up`, and from `horagon-ops`:
+`propose <gameId>`, `challenge <gameId>`, `halt <gameId> (guardian)`, `initialize_config`,
+`pause creation`, `resume creation`, `fund authority`, and from the reference agent:
+`swap <gameId>`, `claim <gameId>`.
 
 | Key                            | Telegram text begins with                                                                                                                                                                    | Repeats           | What to do                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `draft:<gameId>:<count>`       | `AWAY@HOME Final <away>-<home> (ESPN). Check the box score`, or `... was not played within 7 days. Resolve NO`                                                                               | 10 min            | Propose: A for a Final, D for NO                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
-| `unconfirmed:<gameId>:<count>` | `AWAY@HOME: final draft open to propose for 30 min, waiting for the guardian's box-score check` (or `postponed draft`); the 30 min count from the draft or from `end_ts`, whichever is later | once a draft      | Propose now (A or D)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `draft:<gameId>:<count>`       | `AWAY@HOME Final <away>-<home> (ESPN). Auto-propose from <time>`, or `... Check the box score` (with the time proposing opens), or `... was not played within 7 days. Resolve NO`            | 10 min            | Auto-propose from: nothing to do unless paged (K). Otherwise propose: A for a Final, from the time it gives (`end_ts`), D for NO                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `unconfirmed:<gameId>:<count>` | `AWAY@HOME: final draft not proposed 30 min after proposing opened: <cause>` (or `postponed draft`; with auto-propose off `... open to propose for 30 min`); from the draft or `end_ts`      | once a draft      | Propose now (A or D) with the command it prints. The cause says why the keeper did not: a dry run, a postponed result, a round after a challenge, another league, a held result (`source-held:`), ESPN no longer Final at the draft score, or the error of a propose that keeps failing                                                                                                                                                                                                                                                                        |
+| `auto-proposed:<id>:<count>`   | `Proposed YES|NO for AWAY@HOME, Final <away>-<home> (ESPN). ESPN and balldontlie agree`, or `CHECK: proposed ...`, or `DRY RUN: would propose ...`                                           | 10 min            | K (`<id>` is the game id). Agree: nothing to do. `CHECK`: check the box score it links and challenge before the time it gives if it is wrong. `DRY RUN`: nothing was sent, propose by hand (A)                                                                                                                                                                                                                                                                                                                                                                 |
+| `source-mismatch:<gameId>`     | `MISMATCH: AWAY@HOME balldontlie <away>-<home> vs proposed <away>-<home>. Challenge before <time>`                                                                                           | 10 min            | K: check the box score; if the proposal is wrong, `horagon-ops challenge <gameId>` before that time, then C. It repeats while the window is open                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `source-held:<gameId>`         | `HELD: AWAY@HOME ESPN <away>-<home> vs balldontlie <away>-<home>, nothing proposed`                                                                                                          | 3 h               | K: check the box score it links, then propose by hand (A, with `--periods` when ESPN is wrong). The keeper proposes by itself if the two sources come to agree                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `auto-propose-off`             | `Auto-propose is off (<reason>): propose every result by hand (runbook A).`                                                                                                                  | once a start      | Every result waits for a guardian (A). To turn it on: `HORAGON_PUBLIC_URL` set and `KEEPER_AUTO_PROPOSE` not `off` in `.env.keeper`, then restart (G)                                                                                                                                                                                                                                                                                                                                                                                                          |
 | `challenge:<gameId>:<count>`   | `Challenged: AWAY@HOME.`                                                                                                                                                                     | 10 min            | C                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | `evidence-mismatch:<gameId>`   | `Evidence mismatch: AWAY@HOME has sha256 ... on chain, but the API serves ...`                                                                                                               | 3 h               | E, before the dispute window closes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | `periods:<gameId>`             | `AWAY@HOME: ESPN periods do not add up to <home>-<away>; resolve by hand`                                                                                                                    | 3 h               | No draft. Propose with `--score` and `--periods` from the box score (A)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
@@ -478,7 +555,7 @@ transaction: `create <gameId>`, `halt <gameId> (<rule>)`, `finalize <gameId>`, `
 | `ata-close:<wallet>`           | `Wallet <wallet> closed sponsor-paid ATA <ata>, rent to <address>`                                                                                                                           | 10 min            | The API opens no more token accounts for that wallet. A close that a traced claim_winnings made (YES or NO of its own user and market, rent to the player) never raises it and is recorded as "claim". The trace reads the account's signatures newest first back to its creation, over as many passes as heavy noise needs, and records "unknown" (and raises this alert) only when it reaches the creation without finding a close. Many in a night: lower `SPONSOR_ATAS_PER_IP_DAY` on Vercel, then redeploy                                                |
 | `ata-trace:<ata>`              | `The close of sponsor-paid ATA <ata> (wallet <wallet>) is still being traced after <n> passes: heavy transaction noise on the account. The wallet is not flagged`                            | 3 h               | Noise on the account hides its close and the keeper keeps tracing it, 200 transactions per pass; nothing is flagged meanwhile. Check by hand: open the ATA address in an explorer (or `solana transaction-history <ata>`) and look for a CloseAccount, or a `claim_winnings` that closes it. If the rent went to the sponsor or to a claim, nothing to do (the trace ends by itself once it reaches the close). If it went to another address, the wallet is not blocked until the trace says so: lower `SPONSOR_ATAS_PER_IP_DAY` on Vercel if it is an attack |
 | `external-lp:<market>`         | `External liquidity added to <gameId>; the pool is no longer Horagon's alone`                                                                                                                | 10 min            | Nothing to do: the game page shows it, and a halt withdraws only Horagon's share                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
-| `fail:<action>:<gameId>`       | `<action> <gameId> rejected: ... error <name>`                                                                                                                                               | 10 min            | The program refused a keeper action (`create`, `halt`, `finalize`, `recycle`). Read the error name and check `status`; the keeper plans it again every round                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `fail:<action>:<gameId>`       | `<action> <gameId> rejected: ... error <name>`                                                                                                                                               | 10 min            | The program refused a keeper action (`create`, `halt`, `finalize`, `recycle`, `propose`). Read the error name and check `status`; the keeper plans it again every round. An auto-propose that keeps failing names its error in `unconfirmed:` 30 min after proposing opened                                                                                                                                                                                                                                                                                    |
 | `tx:<label>`                   | `Transaction "<label>" failed 4 times (...); 1 attempt left`                                                                                                                                 | 10 min            | Check the RPC (`HORAGON_RPC_URL`). The keeper plans the action again on the next round                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | `tx-unresolved:<label>`        | `<label>: unresolved after 90 s, <signature> may still land`                                                                                                                                 | 10 min            | The transaction may still land: look the signature up before doing anything by hand. The keeper re-plans from chain state; for a `horagon-ops` command, B (propose) or G (`fund-authority`)                                                                                                                                                                                                                                                                                                                                                                    |
 | `agent-anomaly:<gameId>`       | `Reference agent: after its YES swap on AWAY@HOME the price moved away from the model` (or `NO swap`)                                                                                        | 10 min            | The agent no longer trades that market until it is restarted by hand (a restart after a crash or a stall keeps it off, J); nothing else is affected. It held the market 2 min first, and no trade by another wallet since the swap was stored in that time: a wrong side or a swap that did something else is a bug, stop the agent (J). An indexer more than 2 min behind the chain can also cause it: look for `index-stuck:` and the trades of that market first. Restart it (J) to trade the market again                                                  |

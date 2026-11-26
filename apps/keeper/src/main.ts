@@ -20,9 +20,11 @@ import { loadReplayDir, replayFeed } from './feeds/replay'
 import type { Feed } from './feeds/types'
 import { indexOnce } from './indexer'
 import { dueEvery, FailureStreak, type RoundStep, roundSteps, runRound, runStep } from './loop'
+import { evidenceUri } from './propose'
 import { scheduleTick } from './schedule'
+import { Balldontlie } from './second-source/balldontlie'
 import { StallGuard, watchStall } from './stall'
-import { Keeper } from './tick'
+import { type AutoProposeDeps, autoProposeNotices, Keeper } from './tick'
 import { treasuryTick } from './treasury'
 
 const TICK_MS = 5_000
@@ -81,6 +83,19 @@ async function main(): Promise<void> {
           now: () => new Date(),
           speed: cfg.feed.speed,
         })
+  // Auto-propose (R6): the attestor proposes checked results. Off, it says so once a start.
+  const { mode, publicUrl } = cfg.autoPropose
+  const autoPropose: AutoProposeDeps | undefined =
+    mode !== 'off' && publicUrl
+      ? {
+          mode,
+          evidenceUri: (gameId) => evidenceUri(publicUrl, cfg.cluster, gameId),
+          secondSource: cfg.balldontlieKey ? new Balldontlie(cfg.balldontlieKey) : null,
+        }
+      : undefined
+  const notices = autoProposeNotices(cfg.autoPropose, cfg.telegram !== null)
+  if (notices.warn) log.warn(notices.warn)
+  if (notices.alert) await alerts.send('auto-propose-off', notices.alert)
   const keeper = new Keeper({
     db,
     sender,
@@ -94,6 +109,7 @@ async function main(): Promise<void> {
     seeds: cfg.seeds,
     sigma: ratings.sigma,
     priority: cfg.priority,
+    ...(autoPropose ? { autoPropose } : {}),
   })
 
   let stopping = false
@@ -118,7 +134,13 @@ async function main(): Promise<void> {
   const step = <T>(name: string, fn: () => Promise<T>) => runStep(log, name, fn, guard)
 
   log.info(
-    { feed: feed.name, cluster: cfg.cluster, attestor: cfg.attestor.publicKey.toBase58() },
+    {
+      feed: feed.name,
+      cluster: cfg.cluster,
+      attestor: cfg.attestor.publicKey.toBase58(),
+      autoPropose: autoPropose?.mode ?? 'off',
+      secondSource: autoPropose?.secondSource ? 'balldontlie' : 'off',
+    },
     'keeper started',
   )
   let round = 0
