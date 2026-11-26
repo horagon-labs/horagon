@@ -496,7 +496,7 @@ async function indexMarket(
       // as nothing available: the scan stops at the chunk's first signature, the cursor keeps
       // what earlier chunks read, and a market that keeps failing reaches index-stuck.
       deps.log.warn(
-        { market: m.pubkey, error: errorSummary(err).message },
+        { market: m.pubkey, sig: chunk[0], size: chunk.length, error: errorSummary(err).message },
         'transaction batch read failed',
       )
       answer = []

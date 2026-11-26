@@ -324,6 +324,15 @@ describe('inRequestOrder', () => {
   it('puts each answer at the signature it carries, whatever order it came in', () => {
     const [a, b, c] = [tx('a'), tx('b'), tx('c')]
     expect(inRequestOrder(['a', 'b', 'c'], [c, a, b])).toEqual([a, b, c])
+    // The two orders measured on devnet: 0,2,1 keeps the first answer in place, 2,1,0 does not.
+    expect(inRequestOrder(['a', 'b', 'c'], [a, c, b])).toEqual([a, b, c])
+    expect(inRequestOrder(['a', 'b', 'c'], [c, b, a])).toEqual([a, b, c])
+  })
+
+  it('keys a sponsored trade on its id, the fee payer signature, not a later signer', () => {
+    const sponsored = { transaction: { signatures: ['id', 'user'] } }
+    expect(inRequestOrder(['id'], [sponsored])).toEqual([sponsored])
+    expect(inRequestOrder(['user'], [sponsored])).toEqual([null])
   })
 
   it('reads a null, a short answer, a foreign answer and an empty signature list as missing', () => {
@@ -775,6 +784,8 @@ describe('indexOnce does not skip past a transaction it could not read', () => {
     expect(stops.get(market.toBase58())).toMatchObject({ sig: 'b50', count: 1 })
     expect(warns.find((w) => w.msg === 'transaction batch read failed')?.obj).toMatchObject({
       market: market.toBase58(),
+      sig: 'b50',
+      size: 10,
       error: expect.stringContaining('429'),
     })
     expect(warns.some((w) => w.msg === 'index failed')).toBe(false)
