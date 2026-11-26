@@ -172,11 +172,13 @@ describe('/agent: how the reference agent works (R2b)', () => {
     .replace(/&amp;/g, '&')
   const p = AGENT_PARAMS
 
-  it('has its title and description', () => {
+  it('has its title and description, in its share preview too', () => {
+    const description =
+      "How Horagon's disclosed reference agent trades, and why it never counts as a fan."
     expect(metadata.title).toBe('Reference agent')
-    expect(metadata.description).toBe(
-      "How Horagon's disclosed reference agent trades, and why it never counts as a fan.",
-    )
+    expect(metadata.description).toBe(description)
+    expect(metadata.openGraph).toMatchObject({ title: 'Reference agent · Horagon', description })
+    expect(metadata.twitter).toMatchObject({ title: 'Reference agent · Horagon', description })
   })
 
   it('shows the full wallet, linked to the explorer', () => {

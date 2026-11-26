@@ -6,10 +6,22 @@ import type { Metadata } from 'next'
 import type { ReactNode } from 'react'
 import { BOT_RATE, AGENT_PARAMS as P } from '../../lib/agent'
 import { explorerAddress } from '../../lib/format'
+import { fullTitle, SITE_NAME } from '../../lib/meta'
+
+const TITLE = 'Reference agent'
+const DESCRIPTION =
+  "How Horagon's disclosed reference agent trades, and why it never counts as a fan."
 
 export const metadata: Metadata = {
-  title: 'Reference agent',
-  description: "How Horagon's disclosed reference agent trades, and why it never counts as a fan.",
+  title: TITLE,
+  description: DESCRIPTION,
+  openGraph: {
+    title: fullTitle(TITLE),
+    description: DESCRIPTION,
+    type: 'website',
+    siteName: SITE_NAME,
+  },
+  twitter: { title: fullTitle(TITLE), description: DESCRIPTION, card: 'summary_large_image' },
 }
 
 const REPO = 'https://github.com/horagon-labs/horagon/blob/main'
