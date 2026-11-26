@@ -11,6 +11,25 @@ export const etTime = (ts: number): string => CLOCK.format(new Date(ts * 1000))
 /** "9:08 PM ET". */
 export const etClock = (ts: number): string => `${etTime(ts)} ET`
 
+const DAY = new Intl.DateTimeFormat('en-CA', {
+  timeZone: 'America/New_York',
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+})
+const DAY_LABEL = new Intl.DateTimeFormat('en-US', {
+  timeZone: 'America/New_York',
+  weekday: 'short',
+  month: 'short',
+  day: 'numeric',
+})
+
+/** "2026-11-27": the ET day of unix second `ts`, as the NBA (and the API's `date`) dates games. */
+export const etDay = (ts: number): string => DAY.format(new Date(ts * 1000))
+
+/** "Fri, Nov 27": the ET day of unix second `ts`, for people. */
+export const etDayLabel = (ts: number): string => DAY_LABEL.format(new Date(ts * 1000))
+
 const plural = (n: number, unit: string) => `${n} ${unit}${n === 1 ? '' : 's'}`
 
 /** "1 hour 2 minutes", "4 minutes", "45 seconds": for aria labels (spec 2.6). */

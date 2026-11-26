@@ -2,7 +2,9 @@
 // The game screen's data (Chronometer spec 4.2, 5.2): the game every 3 s and its history every
 // 15 s as before, plus the winner market's state every 60 s for its real start_ts. While a
 // result is proposed, the published evidence JSON names the proposed side, so the needle can
-// turn toward it. No new endpoint: both are routes the SDK client already has.
+// turn toward it. No new endpoint: both are routes the SDK client already has. The server's first
+// frame (R5, lib/server/initial.ts) draws the game, its real price included, until the first
+// poll answers; without it the page opens on a dial with no needle.
 import { isHoragonError } from '@horagon/sdk'
 import { api } from '../lib/api'
 import { winnerOf } from '../lib/chrono/board'
@@ -10,6 +12,7 @@ import { proposedOutcome } from '../lib/chrono/evidence'
 import { gameDial } from '../lib/chrono/game'
 import { pollHealth } from '../lib/chrono/health'
 import { useNow } from '../lib/chrono/now'
+import type { InitialGame } from '../lib/server/initial'
 import { usePoll } from '../lib/use-poll'
 import { GameLoading, GameScreen, NoGame } from './chrono/game-screen'
 import { GamePositions, MarketBlock } from './chrono/market-block'
@@ -17,10 +20,10 @@ import { ErrorText } from './error-text'
 
 const SLOW_POLL_MS = 60_000
 
-export function GameView({ id }: { id: string }) {
+export function GameView({ id, initial }: { id: string; initial?: InitialGame }) {
   const detail = usePoll(`game:${id}`, () => api.games.get(id))
   const history = usePoll(`history:${id}`, () => api.games.history(id), 15_000)
-  const game = detail.data
+  const game = detail.data ?? initial?.game
   const winner = game ? winnerOf(game) : undefined
   const pubkey = winner?.pubkey ?? ''
   const marketState = usePoll(
@@ -33,14 +36,16 @@ export function GameView({ id }: { id: string }) {
     () => api.evidence(id, 'winner'),
     SLOW_POLL_MS,
   )
-  const now = useNow()
+  // 0 while hydrating (lib/chrono/now.ts): the server's clock, so both renders match.
+  const now = useNow() || (initial?.now ?? 0)
   const health = pollHealth(detail)
 
   if (!game) {
     // A malformed id is refused as INVALID_INPUT before the lookup: it names no game either.
     const missing =
-      isHoragonError(detail.error) &&
-      (detail.error.code === 'NOT_FOUND' || detail.error.code === 'INVALID_INPUT')
+      (isHoragonError(detail.error) &&
+        (detail.error.code === 'NOT_FOUND' || detail.error.code === 'INVALID_INPUT')) ||
+      initial?.missing === true
     if (missing) return <NoGame />
     return (
       <div className="space-y-3">

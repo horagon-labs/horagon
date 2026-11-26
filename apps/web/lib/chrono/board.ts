@@ -12,7 +12,7 @@ import { isTonight, percent, usdc } from '../format'
 import { rowSubject } from './copy'
 import { timeLeftFraction } from './geometry'
 import { type DialState, deriveDialState, dialLabel, needlePrice, secsToClose } from './state'
-import { etClock } from './time'
+import { etClock, etDay, etDayLabel } from './time'
 import { gameInterval, type Interval } from './tracks'
 
 export interface BoardItem {
@@ -134,6 +134,37 @@ export function itemLabel(i: BoardItem): string {
   return `${teams}. ${words}${i.held ? '. You hold a position' : ''}`
 }
 
+/** The next games after tonight: the first tip-off and how many games share its ET day. */
+export interface Upcoming {
+  tip: number
+  count: number
+}
+
+const tipOf = (g: Pick<Game, 'scheduledTipoff'>): number =>
+  Math.floor(Date.parse(g.scheduledTipoff) / 1000)
+
+/**
+ * The first scheduled games past tonight's window (lib/format.ts `isTonight`), so an empty board
+ * can say when the next ones are (R5). Null when `games` holds none.
+ */
+export function upcomingOf(games: readonly Game[], nowSecs: number): Upcoming | null {
+  const later = games
+    .filter((g) => g.status === 'scheduled' && !isTonight(g, nowSecs * 1000))
+    .map(tipOf)
+    .filter((t) => t > nowSecs)
+    .sort((a, b) => a - b)
+  const first = later[0]
+  if (first === undefined) return null
+  const day = etDay(first)
+  return { tip: first, count: later.filter((t) => etDay(t) === day).length }
+}
+
+/** "Next games: Fri, Nov 27 · 4 games from 7:00 PM ET". */
+export function nextLine(u: Upcoming): string {
+  const games = u.count === 1 ? '1 game' : `${u.count} games`
+  return `Next games: ${etDayLabel(u.tip)} · ${games} from ${etClock(u.tip)}`
+}
+
 export interface BoardModel {
   /** Every team playing tonight, for the follow chips. */
   teams: string[]
@@ -141,18 +172,26 @@ export interface BoardModel {
   items: BoardItem[]
   /** The line for an empty board, with the words the board already uses; null with rows. */
   empty: string | null
+  /** On an empty board with no follow filter: when the next games are, if known. */
+  next: string | null
   /** The Night dial's clock (spec 5.4): `now` moved up to the newest winner `priceTs` the board has seen. */
   chainNow: number
 }
 
-/** Tonight's board (spec 4.1, 4.4): the 24-hour filter, the follow filter and the list order. */
+/**
+ * Tonight's board (spec 4.1, 4.4): the 24-hour filter, the follow filter and the list order.
+ * `upcoming`: the next games the server found past the list's own days (lib/server/initial.ts).
+ */
 export function boardModel(
   games: Game[] | undefined,
   portfolio: PositionsResponse | undefined,
   now: number,
   follows: readonly string[],
+  upcoming: Upcoming | null = null,
 ): BoardModel {
-  if (games === undefined) return { teams: [], items: [], empty: 'Loading games…', chainNow: now }
+  if (games === undefined) {
+    return { teams: [], items: [], empty: 'Loading games…', next: null, chainNow: now }
+  }
   // Every endTs comparison on the Night dial uses chain time (spec 5.4), like each row does.
   const newest = Math.max(0, ...games.map((g) => winnerOf(g)?.priceTs ?? 0))
   const chainNow = effectiveTime(now, newest)
@@ -163,10 +202,12 @@ export function boardModel(
       ? tonight
       : tonight.filter((g) => follows.includes(g.home) || follows.includes(g.away))
   const items = shown.map((g) => boardItem(g, portfolio, now)).sort(listOrder)
-  if (items.length > 0) return { teams, items, empty: null, chainNow }
-  const empty =
-    follows.length > 0
-      ? 'No games for the teams you follow in the next 24 hours.'
-      : 'No NBA games in the next 24 hours.'
-  return { teams, items, empty, chainNow }
+  if (items.length > 0) return { teams, items, empty: null, next: null, chainNow }
+  if (follows.length > 0) {
+    const empty = 'No games for the teams you follow in the next 24 hours.'
+    return { teams, items, empty, next: null, chainNow }
+  }
+  const later = upcomingOf(games, now) ?? upcoming
+  const next = later && later.tip > now ? nextLine(later) : null
+  return { teams, items, empty: 'No NBA games in the next 24 hours.', next, chainNow }
 }
