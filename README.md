@@ -2,11 +2,15 @@
 
 # Horagon
 
-**Game-day prediction markets for the NBA, built on pm-AMM on Solana. Horagon will give each game one market, "will the home team win?". It opens an hour before tip-off and closes at the final buzzer, when the keeper first reads Final, or at the latest 3 h after the scheduled tip-off, which 263 of 268 games measured ended before. While it is open its liquidity shrinks on pm-AMM's √(time left) schedule. A fan will see every position they hold tonight on one screen, and bots and AI agents will trade the same markets through a typed SDK and API.**
+_Game time, kept._
+
+<sub>The name joins hōra and agōn, Greek for "hour" and "contest": the hour of the contest.</sub>
+
+**Game-day prediction markets for the NBA, built on pm-AMM on Solana. Horagon gives each game one market, "will the home team win?". It opens an hour before tip-off and closes at the final buzzer, when the keeper first reads Final, or at the latest 3 h after the scheduled tip-off, which 263 of 268 games measured ended before. While it is open its liquidity shrinks on pm-AMM's √(time left) schedule. A fan will see every position they hold tonight on one screen, and bots and AI agents will trade the same markets through a typed SDK and API.**
 
 [![CI](https://github.com/horagon-labs/horagon/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/horagon-labs/horagon/actions/workflows/ci.yml)
 [![Play money on devnet](https://img.shields.io/badge/money-play%20money%20on%20devnet-b45309?style=flat-square)](#play-money)
-[![Status: Tier 1 built, not deployed yet](https://img.shields.io/badge/status-tier%201%20built%2C%20not%20deployed%20yet-0b6e4f?style=flat-square)](#status)
+[![Status: live on devnet](https://img.shields.io/badge/status-live%20on%20devnet-0b6e4f?style=flat-square)](#status)
 [![Built on pm-AMM](https://img.shields.io/badge/built%20on-pm--AMM-4338ca?style=flat-square)](#why-the-pm-amm)
 [![Not audited](https://img.shields.io/badge/audit-none-6b7280?style=flat-square)](#limits-stated-plainly)
 [![License: MIT](https://img.shields.io/badge/license-MIT-6b7280?style=flat-square)](LICENSE)
@@ -24,11 +28,11 @@
 > devnet test token, which anyone can claim from a faucet. There is no mainnet deployment and no
 > real-money market. One would come only after legal advice in the builder's jurisdiction.
 >
-> **This README describes the repository after Tier 1 was built, before its devnet deploy.**
-> Tier 0, the foundation and five feasibility spikes, finished on 2026-11-19. Tier 1, the second
-> of five tiers (0 to 4), built the `horagon` program, the keeper, API v1 and the web app. None
-> of them is deployed yet, so players cannot use the product. The [Status](#status) table
-> separates what is built from what is planned, and each later tier updates it.
+> **This README describes the repository on 2026-11-26, before the first counted night.** The
+> `horagon` program is deployed on devnet, the keeper runs on a small Linux server, and the web
+> app and API v1 are live at [www.horagon.xyz](https://www.horagon.xyz) (health at
+> `/api/v1/health`). The first counted NBA night is ET 2026-11-27. The [Status](#status) table
+> separates what runs from what is planned, and a full rewrite of this page is still to come.
 
 ## In 30 seconds
 
@@ -41,17 +45,18 @@ Stern (1994): the normal CDF of the home margin plus a pre-game drift, over σ�
 liquidity as L₀·√(T − t). LPs then lose value at an even rate over the game, instead of all at
 once in the minutes that decide it.
 
-Horagon builds a game-day product on that model. This is the design, built in Tiers 1 to 3
-(see [Status](#status)):
+Horagon builds a game-day product on that model. This is the design (see
+[Status](#status) for what runs today):
 
 - **For fans.** A Tonight page lists every NBA game in the next 24 hours, with a market on each.
   A fan buys HOME or AWAY from a burner wallet that holds 0 SOL, because a sponsor pays the
-  transaction fee and the token-account rent. My Game-day shows the night's positions on one
-  screen, with the live score, the price and the P&L, and one button claims them all after the
-  final.
-- **For builders.** The same markets are reachable through `@horagon/sdk`, an HTTP API, a CLI and
-  an MCP server. Bot and agent wallets trade on-chain on pm-AMM like anyone else. They are
-  labelled and reported apart from human wallets.
+  transaction fee and the token-account rent. A My Game-day screen (planned) is to show the
+  night's positions in one place, with the live score, the price and the P&L, and one button to
+  claim them all after the final.
+- **For builders.** The same markets are reachable through `@horagon/sdk` (used from this
+  repository; it is not on npm) and an HTTP API. Bot and agent wallets trade on-chain on pm-AMM
+  like anyone else. They are labelled by a memo, and the pre-registered metric counts them
+  apart from human wallets.
 - **For resolution.** A program-derived address (PDA) of the Horagon program is the authority
   and sole LP of every market. The keeper drafts each result and its evidence JSON. A guardian
   checks the draft against the public box score and proposes it on-chain with the evidence hash.
@@ -61,9 +66,11 @@ It answers the "Game-day mode for prediction markets" entry in Solana's
 [Requests for Startups 2026](https://solana.com/request-for-startups): "Build a live game-day
 experience around the positions a fan already holds."
 
-**Where it stands on 2026-11-21.** Tier 0 laid the foundation: a TypeScript SDK with a pm-AMM
+**Where it stands on 2026-11-26.** Tier 0 laid the foundation: a TypeScript SDK with a pm-AMM
 quote engine and a validator for sponsored transactions, and CI. Tier 1 built the core on it
-(below), and the repository now runs 1,048 tests. Five spikes (S1 to S5) answered whether the
+(below). On 2026-11-26, at commit `2125395`, the repository's test suites passed with db 77 (and 2
+skipped), sdk 732, keeper 501, api 180, spikes 41 and web 500 tests, and 14 integration tests
+skipped; the count changes with every merge. Five spikes (S1 to S5) answered whether the
 plan is feasible, against the real pm-AMM program on devnet or on Surfpool,
 a local fork of devnet:
 
@@ -81,8 +88,9 @@ A sixth measurement, end-ts, set the latest close: S + 3 h, from the play-by-pla
 A market closes at the final buzzer before that.
 
 Tier 1 then built the Horagon program, the keeper, API v1 and the web app, with their tests.
-They are not deployed yet: no Horagon market exists on devnet, and the first live NBA night is
-still ahead.
+They are now deployed on devnet: the program `HtDJ3vfx9vtFSmskm2Ks39kBMuDmFZH3H2B173BB9qHF`, the
+keeper on a small Linux server, and the web app and API at [www.horagon.xyz](https://www.horagon.xyz).
+The first live NBA night that counts is ET 2026-11-27.
 
 ## Check it yourself
 
@@ -132,9 +140,10 @@ quotes the swap with `quoteSwap` and requires it to land within 0.1% of what the
 engine accrues the reserves to the swap's time, takes the 2% fee on the USDC leg, solves the
 curve and floors to raw units, as the program does.
 
-**4. Run the full check:** `pnpm check` runs Biome, the TypeScript type check, 1,048 tests with
-coverage floors, and the build. 12 more tests run only against a Surfpool with the program
-deployed (`HORAGON_IT_RPC`). CI runs `pnpm check` on Node 22.
+**4. Run the full check:** `pnpm check` runs Biome, the TypeScript type check, the tests with
+coverage floors (about 2,000 at 2026-11-26; see the count above), and the build. 14 integration
+tests run only against a Surfpool with the program deployed (`HORAGON_IT_RPC`). CI runs the same
+steps on Node 22.
 
 ## Why the pm-AMM
 
@@ -173,39 +182,39 @@ close.
 
 The bounty's six criteria in its own order, and where Horagon stands on each today:
 
-| Criterion                     | Where Horagon stands on 2026-11-21                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Traction** (biggest weight) | **None yet.** No player market has opened. The first live NBA night is planned for 2026-11-23 ET, or 2026-11-24 ET (an NBA Cup night) at the latest. A public `/metrics` page will count, from the chain: active wallets, returning wallets (2 or more nights), engaged wallets (3 or more trades across 2 or more games), trades, volume and fees. Team wallets are listed publicly and excluded. Bot and agent wallets are reported apart from humans. This row will carry those numbers.                                                                                                                                                                         |
-| **Why the pm-AMM**            | [The section above](#why-the-pm-amm), with the model in [`win-probability.ts`](packages/sdk/src/model/win-probability.ts) and the time-rescaled quote in [`rescale.ts`](packages/sdk/src/math/rescale.ts) and [`quote.ts`](packages/sdk/src/math/quote.ts).                                                                                                                                                                                                                                                                                                                                                                                                         |
-| **Narrative**                 | A fan already holds positions during a game. Horagon will give those positions a live game-day screen, as the RFS entry asks, and will let bots and agents be the fan's counterparties on the same pm-AMM markets.                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| **Depth of integration**      | Tier 0: a port of pm-AMM's accrual and curve that matches 6 devnet swaps; a program PDA as market authority through CPI (S2, on Surfpool); a sponsor validator that decodes pm-AMM instructions by their IDL discriminators and only pays for `swap`, `redeem_pair` and `claim_winnings` on Horagon markets; the pm-AMM TypeScript SDK vendored at a pinned commit. Built in Tier 1, not deployed yet: the Horagon program uses CPI for `initialize_market`, `deposit_liquidity`, `withdraw_liquidity` (halt), `resolve_market`, `claim_lp_residuals` and `claim_winnings` (recycling the treasury), and the keeper's indexer reads every trade on Horagon markets. |
-| **Product today**             | **Built, not deployed yet.** Tier 1 built the full loop: keeper, program, sponsor, API v1, and the Tonight and Game pages. None of it runs on devnet yet, so no player can trade; the devnet deploy and a replayed game come next, then the first live NBA night.                                                                                                                                                                                                                                                                                                                                                                                                   |
-| **Standalone potential**      | Sports are where prediction-market volume is: 77 to 81% of Kalshi's volume from May to July 2026 ([Pew Research](https://www.pewresearch.org/short-reads/2026/09/23/prediction-markets-trading-volume-doubled-between-may-and-july-largely-driven-by-sports/)). A game is the moment a fan cares most. The same code would run on any pm-AMM collateral mint. Developer tooling (SDK, API, CLI, MCP, a local sandbox that replays recorded games) is meant to bring outside bots and agents in as counterparties. A real-money version is out of scope until legal advice ([Limits](#limits-stated-plainly)).                                                       |
+| Criterion                     | Where Horagon stands on 2026-11-26                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Traction** (biggest weight) | **None yet.** The site, API, keeper and program are live on devnet, but no counted night has run. The first counted NBA night is ET 2026-11-27. Wallets, trades and volume are counted from the chain by the pre-registered metric ([`docs/metrics.md`](docs/metrics.md)); team wallets are listed in [`docs/metrics-wallets.json`](docs/metrics-wallets.json) and excluded, and bot wallets are reported apart from humans. A public `/metrics` page is not built; it is decided on 2026-12-05. This row will carry those numbers.                                                                                                                                      |
+| **Why the pm-AMM**            | [The section above](#why-the-pm-amm), with the model in [`win-probability.ts`](packages/sdk/src/model/win-probability.ts) and the time-rescaled quote in [`rescale.ts`](packages/sdk/src/math/rescale.ts) and [`quote.ts`](packages/sdk/src/math/quote.ts).                                                                                                                                                                                                                                                                                                                                                                                                              |
+| **Narrative**                 | A fan already holds positions during a game. Horagon gives each game a live market, and a My Game-day screen for a fan's positions (planned, R7) is how it answers the RFS entry. Bots and agents trade the same pm-AMM markets as the fan's counterparties.                                                                                                                                                                                                                                                                                                                                                                                                             |
+| **Depth of integration**      | Tier 0: a port of pm-AMM's accrual and curve that matches 6 devnet swaps; a program PDA as market authority through CPI (S2, on Surfpool); a sponsor validator that decodes pm-AMM instructions by their IDL discriminators and only pays for `swap`, `redeem_pair` and `claim_winnings` on Horagon markets; the pm-AMM TypeScript SDK vendored at a pinned commit. Built in Tier 1 and deployed on devnet: the Horagon program uses CPI for `initialize_market`, `deposit_liquidity`, `withdraw_liquidity` (halt), `resolve_market`, `claim_lp_residuals` and `claim_winnings` (recycling the treasury), and the keeper's indexer reads every trade on Horagon markets. |
+| **Product today**             | **Live on devnet.** The program, the keeper (on a small Linux server), API v1 and the web app (Tonight and Game pages, burner wallet, trading, claim) run. A reference agent is installed next to the keeper and starts in dry run. The first counted NBA night is ET 2026-11-27.                                                                                                                                                                                                                                                                                                                                                                                        |
+| **Standalone potential**      | Sports are where prediction-market volume is: 77 to 81% of Kalshi's volume from May to July 2026 ([Pew Research](https://www.pewresearch.org/short-reads/2026/09/23/prediction-markets-trading-volume-doubled-between-may-and-july-largely-driven-by-sports/)). A game is the moment a fan cares most. The same code would run on any pm-AMM collateral mint. The typed SDK and the HTTP API let outside bots and agents trade as counterparties; a CLI, an MCP server and a replay sandbox are not planned before submission. A real-money version is out of scope until legal advice ([Limits](#limits-stated-plainly)).                                               |
 
 ## Status
 
-What exists at this commit, and what does not yet. The dates are targets from the design; each
-tier updates this table.
+What exists at this commit, and what does not yet. The plan from here is the R-list of the
+rescope plan, up to the submission deadline of 2026-12-08, 21:00 UTC.
 
-| Component                                                                                                                 | Status                                                                                                                                                                    | Where                                                                  |
-| ------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
-| pm-AMM quote engine: accrual (time rescale), the dynamic curve and the 2% fee, in all 6 swap directions                   | **Built** (Tier 0). It matches 6 devnet swaps: 4 exactly, worst error 0.0011%. A lagging client clock quotes at the chain's effective time, never before the last accrual | [`packages/sdk/src/math`](packages/sdk/src/math)                       |
-| pm-AMM bindings: program and mint constants, PDAs, `Market` account decoding, instruction discriminators, error mapping   | **Built** (Tier 0)                                                                                                                                                        | [`packages/sdk/src/pm-amm`](packages/sdk/src/pm-amm)                   |
-| Win-probability model: Elo before the game (K 20, home advantage 100), Brownian in-game model                             | **Built** (Tier 0). Shown to fans; the reference agent trades toward it                                                                                                   | [`packages/sdk/src/model`](packages/sdk/src/model)                     |
-| Resolution evidence: an RFC 8785 (JCS) canonical JSON and its sha256                                                      | **Built** (Tier 0)                                                                                                                                                        | [`packages/sdk/src/evidence`](packages/sdk/src/evidence)               |
-| Sponsor validator: an allowlist for every instruction of a fee-paid transaction                                           | **Built** (Tier 0), 40 tests. It ties outcome-token ATA creates to the markets the transaction trades, and reports how many it approved                                   | [`packages/api/src/sponsor`](packages/api/src/sponsor)                 |
-| Spikes S1 to S5                                                                                                           | **Done.** S1, S2 (Surfpool), S3a, S3b and S5 pass. S4 fails on the NBA CDN, which refused every host, and ESPN replaces it. All 12 games of 2026-11-18 ET are recorded    | [`docs/spikes.md`](docs/spikes.md), [`spikes/results`](spikes/results) |
-| Replay fixtures: 12 recorded NBA games, 233 to 308 frames each                                                            | **Built** (Tier 0)                                                                                                                                                        | [`tests/fixtures/replay`](tests/fixtures/replay)                       |
-| CI: lint, type check, test, build on Node 22; security scans; program build                                               | **Built** (Tier 0). Tier 1 added the security job (gitleaks, osv-scanner, `pnpm audit`) and `program.yml` (build, IDL check, `cargo audit`), not yet run on GitHub        | [`.github/workflows`](.github/workflows)                               |
-| `horagon` program (Anchor): config, game markets, halt, propose, challenge, finalize, recycle                             | **Built** (Tier 1), not deployed yet                                                                                                                                      | [`programs/horagon`](programs/horagon)                                 |
-| Keeper: schedule, ESPN feed, Elo, market creation, halts, evidence, proposals, treasury, indexer, alerts                  | **Built** (Tier 1), not deployed yet                                                                                                                                      | [`apps/keeper`](apps/keeper)                                           |
-| Reference agent: one disclosed team wallet that trades toward the model on quiet live markets ([below](#reference-agent)) | **Built**, not run yet. Off unless `AGENT_ENABLED=1`, and it refuses to start unless its wallet is listed as `team-burner`; it runs dry unless `AGENT_DRY_RUN=0`          | [`apps/keeper/src/agent`](apps/keeper/src/agent)                       |
-| API v1: reads, transaction building, sponsored submit, faucet                                                             | **Built** (Tier 1), not deployed yet                                                                                                                                      | [`packages/api`](packages/api)                                         |
-| Web: Tonight, Game, burner wallet, trading, claim                                                                         | **Built** (Tier 1), not deployed yet                                                                                                                                      | [`apps/web`](apps/web)                                                 |
-| My Game-day, the Verify, Metrics and Status pages, leaderboard, share cards, a second guardian (watcher)                  | **Planned**, Tier 2 (by 2026-11-28)                                                                                                                                       | —                                                                      |
-| CLI `horagon`, local sandbox `horagon dev` that replays recorded games, API keys, OpenAPI, docs                           | **Planned**, Tier 2                                                                                                                                                       | —                                                                      |
-| MCP server, Agent Skills, `create-horagon` templates, Python SDK, second-half markets                                     | **Planned**, Tier 3 (by 2026-12-02); each feature can be switched off                                                                                                     | —                                                                      |
-| Third-party audit                                                                                                         | **Not planned** for the hackathon                                                                                                                                         | —                                                                      |
+| Component                                                                                                                         | Status                                                                                                                                                                                                                                    | Where                                                                  |
+| --------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| pm-AMM quote engine: accrual (time rescale), the dynamic curve and the 2% fee, in all 6 swap directions                           | **Built** (Tier 0). It matches 6 devnet swaps: 4 exactly, worst error 0.0011%. A lagging client clock quotes at the chain's effective time, never before the last accrual                                                                 | [`packages/sdk/src/math`](packages/sdk/src/math)                       |
+| pm-AMM bindings: program and mint constants, PDAs, `Market` account decoding, instruction discriminators, error mapping           | **Built** (Tier 0)                                                                                                                                                                                                                        | [`packages/sdk/src/pm-amm`](packages/sdk/src/pm-amm)                   |
+| Win-probability model: Elo before the game (K 20, home advantage 100), Brownian in-game model                                     | **Built** (Tier 0). Shown to fans; the reference agent trades toward it                                                                                                                                                                   | [`packages/sdk/src/model`](packages/sdk/src/model)                     |
+| Resolution evidence: an RFC 8785 (JCS) canonical JSON and its sha256                                                              | **Built** (Tier 0)                                                                                                                                                                                                                        | [`packages/sdk/src/evidence`](packages/sdk/src/evidence)               |
+| Sponsor validator: an allowlist for every instruction of a fee-paid transaction                                                   | **Built** (Tier 0), 40 tests. It ties outcome-token ATA creates to the markets the transaction trades, and reports how many it approved                                                                                                   | [`packages/api/src/sponsor`](packages/api/src/sponsor)                 |
+| Spikes S1 to S5                                                                                                                   | **Done.** S1, S2 (Surfpool), S3a, S3b and S5 pass. S4 fails on the NBA CDN, which refused every host, and ESPN replaces it. All 12 games of 2026-11-18 ET are recorded                                                                    | [`docs/spikes.md`](docs/spikes.md), [`spikes/results`](spikes/results) |
+| Replay fixtures: 12 recorded NBA games, 233 to 308 frames each                                                                    | **Built** (Tier 0)                                                                                                                                                                                                                        | [`tests/fixtures/replay`](tests/fixtures/replay)                       |
+| CI: lint, type check, test, build on Node 22; security scans; program build                                                       | **Built.** The security job runs the gitleaks CLI (pinned by checksum), osv-scanner and `pnpm audit`; `program.yml` runs the program build, IDL check and `cargo audit`. Both also run on pushes to `tier2`                               | [`.github/workflows`](.github/workflows)                               |
+| `horagon` program (Anchor): config, game markets, halt, propose, challenge, finalize, recycle                                     | **Built** (Tier 1), live on devnet                                                                                                                                                                                                        | [`programs/horagon`](programs/horagon)                                 |
+| Keeper: schedule, ESPN feed, Elo, market creation, halts, evidence, proposals, treasury, indexer, alerts                          | **Built** (Tier 1), live on devnet                                                                                                                                                                                                        | [`apps/keeper`](apps/keeper)                                           |
+| Reference agent: one disclosed team wallet that trades toward the model on quiet live markets ([below](#reference-agent))         | **Built**, installed next to the keeper, starting in dry run (it decides and sends nothing); it goes live only after `main` is public. Off unless `AGENT_ENABLED=1`, and it refuses to start unless its wallet is listed as `team-burner` | [`apps/keeper/src/agent`](apps/keeper/src/agent)                       |
+| API v1: reads, transaction building, sponsored submit, faucet                                                                     | **Built** (Tier 1), live on devnet                                                                                                                                                                                                        | [`packages/api`](packages/api)                                         |
+| Web: Tonight, Game, burner wallet, trading, claim                                                                                 | **Built** (Tier 1), live on devnet                                                                                                                                                                                                        | [`apps/web`](apps/web)                                                 |
+| My Game-day, the Verify page, a public Metrics page, share cards                                                                  | **Planned**: My Game-day (R7) and the Verify page (R6); a public Metrics page is decided on 2026-12-05. The per-game share card and the Share button are built (R5)                                                                       | —                                                                      |
+| Leaderboards and Night Rank, Season, badges, Crews, the fan-facing Telegram bot, a second guardian (watcher), second-half markets | **Cut** (decision 6, 2026-11-26): not built before submission                                                                                                                                                                             | —                                                                      |
+| CLI `horagon`, local sandbox, API keys, OpenAPI, MCP server, Agent Skills, templates, Python SDK                                  | **Not planned** before submission                                                                                                                                                                                                         | —                                                                      |
+| Third-party audit                                                                                                                 | **Not planned** for the hackathon                                                                                                                                                                                                         | —                                                                      |
 
 ## On-chain proof (devnet, 2026-11-18)
 
@@ -295,7 +304,7 @@ check). The devnet figures and the recorded night are from commit `a42801b` on `
 
 ## How a game night works
 
-The design for Tiers 1 and 2. "S" is the scheduled tip-off time.
+How a market runs, as built. "S" is the scheduled tip-off time.
 
 ```mermaid
 sequenceDiagram
@@ -324,7 +333,8 @@ sequenceDiagram
 1. **Every hour.** The keeper reads the next 36 hours of games and computes each pre-game
    probability p0 from Elo, clamped to [0.05, 0.95]. It picks up to 4 featured games a night.
 2. **S − 60 minutes.** The program creates the market at price p0 and seeds it from its treasury:
-   1,000 mUSDC for a featured game, 300 for the others.
+   1,000 mUSDC for every game (the deployed `SEED_REGULAR_USDC`; the code default for a
+   non-featured game is 300).
 3. **During the game.** The keeper reads ESPN every 15 seconds and stores score, clock and model
    probability. It halts a market by withdrawing all liquidity in four cases:
    - the game is final while the market is still open: this is how a market closes at the
@@ -342,7 +352,8 @@ sequenceDiagram
    - the rule and the outcome;
    - the sources, each with a fetch time.
 
-   The guardian checks the draft against the public box score and, from `end_ts` on, runs
+   Proposing opens at `end_ts`, S + 3 h. Until auto-propose ships (R6, due about 2026-11-30), the
+   guardian checks the draft against the public box score and, from `end_ts` on, runs
    `horagon-ops propose <gameId> --box-score <url> --score <home>-<away>`, which publishes the
    JSON and calls `propose_result` with its sha256. Anyone can recompute the hash.
 5. **15 minutes later.** If no guardian has challenged, `finalize` resolves the pm-AMM market
@@ -358,8 +369,7 @@ NO. `redeem_pair` (1 YES + 1 NO →
 <a id="reference-agent"></a>
 
 **Reference agent.** One disclosed team wallet trades toward the win-probability model, so a
-market that fans leave quiet still follows the game. It is off unless enabled, runs as its own
-process beside the keeper ([`apps/keeper/src/agent`](apps/keeper/src/agent)) and pays its own
+market that fans leave quiet still follows the game. It starts in dry run (it decides and sends nothing) and goes live only after `main` is public. It is off unless enabled, and runs as its own process beside the keeper (a separate systemd unit, started by hand) ([`apps/keeper/src/agent`](apps/keeper/src/agent)) and pays its own
 fees, never through the sponsor. Every 20 seconds it looks at each live NBA winner market. It
 trades one only when the game has tipped off, more than 2 minutes remain before its `end_ts`,
 the model was updated in the last 60 seconds and no other wallet has traded that market for 90
@@ -370,25 +380,25 @@ to bring the price to 0.02 short of the model. It caps a swap at 100 mUSDC, and 
 Its wallet, `7Da24CpktL9Cp4st1iQ3U4ZKHgsRYXXEJx5oGbgFWP1Z`, is listed in
 [`docs/metrics-wallets.json`](docs/metrics-wallets.json) as `team-burner`, in a public commit
 made before its first swap, and the agent refuses to start unless the copy it ships with lists
-it so. Every swap it sends carries the `horagon:bot` memo, so it never counts as a fan, and its
-volume is reported apart from the fans' volume. Apart from it, no team wallet swaps on a live
+it so. Every swap it sends carries the `horagon:bot` memo, so it never counts as a fan, and its swaps are counted as team, not as fans. Reporting fan volume apart from agent volume is
+planned (R2b, due 2026-11-28); today `scripts/count-fans.mjs` reports wallets and swaps per class. Apart from it, no team wallet swaps on a live
 market except in smoke tests and rehearsals, and every team wallet is listed and left out of the
 metrics.
 
 ## Who can do what
 
-The planned keys, from the design. None of these keys holds anything of real value: this is
+The keys, as deployed. None of these keys holds anything of real value: this is
 devnet.
 
-| Key                 | Held by                                                                                               | Can                                                                          | Cannot                                                |
-| ------------------- | ----------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- | ----------------------------------------------------- |
-| Admin               | The builder's wallet                                                                                  | Change the config, withdraw the treasury, upgrade the program                | —                                                     |
-| Attestor            | The keeper                                                                                            | Create markets, halt, propose results                                        | Finalize early, withdraw the treasury                 |
-| Guardian 1          | The builder's wallet                                                                                  | Propose, challenge, halt                                                     | Withdraw the treasury                                 |
-| Guardian 2 (Tier 2) | A watcher on separate infrastructure                                                                  | Re-read the score, and challenge a wrong proposal                            | Withdraw the treasury                                 |
-| Sponsor             | The API server                                                                                        | Pay fees and rent for allowlisted transactions only                          | Sign anything else; it holds only a small SOL balance |
-| Reference agent     | The agent process on the VPS (`~/horagon/.keys/agent.json`), its only signer; listed as `team-burner` | Sign and pay for its own swaps (each with the `horagon:bot` memo) and claims | Use the sponsor; do anything a player's wallet cannot |
-| Authority PDA       | The `horagon` program                                                                                 | Act as each market's authority and sole LP, and own the treasury             | Sign outside the program's instructions               |
+| Key             | Held by                                                                                               | Can                                                                          | Cannot                                                |
+| --------------- | ----------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- | ----------------------------------------------------- |
+| Admin           | The builder's wallet                                                                                  | Change the config, withdraw the treasury, upgrade the program                | —                                                     |
+| Attestor        | The keeper                                                                                            | Create markets, halt, propose results                                        | Finalize early, withdraw the treasury                 |
+| Guardian 1      | The builder's wallet                                                                                  | Propose, challenge, halt                                                     | Withdraw the treasury                                 |
+| Guardian 2      | Not set: the config's second guardian slot is empty                                                   | Nothing                                                                      | —                                                     |
+| Sponsor         | The API server                                                                                        | Pay fees and rent for allowlisted transactions only                          | Sign anything else; it holds only a small SOL balance |
+| Reference agent | The agent process on the VPS (`~/horagon/.keys/agent.json`), its only signer; listed as `team-burner` | Sign and pay for its own swaps (each with the `horagon:bot` memo) and claims | Use the sponsor; do anything a player's wallet cannot |
+| Authority PDA   | The `horagon` program                                                                                 | Act as each market's authority and sole LP, and own the treasury             | Sign outside the program's instructions               |
 
 If the attestor key leaks, the attacker can propose a wrong result, halt open markets and create
 markets. A guardian challenges a wrong result within the 15-minute window, and the admin pauses
@@ -436,22 +446,26 @@ rent when it is spent.
 
 ## Roadmap
 
-Each tier has its own implementation plan. A tier's player-facing features start only after the
-previous tier has run through a real NBA night; developer tooling can start once the SDK
-interfaces it uses are tested.
+Tiers 0 and 1 are built and deployed. From here the plan is the R-list of the rescope plan (R0 to
+R12), which ends at the submission deadline of 2026-12-08, 21:00 UTC; the team submits by
+15:00 UTC the same day, and the last feature day is 2026-12-06.
 
-| Tier                                | Target              | Scope                                                                                                                                    | Done when                                                                                       |
-| ----------------------------------- | ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| 0. Foundation and spikes            | 2026-11-20          | Monorepo, CI, the SDK's math and quote engine, the sponsor validator, spikes S1 to S5                                                    | **Done on 2026-11-19**                                                                          |
-| 1. Core                             | 2026-11-23          | The `horagon` program, keeper, indexer, sponsor, API v1, Tonight and Game pages, trading from a 0-SOL burner, claims, alerts             | A replayed game runs end to end on devnet, then the first live NBA night                        |
-| 2. Trust, game-day, developer tools | 2026-11-28          | My Game-day, the second guardian, Verify, Metrics, Status, leaderboard, share cards; CLI, `horagon dev` sandbox, API keys, OpenAPI, docs | A live night resolves through the dispute window; a "zero to first bot" smoke test passes in CI |
-| 3. Agents and reach                 | 2026-12-02          | MCP server, Agent Skills, `create-horagon` templates, Python SDK, practice arena, second-half markets                                    | Each feature behind a flag, off if it breaks                                                    |
-| 4. Submission                       | 2026-12-03 to 12-05 | Feature freeze, security pass, docs, demo and videos                                                                                     | Submitted ahead of the deadline; markets keep running through judging                           |
+| Step                            | Target     | Scope                                                                                                               | Done when                                                                |
+| ------------------------------- | ---------- | ------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| Tiers 0 and 1: foundation, core | Done       | The SDK's math and quote engine, the sponsor validator, the `horagon` program, keeper, indexer, API v1, web app     | Deployed on devnet; the first counted NBA night is ET 2026-11-27         |
+| Settlement and disclosure       | 2026-11-30 | Auto-propose with a second-source check (R6), fan versus agent volume (R2b), My Game-day (R7)                       | A live night resolves through the dispute window                         |
+| Practice, ops and security      | 2026-12-02 | Practice replay loop (R8), salted market ids, sponsor reserve and alerts, CSP, upgrade authority to a cold key (R9) | Each item shipped or cut by 2026-12-02                                   |
+| Study, submission               | 2026-12-08 | Mechanism study and calibration from chain (R10), the submission package and a README rewrite (R11)                 | Submitted by 2026-12-08, 15:00 UTC; markets keep running through judging |
+
+Cut on 2026-11-26 (decision 6): Night Rank, Season, badges, Crews, the fan-facing Telegram bot,
+leaderboards, the independent watcher, a verifiable build and the public Metrics page decided on
+2026-12-05. A CLI, an MCP server, a Python SDK and a replay sandbox for outside builders are not
+planned before submission.
 
 ## Limits, stated plainly
 
-- **Not deployed yet.** Tier 1 is built and tested, but none of it runs on devnet yet. No player
-  can trade on Horagon today, and there is no traction to report.
+- **Deployed, but no counted night yet.** The program, keeper, API and web app run on devnet.
+  The first counted NBA night is ET 2026-11-27, so there is no traction to report yet.
 - **Devnet and play money only.** mUSDC is free from a faucet, so devnet activity costs little
   to fake. The design answers with engaged-wallet counts and separate reporting for bots, but a
   judge may still weigh devnet numbers below mainnet ones.
@@ -464,8 +478,8 @@ interfaces it uses are tested.
     close before the buzzer. At S + 2 h 45 min it would have been 36, and at S + 2 h 10 min, the
     close until 2026-11-26, all but 1.
   - A result can be proposed only from `end_ts` on. A game of median length ends at
-    S + 2 h 32 min, so it settles about 45 minutes after its buzzer: 28 minutes to `end_ts`,
-    then the 15-minute dispute window.
+    S + 2 h 32 min, 28 minutes before `end_ts`, and a result becomes final 15 minutes after it
+    is proposed. Until auto-propose ships (R6), the guardian proposes by hand.
   - The halt waits for the feed. ESPN showed Final 25 to 148 seconds after the buzzer on
     2026-11-18, and the keeper reads it every 15 seconds; until the halt lands the market can
     be sniped. Depth follows √(time left), so at a median buzzer, 28 of the market's 240
@@ -488,8 +502,9 @@ interfaces it uses are tested.
   them. The keeper watches every account the sponsor paid for, and once a wallet closes one to
   another address outside a claim, the sponsor opens no more for that wallet
   ([`docs/security.md`](docs/security.md#sponsor-rent-is-spend)).
-- **S2 is not proven on devnet.** The PDA authority passed on Surfpool. The devnet test needs
-  about 3 devnet SOL and comes with the Tier 1 deploy. If it fails, the attestor key becomes the
+- **S2 is proven on Surfpool; devnet comes with the first markets.** The PDA authority passed on
+  Surfpool. The devnet check is the keeper creating markets through the program, which starts
+  an hour before the first tip-off of ET 2026-11-27. If it fails, the attestor key becomes the
   market authority, and the dispute window stays on-chain.
 - **Surfpool needs Linux.** The local sandbox ran on a remote Ubuntu host; the dev box has no WSL.
 - **The pm-AMM program is not Horagon's.** Its own docs call the mainnet deployment a
@@ -519,15 +534,15 @@ Here is the argument against building it:
   money would, and a real-money sports market run by a small team is legally hard almost
   everywhere. So the product may never leave devnet.
 - **Results come slowly.** Markets trade to the final buzzer, but a result can be proposed only
-  from `end_ts` = S + 3 h, so a game of median length settles about 45 minutes after it ends,
-  and a game still being played at S + 3 h closes early.
+  from `end_ts` = S + 3 h, so a result waits for `end_ts` and then for the 15-minute dispute
+  window, and a game still being played at S + 3 h closes early.
 - **The integrity of the result rests on one feed and one person.** It depends on an unofficial
-  ESPN feed and one guardian until the watcher ships.
+  ESPN feed and one guardian; the second guardian slot is not set.
 - **There is no proof yet that anyone wants it.** The core loop has not run in front of a user.
 
 Of these, the design answers some in part:
 
-- the dispute window, the published evidence hash and the second guardian;
+- the dispute window and the published evidence hash;
 - engaged-wallet metrics, with bot wallets reported apart;
 - a close at the final buzzer, with an `end_ts` set from 268 games of play-by-play that the
   keeper can move by config as more games come in.

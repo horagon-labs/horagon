@@ -82,13 +82,17 @@ the alert table; the key itself is in the keeper's `alert` log line (the last co
 1. `horagon-ops status --date <ET date>`: the games whose tip-off falls in the 48 h from 00:00 UTC
    of that date (without `--date`: from 12 h ago), by tip-off, with `featured` on the featured
    ones and `no market` until S − 60 min. The first line is the keeper heartbeat.
-2. Featured games (at most 4 a date, 1,000 mUSDC seed instead of 300): the hourly schedule pass
+2. Featured games (at most 4 a date; every market seeds 1,000 mUSDC with the deployed
+   `SEED_REGULAR_USDC=1000`, the same as a featured game's seed): the hourly schedule pass
    picks them once per date. To change them: `horagon-ops featured <ET date> <gameId>...` (1 to
    4 ids; it replaces that date's choice, and the schedule pass keeps it). The seed is taken
    when the market is created, so change them before S − 60 min.
 3. Treasury: every hour the keeper claims 1,000 mUSDC from the faucet for the attestor wallet
    and moves the attestor's mUSDC into the treasury, up to the seeds of the next 36 h + 20 %.
-   A 12-game night needs 7,680 mUSDC, so a fresh treasury needs about 8 hourly passes. If
+   With the deployed seeds (1,000 for every market), a night of N games needs N × 1,000 × 1.2
+   mUSDC: 13,200 for the 11 games of ET 2026-11-27, 14,400 for 12. The code defaults (1,000
+   featured, 300 for the others) would need 7,680 for a 12-game night. Each hourly pass moves
+   at most what the attestor holds, so check the treasury and the attestor's balance together. If
    `treasury-low` came in, add mUSDC to the attestor wallet (claim the faucet for another wallet
    you control and transfer it); the next hourly pass moves it (a restart moves it at once: H).
 4. SOL:
@@ -311,32 +315,32 @@ come too late, so:
    ```
 
 The keeper tries the create again every round, so the market opens within seconds of the
-treasury holding the seed: 1,000 mUSDC for a featured game, 300 for the others (a featured game
-takes 300 when the treasury holds 300 to 1,000, with a `treasury-low` alert).
+treasury holding the seed: 1,000 mUSDC for every game with the deployed `SEED_REGULAR_USDC`
+(the code default for a non-featured game is 300). A market is created only when the treasury
+holds its whole seed: below it the keeper alerts `treasury-empty` and creates nothing.
 
 ### I. Turn a feature off
 
-Each Tier 2 feature sits behind a flag, and every flag starts off: `FLAG_ME`, `FLAG_METRICS`,
+The database holds ten flags, and every flag starts off: `FLAG_ME`, `FLAG_METRICS`,
 `FLAG_METRICS_COHORT`, `FLAG_SHARE`, `FLAG_RANK`, `FLAG_CREWS`, `FLAG_TELEGRAM`, `FLAG_CLUTCH`,
-`FLAG_PRACTICE` and `FLAG_VERIFY`. While a flag is off, the API routes behind it answer 404
-(`application/problem+json`), POST routes too, and the pages built on them hide the feature.
-The API reads the flags on every request, so a change applies at once, with no deploy and no
-restart.
+`FLAG_PRACTICE` and `FLAG_VERIFY`. A route guarded by `requireFlags` answers 404
+(`application/problem+json`) while its flag is off, POST routes too, and the API reads the flags
+on every request, so a change applies at once, with no deploy and no restart.
 
-When a feature misbehaves during a night, turn its flag off first and look into it after:
+At this commit no route or page reads any flag, so `horagon-ops flag on` and `flag off` change
+nothing a player sees. In particular the Share button and the per-game OG card are not behind a
+flag: if the OG route misbehaves on a night, the switch is a deploy (or a rollback of the web),
+not a flag. A feature that ships with a guard documents its flag here.
 
-```bash
-horagon-ops flag off FLAG_SHARE
-```
-
-The command prints every flag with its state and logs the change in `ops_events` (actor ops,
-action flag). Turn the flag back on once the fix is deployed:
+The command, for a flag that a route does read:
 
 ```bash
-horagon-ops flag on FLAG_SHARE
+horagon-ops flag off <FLAG_NAME>
+horagon-ops flag on <FLAG_NAME>
 ```
 
-`GET /api/v1/flags`, `POST /api/v1/tx/trade` and the Tier 1 game routes have no flag.
+It prints every flag with its state and logs the change in `ops_events` (actor ops, action
+flag). `GET /api/v1/flags`, `POST /api/v1/tx/trade` and the Tier 1 game routes have no flag.
 
 ### J. The reference agent
 
@@ -423,7 +427,7 @@ transaction: `create <gameId>`, `halt <gameId> (<rule>)`, `finalize <gameId>`, `
 | `feed-silent:<gameId>`         | `AWAY@HOME: no feed for <n> min, last seen ...`, or `... no feed read since the keeper started`                                                                                              | 10 min            | Same as `feed-silent-q4:`. This one never halts by itself                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | `halt:<gameId>`                | `Halted AWAY@HOME: <rule>`                                                                                                                                                                   | 10 min            | `final-before-end`: wait for `draft:`. `feed-silent`: check the box score; if the game is still on, nothing to do (the market stays halted until its result). `postponed`, `not-started`: D                                                                                                                                                                                                                                                                                                                                                                    |
 | `no-p0:<gameId>`               | `AWAY@HOME: no p0, market not created`                                                                                                                                                       | 10 min            | The game's row has no pre-game probability, which the hourly schedule step writes for every game it reads. Look for a failing `schedule` step in the log. A market can still open while the game has not started, until S + 30 min                                                                                                                                                                                                                                                                                                                             |
-| `treasury-low`                 | `Treasury <n> mUSDC, next 36 h needs <n>`, or `Treasury <n> mUSDC: <gameId> seeded at 300 instead of 1,000`                                                                                  | 10 min            | Add mUSDC to the attestor wallet ("The day before", step 3). Featured games get the 300 seed meanwhile                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `treasury-low`                 | `Treasury <n> mUSDC, next 36 h needs <n>`, or `Treasury <n> mUSDC: <gameId> seeded at 300 instead of 1,000`                                                                                  | 10 min            | Add mUSDC to the attestor wallet ("The day before", step 3). With the deployed seeds (1,000 for every game) the 300 fallback for a featured game never applies: below the seed no market is created                                                                                                                                                                                                                                                                                                                                                            |
 | `treasury-empty:<gameId>`      | `Treasury <n> mUSDC: cannot seed <gameId>`                                                                                                                                                   | 10 min            | No market for that game until the treasury holds its seed; the keeper retries every round while the game has not started, until S + 30 min. The hourly top-up may come too late: fill the treasury now (H)                                                                                                                                                                                                                                                                                                                                                     |
 | `treasury-unread`              | `Treasury balance could not be read <n> times in a row`                                                                                                                                      | 3 h               | No market is created until the RPC answers. Check `HORAGON_RPC_URL` and the RPC provider                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | `sol-authority`                | `Authority holds <n> SOL, under 2 nights of markets`                                                                                                                                         | 10 min            | `horagon-ops fund-authority <sol>` (G: check before repeating it)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |

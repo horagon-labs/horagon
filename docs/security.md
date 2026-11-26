@@ -11,6 +11,7 @@ RPC's genesis hash has shown it is not mainnet (`packages/api/src/sponsor/submit
 - The treasury (the Authority PDA's mUSDC ATA) and the Authority's SOL.
 - The sponsor's SOL.
 - The attestor's SOL and mUSDC: it is also the keeper wallet that fills the treasury.
+- The reference agent's SOL and mUSDC: a capped balance, spent only on its own swaps.
 - Correct resolutions: a market pays the side that won the real game.
 - The keys in `.keys/`, on the VPS and in Vercel.
 
@@ -22,6 +23,7 @@ RPC's genesis hash has shown it is not mainnet (`packages/api/src/sponsor/submit
 | Attestor (keeper, VPS)       | create markets, `halt`, `propose_result`                                                                                             | challenge, finalize early, withdraw, change config      |
 | Guardian 1 (`guardian.json`) | `challenge`, `propose_result`, `halt`                                                                                                | create markets, finalize early, withdraw, change config |
 | Sponsor (Vercel)             | pay fees and ATA rent of allow-listed transactions                                                                                   | sign anything else (see `packages/api/src/sponsor`)     |
+| Reference agent (VPS)        | sign and pay for its own swaps (each with the `horagon:bot` memo) and faucet claims                                                  | sign as the sponsor; anything a player's wallet cannot  |
 
 `finalize` and `recycle` need no key: anyone may send them, and the program checks the market's
 status and the dispute window.
@@ -32,6 +34,12 @@ dispute window (900 s as set up in `docs/deploy.md`). The admin stops new market
 `horagon-ops pause`, then replaces the attestor with an `update_config` transaction. `horagon-ops`
 has no command for that yet, so it is built by hand with `updateConfig` from the SDK's program
 client.
+
+A leaked agent key is bounded by what the agent wallet holds: a thief can spend only its own
+capped SOL and play mUSDC, and can move prices, without the memo. Stop `horagon-agent` and stop
+funding it. Its trades are already outside the metric, because its wallet is listed as
+`team-burner` in `docs/metrics-wallets.json`. The sponsor, attestor and treasury are not
+reachable with it.
 
 ## Threats and measures
 
@@ -133,6 +141,7 @@ Review this list whenever a dependency is upgraded.
 
 ## Not yet covered (later tiers)
 
-Sign-In With Solana for `/ops`, API keys, general read rate limits, CSP, the independent
-watcher (guardian 2), `solana-verify` hashes, a `horagon-ops` command for `update_config`
-(attestor and guardians), and redaction in the API's logger.
+Sign-In With Solana for `/ops`, API keys, general read rate limits, CSP, a `horagon-ops`
+command for `update_config` (attestor and guardians), and redaction in the API's logger. A
+second guardian is not set: the config's second guardian slot is empty, and one guardian
+confirms every result.

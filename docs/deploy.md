@@ -4,12 +4,12 @@ Play-money on devnet. No real value. No prizes.
 
 Four pieces run in four places:
 
-| Piece             | Where                                       | How it ships                                                                                                                                                                  |
-| ----------------- | ------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Program `horagon` | Solana devnet                               | `solana program deploy` where the Solana CLI runs, with the upgrade key `.keys/deployer.json`                                                                                 |
-| Web + API v1      | Vercel (project `horagon`, root `apps/web`) | `vercel deploy --prod` from the repo root of a clean tree (`.vercelignore` keeps keys and env files out), or the Git integration (pushed branches only; production is `main`) |
-| Keeper + watchdog | The VPS, user `horagon`, systemd user units | `bash ops/deploy-keeper.sh`, with `HORAGON_VPS` set to your SSH host alias                                                                                                    |
-| Database          | Supabase Postgres                           | `pnpm --filter @horagon/db db:migrate`                                                                                                                                        |
+| Piece             | Where                                       | How it ships                                                                                                                                                                 |
+| ----------------- | ------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Program `horagon` | Solana devnet                               | `solana program deploy` where the Solana CLI runs, with the upgrade key `.keys/deployer.json`                                                                                |
+| Web + API v1      | Vercel (project `horagon`, root `apps/web`) | `vercel deploy --prod` from the repo root of a clean tree (`.vercelignore` keeps keys and env files out). The Git integration is off: pushing `main` does not deploy the web |
+| Keeper + watchdog | The VPS, user `horagon`, systemd user units | `bash ops/deploy-keeper.sh`, with `HORAGON_VPS` set to your SSH host alias                                                                                                   |
+| Database          | Supabase Postgres                           | `pnpm --filter @horagon/db db:migrate`                                                                                                                                       |
 
 ## Keys
 
@@ -56,8 +56,8 @@ variables it needs exported (`docs/runbook.md`, "Before you start").
    (signs with `deployer.json`; `--window` is the dispute window in seconds, 60 to 604800), then
    mark the four keys as team wallets, left out of every metric:
    `horagon-ops team <deployer pubkey> <attestor pubkey> <guardian pubkey> <sponsor pubkey>`.
-4. **Vercel:** import the repo (the Git integration builds only pushed branches, and production is
-   `main`), or `vercel link` and `vercel deploy --prod` at the repo root; framework Next.js, root
+4. **Vercel:** `vercel link`, then `vercel deploy --prod` at the repo root (the Git integration is
+   off, so a push never deploys); framework Next.js, root
    `apps/web`, install command `pnpm install --frozen-lockfile`, build command
    `pnpm --filter @horagon/sdk build && pnpm --filter @horagon/web build`. Set the
    "Shared" and "Web and API" variables of `.env.example`.
@@ -103,6 +103,10 @@ The agent is optional and off by default (`AGENT_ENABLED` unset). Before it ever
 
 ## Every deploy
 
+The order is the keeper first, then the web, both from the same clean commit. The web's
+"open until the final buzzer" copy is true only once the keeper halts a market on the first
+Final read.
+
 ```bash
 pnpm check
 HORAGON_VPS=<your SSH host alias> bash ops/deploy-keeper.sh
@@ -120,3 +124,19 @@ new one, which also clears the markets its anomaly check stopped. A stopped agen
 A keeper restart is safe during a night, but avoid one from S + 1h40m until a game's market is
 halted at the buzzer or its `end_ts` has passed (`docs/runbook.md`, procedure G). Logs:
 `ssh "$HORAGON_VPS" journalctl --user -u horagon-keeper -f -o cat`.
+
+Then the web, from the same commit. The Git integration is off, so it ships only this way, and
+the build gets no commit sha from Vercel: set `HORAGON_VERSION` to the first seven characters of that
+commit's sha first, or `/api/v1/health` keeps reporting the previous value (or `dev` when unset), and
+a version check passes on a stale value.
+
+```bash
+git rev-parse --short=7 HEAD  # set HORAGON_VERSION to this value in the Vercel production env
+vercel deploy --prod          # from the repo root, same clean tree
+curl -s https://www.horagon.xyz/api/v1/health
+```
+
+After a deploy whose keeper adds the `trades.bot_memo` column (migrate first:
+`pnpm --filter @horagon/db db:migrate`), run `horagon-ops backfill-bot-memo` until it reports 0
+left, so trades indexed before the column existed get their memo flag (`docs/runbook.md`, "Before
+you start"). A deploy never restarts the agent.

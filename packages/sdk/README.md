@@ -3,9 +3,17 @@
 TypeScript SDK for Horagon: play-money prediction markets on NBA games, traded while the game
 is on, on pm-AMM (Solana devnet). Play-money on devnet. No real value. No prizes.
 
+Not published to npm: `@horagon/sdk` is a workspace package of this repository (version
+`0.0.0`), so `npm install @horagon/sdk` does not work. Use it from a clone:
+
 ```bash
-npm install @horagon/sdk @solana/web3.js
+git clone https://github.com/horagon-labs/horagon.git && cd horagon
+corepack enable && pnpm install
+pnpm --filter @horagon/sdk build
 ```
+
+Then depend on it from another workspace package with `"@horagon/sdk": "workspace:*"` in its
+`package.json` (`apps/web` does), and install `@solana/web3.js` 1.x beside it.
 
 ## Read a market and quote a trade
 
