@@ -1,6 +1,6 @@
 // What each HoragonError code does on the dial besides its words (spec 6.1). The words stay
 // errorText's; a non-HoragonError only ever shows "Something went wrong. Try again.".
-import { isHoragonError } from '@horagon/sdk'
+import { isHoragonError } from '@horagon/sdk/errors'
 import { pollHealth } from './health'
 
 /**

@@ -6,17 +6,20 @@
 // button stays off until the box is ticked, and nothing is created or sent before that. Until the
 // wallet's storage has opened (the server render, the first browser render) the wallet part is a
 // neutral "Loading your balance…" line: a returning visitor never sees the set-up state flash.
-import { type GameDetail, type MarketSummary, parseAmount } from '@horagon/sdk'
+// The first wallet action of a page waits for the wallet's key code (R5c): its buttons say so,
+// and a press on Buy or a tick of the box starts that load early (R5c refix).
+import type { GameDetail, MarketSummary } from '@horagon/sdk'
+import { parseAmount } from '@horagon/sdk/amount'
 import { useState } from 'react'
 import { buySteps, percentOf, sellSteps, stepIndex } from '../../lib/chrono/bezel'
 import { dialCaption } from '../../lib/chrono/copy'
 import { errorEffect, requoteShown, retryLeft } from '../../lib/chrono/errors'
-import type { DialState } from '../../lib/chrono/state'
-import { cents, explorerTx, percent, usdc } from '../../lib/format'
-import { DEFAULT_SLIPPAGE_BPS } from '../../lib/trade'
+import { crownLabel, type DialState } from '../../lib/chrono/state'
+import { cents, explorerTx, usdc } from '../../lib/format'
+import { DEFAULT_SLIPPAGE_BPS } from '../../lib/trade-shared'
 import { sendDisabled, sendText } from '../../lib/trade-view'
 import type { Trade } from '../../lib/use-trade'
-import { FAUCET_BUTTON, WALLET_LOADING } from '../../lib/wallet-copy'
+import { FAUCET_BUTTON, WALLET_LOADING, WALLET_PREPARING } from '../../lib/wallet-copy'
 import { AgeCheckbox } from '../age-dialog'
 import { ErrorText } from '../error-text'
 import { Bezel } from './bezel'
@@ -36,6 +39,10 @@ export interface CrownPanelProps {
   /** Unix seconds from useNow, for the RATE_LIMITED countdown. */
   now: number
   funding: boolean
+  /** A wallet action waits for the wallet's key code to load (WalletState.preparing). */
+  preparing?: boolean
+  /** A sign that a wallet action follows (a press on Buy, the 18+ box ticked): load early. */
+  onIntent?: () => void
   fundNote: string | undefined
   /** The faucet; `affirmedHere` when this crown's own 18+ box is ticked. */
   onFaucet: (affirmedHere?: boolean) => void
@@ -56,6 +63,7 @@ export function CrownPanel(p: CrownPanelProps) {
   // The inline 18+ box (R5): asked only while the device never ticked it.
   const [ticked, setTicked] = useState(false)
   const blocked = t.ageNeeded && !ticked
+  const preparing = p.preparing ?? false
   const buying = t.action === 'buy'
   const steps = buying ? buySteps(t.balance) : sellSteps(t.held?.shares)
   const q = t.quote.data ?? t.lastQuote
@@ -67,7 +75,6 @@ export function CrownPanel(p: CrownPanelProps) {
   const ghost = q && t.check.quote ? q.priceAfter : null
   const spendable = t.balance ? parseAmount(t.balance) > 0n : false
   const tone = t.side === 'home' ? 'lume' : 'brass'
-  const now = p.market.price === null ? 'no price yet' : percent(p.market.price)
   const chip =
     'min-h-11 flex-1 rounded-card border border-line font-mono text-13 aria-pressed:border-lume-300 aria-pressed:text-lume-300 disabled:opacity-40'
   return (
@@ -115,7 +122,13 @@ export function CrownPanel(p: CrownPanelProps) {
           ghostShake={requote}
           stale={p.stale}
           detail={buying ? `${t.amount} mUSDC` : `${t.amount} shares`}
-          label={`${p.game.home} to win, ${now}${ghost === null ? '' : `, after this trade ${percent(ghost)}`}`}
+          label={crownLabel({
+            state: p.state,
+            game: p.game,
+            outcome: p.market.outcome,
+            price: p.market.price,
+            ghost,
+          })}
         />
       </Bezel>
       {q && t.check.quote && (
@@ -202,18 +215,26 @@ export function CrownPanel(p: CrownPanelProps) {
               {' '}
               <button
                 type="button"
-                disabled={p.funding || blocked}
+                disabled={p.funding || preparing || blocked}
                 onClick={() => p.onFaucet(ticked)}
                 className="min-h-11 font-semibold underline disabled:opacity-50"
               >
-                {p.funding ? 'Requesting…' : FAUCET_BUTTON}
+                {p.funding ? 'Requesting…' : preparing ? WALLET_PREPARING : FAUCET_BUTTON}
               </button>
             </>
           )}
         </p>
       )}
       {p.fundNote && !t.fundNoteHidden && <p className="text-13 text-lume-300">{p.fundNote}</p>}
-      {t.loaded && t.ageNeeded && <AgeCheckbox checked={ticked} onChange={setTicked} />}
+      {t.loaded && t.ageNeeded && (
+        <AgeCheckbox
+          checked={ticked}
+          onChange={(on) => {
+            setTicked(on)
+            if (on) p.onIntent?.()
+          }}
+        />
+      )}
       {!t.loaded ? (
         <p
           className="flex min-h-11 items-center justify-center text-13 text-ash-400"
@@ -226,13 +247,13 @@ export function CrownPanel(p: CrownPanelProps) {
         <>
           <button
             type="button"
-            disabled={blocked || p.funding}
+            disabled={blocked || p.funding || preparing}
             onClick={() => t.send(ticked)}
             className={`min-h-11 w-full rounded-card px-4 text-15 font-semibold text-enamel-950 disabled:opacity-50 ${
               tone === 'brass' ? 'bg-brass-500' : 'bg-lume-300'
             }`}
           >
-            {p.funding ? 'Getting play mUSDC…' : label}
+            {p.funding ? 'Getting play mUSDC…' : preparing ? WALLET_PREPARING : label}
           </button>
           <p className="text-12 text-ash-400">
             Sets up a play wallet in this browser, then you hold to buy.
@@ -244,6 +265,7 @@ export function CrownPanel(p: CrownPanelProps) {
           tone={tone}
           disabled={blocked || wait > 0 || sendDisabled(t.ready, t.check.ok, t.stage)}
           pending={t.stage !== null}
+          onPressStart={p.onIntent}
           onConfirm={() => t.send(ticked)}
         />
       )}
@@ -270,7 +292,11 @@ export function CrownPanel(p: CrownPanelProps) {
         </p>
       )}
       {/* A RATE_LIMITED wait counts down on the HoldButton: the line leaves the seconds to it. */}
-      <ErrorText error={t.shownError} countdown={effect === 'countdown'} />
+      <ErrorText
+        error={t.shownError}
+        countdown={effect === 'countdown'}
+        gameFinal={p.game.status === 'final'}
+      />
     </div>
   )
 }

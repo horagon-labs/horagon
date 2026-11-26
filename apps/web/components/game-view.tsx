@@ -5,7 +5,7 @@
 // turn toward it. No new endpoint: both are routes the SDK client already has. The server's first
 // frame (R5, lib/server/initial.ts) draws the game, its real price included, until the first
 // poll answers; without it the page opens on a dial with no needle.
-import { isHoragonError } from '@horagon/sdk'
+import { isHoragonError } from '@horagon/sdk/errors'
 import { api } from '../lib/api'
 import { winnerOf } from '../lib/chrono/board'
 import { proposedOutcome } from '../lib/chrono/evidence'

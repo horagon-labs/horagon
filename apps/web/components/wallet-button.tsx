@@ -2,9 +2,12 @@
 // Header wallet: balance and address; the sheet has test funds, positions, Export and Import.
 // The sheet opens by itself when the 18+ gate has just created a wallet: it starts empty, so
 // the faucet comes first. The YourHour chip opens it at the positions (Chronometer spec 3.2).
+// "Set up wallet" waits for the wallet's key code on its first tap (R5c): it says so, and a load
+// that fails says so beside it.
 import dynamic from 'next/dynamic'
 import { useEffect, useRef, useState } from 'react'
 import { shortKey, usdc } from '../lib/format'
+import { SOMETHING_WRONG, WALLET_PREPARING } from '../lib/wallet-copy'
 import { YourHour } from './chrono/your-hour'
 import { useWallet } from './wallet'
 
@@ -15,7 +18,8 @@ const WalletSheet = dynamic(() => import('./wallet-sheet'), {
 })
 
 export function WalletButton() {
-  const { loaded, address, walletsCreated, portfolio, openGate } = useWallet()
+  const { loaded, address, walletsCreated, portfolio, openGate, preparing } = useWallet()
+  const [failed, setFailed] = useState(false)
   const dialog = useRef<HTMLDialogElement>(null)
   const [sheet, setSheet] = useState<{ atPositions: boolean } | null>(null)
   const seenCreated = useRef(walletsCreated)
@@ -37,13 +41,24 @@ export function WalletButton() {
   if (!loaded) return <span className="text-13 text-ash-400">Wallet…</span>
   if (!address) {
     return (
-      <button
-        type="button"
-        onClick={openGate}
-        className="min-h-11 rounded-full border border-brass-500/40 px-4 text-13 text-brass-400"
-      >
-        Set up wallet
-      </button>
+      <div className="flex flex-col items-end">
+        <button
+          type="button"
+          disabled={preparing}
+          onClick={() => {
+            setFailed(false)
+            openGate().catch(() => setFailed(true))
+          }}
+          className="min-h-11 rounded-full border border-brass-500/40 px-4 text-13 text-brass-400 disabled:opacity-50"
+        >
+          {preparing ? WALLET_PREPARING : 'Set up wallet'}
+        </button>
+        {failed && (
+          <p role="alert" className="pb-1 text-right text-12 text-red-400">
+            {SOMETHING_WRONG}
+          </p>
+        )}
+      </div>
     )
   }
 

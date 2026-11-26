@@ -6,15 +6,32 @@
 //
 // The 18+ self-declaration (spec section 12) is enforced here, so the UI cannot skip it: no
 // burner is created or imported until the box was ticked. The flag stays on this device.
+//
+// This module creates and checks keys with web3.js's Keypair, so it loads with the first action
+// that needs a key (R5c, lib/wallet-loader.ts), never on a page load. The storage itself and the
+// address of a stored key are in lib/key-store.ts, which needs no ed25519 code.
 import { Keypair } from '@solana/web3.js'
-import bs58 from 'bs58'
+import {
+  ageAffirmed,
+  BURNER_KEY,
+  BURNER_PREVIOUS_KEY,
+  exportSecret,
+  type KeyStore,
+  keyBytes,
+  SECRET_KEY_BYTES,
+} from './key-store'
 
-export const BURNER_KEY = 'horagon.burner.v1'
-export const BURNER_PREVIOUS_KEY = 'horagon.burner.v1.previous'
-/** Stored as JSON `{ "affirmedAt": <ms> }`; never sent to the server. */
-export const AGE_KEY = 'horagon.age18.v1'
-
-export type KeyStore = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>
+export {
+  AGE_KEY,
+  affirmAge,
+  ageAffirmed,
+  BURNER_KEY,
+  BURNER_PREVIOUS_KEY,
+  type KeyStore,
+  memoryStore,
+  needsAge,
+  openKeyStore,
+} from './key-store'
 
 /** The 18+ box has not been ticked yet; the UI asks, then calls `affirmAge` and retries. */
 export class AgeRequired extends Error {
@@ -24,44 +41,26 @@ export class AgeRequired extends Error {
   }
 }
 
-/** True once the box was ticked. A missing, unreadable or foreign value counts as not ticked. */
-export function ageAffirmed(store: KeyStore): boolean {
+/**
+ * The 64 bytes of a pasted or stored secret key, or an Error that says what is wrong with it.
+ * Only the length is checked here; `decodeSecret` also checks the public key half.
+ */
+export function secretBytes(text: string): Uint8Array {
+  let bytes: Uint8Array
   try {
-    const raw = store.getItem(AGE_KEY)
-    if (raw === null) return false
-    const parsed: unknown = JSON.parse(raw)
-    if (parsed === null || typeof parsed !== 'object') return false
-    return typeof (parsed as { affirmedAt?: unknown }).affirmedAt === 'number'
+    bytes = keyBytes(text)
   } catch {
-    return false
+    throw new Error('Paste a base58 secret key or a JSON array of 64 numbers.')
   }
-}
-
-export function affirmAge(store: KeyStore, now = Date.now()): void {
-  store.setItem(AGE_KEY, JSON.stringify({ affirmedAt: now }))
-}
-
-/** A burner is stored but the box was never ticked: ask once, before its next trade. */
-export function needsAge(store: KeyStore): boolean {
-  try {
-    return store.getItem(BURNER_KEY) !== null && !ageAffirmed(store)
-  } catch {
-    return false
+  if (bytes.length !== SECRET_KEY_BYTES) {
+    throw new Error(`A secret key is 64 bytes; this one is ${bytes.length}.`)
   }
+  return bytes
 }
 
 /** A base58 secret key (Phantom export) or a JSON byte array (solana-keygen file). */
 export function decodeSecret(text: string): Keypair {
-  const trimmed = text.trim()
-  let bytes: Uint8Array
-  try {
-    bytes = trimmed.startsWith('[')
-      ? Uint8Array.from(JSON.parse(trimmed) as number[])
-      : bs58.decode(trimmed)
-  } catch {
-    throw new Error('Paste a base58 secret key or a JSON array of 64 numbers.')
-  }
-  if (bytes.length !== 64) throw new Error(`A secret key is 64 bytes; this one is ${bytes.length}.`)
+  const bytes = secretBytes(text)
   try {
     return Keypair.fromSecretKey(bytes)
   } catch {
@@ -69,7 +68,7 @@ export function decodeSecret(text: string): Keypair {
   }
 }
 
-export const exportBurner = (kp: Keypair): string => bs58.encode(kp.secretKey)
+export const exportBurner = (kp: Keypair): string => exportSecret(kp.secretKey)
 
 /**
  * The stored burner, or null when none is stored, the value does not decode, or storage cannot
@@ -146,61 +145,4 @@ export function importBurner(store: KeyStore, text: string, now = Date.now()): K
     }
   }
   return save(store, next)
-}
-
-export function memoryStore(): KeyStore {
-  const map = new Map<string, string>()
-  return {
-    getItem: (k) => map.get(k) ?? null,
-    setItem: (k, v) => void map.set(k, v),
-    removeItem: (k) => void map.delete(k),
-  }
-}
-
-/** Reads fall through to `base`; writes stay in memory (the browser refuses them). */
-function readThrough(base: KeyStore): KeyStore {
-  const memory = new Map<string, string>()
-  const removed = new Set<string>()
-  return {
-    getItem: (k) => {
-      if (memory.has(k)) return memory.get(k) ?? null
-      if (removed.has(k)) return null
-      try {
-        return base.getItem(k)
-      } catch {
-        return null
-      }
-    },
-    setItem: (k, v) => {
-      removed.delete(k)
-      memory.set(k, v)
-    },
-    removeItem: (k) => {
-      memory.delete(k)
-      removed.add(k)
-    },
-  }
-}
-
-/**
- * localStorage, or an in-memory store when the browser blocks it (Safari private mode, site
- * data policies): then the wallet and the 18+ flag last only for this tab, and the UI says so.
- * When storage can be read but not written (quota full), reads still see what is stored, so an
- * existing burner is found; new writes stay in this tab.
- */
-export function openKeyStore(getStorage: () => KeyStore): { store: KeyStore; ephemeral: boolean } {
-  let store: KeyStore
-  try {
-    store = getStorage()
-  } catch {
-    return { store: memoryStore(), ephemeral: true }
-  }
-  try {
-    const probe = `${BURNER_KEY}.probe`
-    store.setItem(probe, '1')
-    store.removeItem(probe)
-    return { store, ephemeral: false }
-  } catch {
-    return { store: readThrough(store), ephemeral: true }
-  }
 }

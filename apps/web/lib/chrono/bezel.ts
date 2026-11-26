@@ -1,7 +1,7 @@
 // The bezel's steps (spec 3.1): a non-linear buy ladder cut at the balance, whose last step is
 // the balance itself, and a sell ladder of percentages of the shares held. Steps sit evenly on
 // the same 270° arc as the price scale; a drag clamps at both ends and never wraps around.
-import { formatAmount, parseAmount } from '@horagon/sdk'
+import { formatAmount, parseAmount } from '@horagon/sdk/amount'
 import { MIN_ANGLE, SWEEP } from './geometry'
 
 export const BUY_LADDER = ['1', '2', '5', '10', '25', '50', '100', '250'] as const

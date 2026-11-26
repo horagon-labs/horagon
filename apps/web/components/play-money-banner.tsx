@@ -1,7 +1,7 @@
 // Always on screen (spec section 2, legal): fixed to the bottom of every page. Chronometer
 // changes its look only, never its words (spec 2.7). The words are PLAY_MONEY_NOTICE from the
 // SDK, the one copy of the line (the crown sheet, OG images and bot messages use it too).
-import { PLAY_MONEY_NOTICE } from '@horagon/sdk'
+import { PLAY_MONEY_NOTICE } from '@horagon/sdk/notice'
 
 export function PlayMoneyBanner() {
   return (

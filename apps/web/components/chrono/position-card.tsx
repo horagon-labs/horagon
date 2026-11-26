@@ -2,8 +2,10 @@
 // Your position in this game (spec 3.2): paid, worth now and what it pays if that team wins,
 // with Sell. Claim all is a HoldButton running the wallet's own startClaims, so a claim is
 // still the whole wallet's (one run at a time, every copy shows it).
-import { type PositionsResponse, parseAmount, type Side } from '@horagon/sdk'
+import type { PositionsResponse, Side } from '@horagon/sdk'
+import { parseAmount } from '@horagon/sdk/amount'
 import { explorerTx, usdc } from '../../lib/format'
+import { WALLET_PREPARING } from '../../lib/wallet-copy'
 import { ErrorText } from '../error-text'
 import { HoldButton } from './hold-button'
 
@@ -15,6 +17,8 @@ export interface PositionCardProps {
   canSell: boolean
   onSell: (side: Side) => void
   claiming: boolean
+  /** Claim all waits for the wallet's key code to load (WalletState.preparing). */
+  preparing?: boolean
   claimed: string[]
   claimError: unknown
   onClaim: () => void
@@ -76,8 +80,8 @@ export function PositionCard(p: PositionCardProps) {
       )}
       {(claimable || p.claiming) && (
         <HoldButton
-          label={p.claiming ? 'Claiming…' : 'Claim all'}
-          pending={p.claiming}
+          label={p.claiming ? 'Claiming…' : p.preparing ? WALLET_PREPARING : 'Claim all'}
+          pending={p.claiming || p.preparing}
           onConfirm={p.onClaim}
         />
       )}

@@ -1,7 +1,8 @@
 // The crown's words and small rules (Chronometer spec 3.3), first lifted out of the old
 // trade-panel.tsx: the send button, the quote's key, and which amount a direction starts from.
-import { type Position, parseAmount, type Quote, type Side, type TradeAction } from '@horagon/sdk'
-import type { TradeStage } from './trade'
+import type { Position, Quote, Side, TradeAction } from '@horagon/sdk'
+import { parseAmount } from '@horagon/sdk/amount'
+import type { TradeStage } from './trade-shared'
 import { SET_UP_BUTTON } from './wallet-copy'
 
 export const QUOTE_DEBOUNCE_MS = 300

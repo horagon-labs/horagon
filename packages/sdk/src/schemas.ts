@@ -1,17 +1,37 @@
 // One zod schema per concept, shared by the SDK client, API v1 (input and output) and, from
 // Tier 2, the CLI and MCP. Amounts on the wire are decimal strings ("12.5"), times are unix
 // seconds unless the field name says ISO.
-import { PublicKey } from '@solana/web3.js'
 import { z } from 'zod'
 import { HORAGON_ERROR_CODES } from './errors'
 import { SWAP_DIRECTIONS, type SwapDirection } from './math/curve'
 
-function isPubkey(value: string): boolean {
-  try {
-    return new PublicKey(value).toBase58() === value
-  } catch {
-    return false
+const BASE58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
+
+/** How many bytes `value` decodes to in base58, or null for a character outside the alphabet. */
+function base58Bytes(value: string): number | null {
+  let zeros = 0
+  while (value[zeros] === '1') zeros++
+  let n = 0n
+  for (const c of value) {
+    const digit = BASE58.indexOf(c)
+    if (digit < 0) return null
+    n = n * 58n + BigInt(digit)
   }
+  let bytes = 0
+  for (; n > 0n; n >>= 8n) bytes++
+  return zeros + bytes
+}
+
+/**
+ * What `new PublicKey(value).toBase58() === value` accepts, without web3.js, so a page that checks
+ * API answers with these schemas does not load it (R5c): base58 that decodes to exactly 32 bytes.
+ * A base58 text has one spelling per byte string (each leading "1" is one zero byte), so the
+ * round trip adds nothing to the length check. Off-curve keys (PDAs) pass, as before. zod runs
+ * this refine even on a string its regex refused, so a long one is refused here before the
+ * BigInt work, which grows with the square of the length.
+ */
+function isPubkey(value: string): boolean {
+  return value.length <= 44 && base58Bytes(value) === 32
 }
 
 export const PubkeySchema = z
@@ -105,7 +125,8 @@ export const GameDetailSchema = GameSchema.extend({
 export const GamesQuerySchema = z.strictObject({
   /**
    * YYYY-MM-DD, the US Eastern (ET) day of tip-off, as the NBA dates its games.
-   * Default: today and tomorrow (ET).
+   * Default: from 00:00 ET of the night (the ET date of now - 6 h, `etNight`, so the night
+   * rolls over at 06:00 ET) to the end of the next ET day.
    */
   date: z.iso.date().optional(),
   status: z

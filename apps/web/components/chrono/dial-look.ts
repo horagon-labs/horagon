@@ -1,5 +1,6 @@
 // How each DialState colors a dial (spec 4.3): the time ring, and the face's rim.
 import type { Game, GameHistory } from '@horagon/sdk'
+import { NO_MARKET, started } from '../../lib/chrono/copy'
 import type { Run } from '../../lib/chrono/runs'
 import type { DialState } from '../../lib/chrono/state'
 import { cents, countdown, gameClock } from '../../lib/format'
@@ -16,6 +17,18 @@ export const RING: Record<DialState, string> = {
   live: 'stroke-lume-300',
   pre: 'stroke-ash-400',
 }
+
+/**
+ * How much of the time ring is drawn: the time left, except for a halt while the game is still on
+ * the court (`halted`; a final game reads `closed`), which no time left describes. Its ring is a
+ * status, the full amber hatched ring of spec 4.3, so a halt never looks like a normal close.
+ */
+export const ringShare = (state: DialState, timeLeft: number): number =>
+  state === 'halted' ? 1 : timeLeft
+
+/** The ring's hatching: only a halt is drawn dashed (spec 4.3). */
+export const ringDash = (state: DialState): string | undefined =>
+  state === 'halted' ? '3 3' : undefined
 
 /** The rim: red while the result is under review, the plain line otherwise. */
 export const rimClass = (state: DialState): string =>
@@ -87,7 +100,8 @@ export function stateLine(
     case 'live':
       return 'Open until the final buzzer'
     case 'pre': {
-      if (secsLeft === null) return 'Opens 60 min before tip-off'
+      // No market: one opens 60 min before tip-off, so a game already started will not get one.
+      if (secsLeft === null) return started(game) ? NO_MARKET : 'Opens 60 min before tip-off'
       const tip = Math.floor(Date.parse(game.scheduledTipoff) / 1000)
       return tip > nowSecs ? `tip-off in ${countdown(tip, nowSecs)}` : 'tip-off soon'
     }

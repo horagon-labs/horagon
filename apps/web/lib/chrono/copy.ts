@@ -2,7 +2,7 @@
 // home side's chance to win: it reads "MEM to win · 62%", never a bare "62¢". Once the game is
 // over the words follow the scoreboard, then the result on-chain: "Final · CHA lost · result
 // pending", then "Resolved: MEM won". A losing side is never shown as "wins".
-import type { Game, Outcome } from '@horagon/sdk'
+import type { Game, MarketStatus, Outcome } from '@horagon/sdk'
 import { percent } from '../format'
 import type { DialState } from './state'
 
@@ -38,9 +38,23 @@ function resolvedWords(g: VerdictGame, homeWon: boolean): string {
   return `Resolved: ${homeWon ? g.home : g.away} won`
 }
 
+/** "Final · CHA lost", or "Final" while the scoreboard names no winner. */
+export function finalWords(g: VerdictGame, homeWon: boolean | null): string {
+  return homeWon === null ? 'Final' : `Final · ${g.home} ${homeWon ? 'won' : 'lost'}`
+}
+
+/** The keeper never opened a market for a game that has started (R5c, review finding 5). */
+export const NO_MARKET = 'No market for this game'
+
+/** The game is on the court or over: a missing market will not open any more. */
+export const started = (g: Pick<Game, 'status'>): boolean => g.status !== 'scheduled'
+
 /**
  * The line under the dial's number: "MEM to win", "Final · CHA lost · result pending",
  * "Resolved: MEM won", or nothing for a void game (its own line says postponed or canceled).
+ * A final game with no market (`pre`, the only state a final game without one has) has no result
+ * to wait for: "Final · CHA lost". Neither does a result that is proposed or under review (R5c
+ * refix): the state line under it says so, never next to "result pending".
  */
 export function dialCaption(state: DialState, g: VerdictGame, outcome: Outcome | null): string {
   const v = verdict(state, g, outcome)
@@ -48,15 +62,42 @@ export function dialCaption(state: DialState, g: VerdictGame, outcome: Outcome |
     case 'resolved':
       return resolvedWords(g, v.homeWon)
     case 'final':
-      return v.homeWon === null
-        ? 'Final · result pending'
-        : `Final · ${g.home} ${v.homeWon ? 'won' : 'lost'} · result pending`
+      return state === 'pre' || state === 'proposed' || state === 'challenged'
+        ? finalWords(g, v.homeWon)
+        : `${finalWords(g, v.homeWon)} · result pending`
     case 'void':
       return ''
     case 'to-win':
       return `${g.home} to win`
   }
 }
+
+/**
+ * A position's market status in the wallet sheet (R5c, review finding 2): the keeper's halt is
+ * the normal close at the final buzzer, so `halted` reads "trading closed". A Position carries no
+ * game status to tell that from a halt mid-game; the game page says which one it was. An `open`
+ * market says nothing (null, R5c refix): in the seconds between the final buzzer and the halt
+ * reaching the index it is no longer open, and the sheet cannot tell.
+ */
+export const positionStatus = (status: MarketStatus): string | null =>
+  status === 'open' ? null : status === 'halted' ? 'trading closed' : status
+
+/**
+ * The ResolutionCard's note when someone besides Horagon provides liquidity: the keeper's halt
+ * withdraws only Horagon's share, so the market can still trade on chain. On a final game that
+ * halt is the close at the final buzzer (R5c refix), so the note never says "halt" under a dial
+ * that says trading closed.
+ */
+export function externalLpNote(g: Pick<Game, 'status'>): string {
+  const who = 'Someone besides Horagon also provides liquidity here.'
+  return g.status === 'final'
+    ? `${who} The close at the final buzzer withdraws only Horagon's share, so this market can still trade outside Horagon.`
+    : `${who} A halt withdraws only Horagon's share, so this market can still trade after a halt.`
+}
+
+/** The ResolutionCard's link to the halt transaction: at the final buzzer it is the close. */
+export const haltLinkLabel = (g: Pick<Game, 'status'>): string =>
+  g.status === 'final' ? 'Closed' : 'Halted'
 
 /** The short subject over a row's number: "MEM to win", "CHA lost", "Resolved: MEM won". */
 export function rowSubject(state: DialState, g: VerdictGame, outcome: Outcome | null): string {
@@ -84,6 +125,9 @@ export const liveNumber = (state: DialState): boolean =>
 
 /** The Model line's explanation, in place (audit section 4). */
 export const MODEL_HINT = 'Model: live win chance from score and clock'
+
+/** Why nothing trades once the game is final, open market or halted (R1, R5c). */
+export const BUZZER_CLOSED = 'Trading closed at the final buzzer.'
 
 /** After the close, before a result: who checks, and what comes next. */
 const RESULT_NEXT = 'The result goes on-chain after a box-score check.'

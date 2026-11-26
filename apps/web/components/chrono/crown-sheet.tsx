@@ -4,7 +4,7 @@
 // The sheet sits in the top layer over the play-money banner, so it carries the same line in a
 // footer that stays put while its content scrolls (spec 2.7). Its title and Close stay at the
 // top of the scrolling area, each open starts at the top, and a tap on the backdrop closes it.
-import { PLAY_MONEY_NOTICE } from '@horagon/sdk'
+import { PLAY_MONEY_NOTICE } from '@horagon/sdk/notice'
 import { type MouseEvent, type ReactNode, useEffect, useRef } from 'react'
 
 interface Box {

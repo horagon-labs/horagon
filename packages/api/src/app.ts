@@ -63,7 +63,7 @@ import {
   usdcBalanceOf,
 } from './services'
 import { MarketSet, submitSponsored } from './sponsor/submit'
-import { etDayRange, etNextDay, etToday, toGame, toGameDetail, toHistory } from './views'
+import { etDayRange, etNextDay, etNight, toGame, toGameDetail, toHistory } from './views'
 
 type Env = { Variables: { requestId: string } }
 
@@ -230,10 +230,10 @@ export function createApp(deps: ApiDeps) {
     async (c) => {
       const q = c.req.valid('query')
       const now = deps.now()
-      const today = etToday(now)
+      const night = etNight(now)
       const range = q.date
         ? etDayRange(q.date)
-        : { from: etDayRange(today).from, to: etDayRange(etNextDay(today)).to }
+        : { from: etDayRange(night).from, to: etDayRange(etNextDay(night)).to }
       const games = await listGames(deps.db, {
         ...range,
         ...(q.status ? { statuses: q.status } : {}),

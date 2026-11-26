@@ -3,9 +3,8 @@
 // crawler sees real content. Everything here is best effort: a slow or failing API leaves the
 // value out, and the page's own poll loads it in the browser as before.
 import type { Game, GameDetail, HoragonClient } from '@horagon/sdk'
-import { isHoragonError } from '@horagon/sdk'
+import { etNextDay, etNight, isHoragonError } from '@horagon/sdk'
 import { type Upcoming, upcomingOf } from '../chrono/board'
-import { etDay } from '../chrono/time'
 import { isTonight } from '../format'
 
 /** How long a first frame waits for the API before it renders without the data. */
@@ -14,8 +13,6 @@ export const INITIAL_TIMEOUT_MS = 1_500
 export const INITIAL_TTL_MS = 3_000
 /** On a day with no game ahead, how many more ET days the board looks for the next ones. */
 export const LOOKAHEAD_DAYS = 6
-
-const DAY_SECS = 86_400
 
 export type BoardClient = Pick<HoragonClient, 'games'>
 
@@ -35,7 +32,7 @@ export async function within<T>(p: Promise<T>, ms: number): Promise<T | undefine
 export interface InitialBoard {
   /** Tonight's games as the API lists them; undefined when the API did not answer in time. */
   games: Game[] | undefined
-  /** The next games, when the default list (today and tomorrow, ET) has nothing ahead. */
+  /** The next games, when the default list (the ET night and the day after it) has nothing ahead. */
   upcoming: Upcoming | null
   /** Unix seconds the data is for: the first frame's clock, so the browser hydrates the same. */
   now: number
@@ -59,7 +56,8 @@ export async function loadBoard(
 }
 
 /**
- * The next games past the default list's days (0 and 1): days 2 to LOOKAHEAD_DAYS + 1 are asked
+ * The next games past the default list's two days (`etNight` and the day after it): the next
+ * LOOKAHEAD_DAYS ET days, stepped with `etNextDay`, are asked
  * all at once, under one `timeoutMs` cap for the lot (R5 review finding 8), and the first day
  * that has games answers. A day that fails or is still out when the cap ends stops the search
  * there, so a later day never passes for the next one. Never throws.
@@ -69,9 +67,12 @@ export async function lookAhead(
   nowSecs: number,
   timeoutMs = INITIAL_TIMEOUT_MS,
 ): Promise<Upcoming | null> {
-  const days = Array.from({ length: LOOKAHEAD_DAYS }, (_, i) =>
-    client.games.list({ date: etDay(nowSecs + (i + 2) * DAY_SECS) }).catch(() => undefined),
-  )
+  let date = etNextDay(etNextDay(etNight(nowSecs)))
+  const days = Array.from({ length: LOOKAHEAD_DAYS }, () => {
+    const asked = date
+    date = etNextDay(date)
+    return client.games.list({ date: asked }).catch(() => undefined)
+  })
   let timer: ReturnType<typeof setTimeout> | undefined
   const late = new Promise<'late'>((resolve) => {
     timer = setTimeout(() => resolve('late'), timeoutMs)

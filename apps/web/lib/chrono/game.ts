@@ -1,7 +1,8 @@
 // The game screen's dial (spec 4.2, 4.3): the state table, the needle (a proposal turns it
 // toward the proposed side), and the time ring from the market's real start_ts once the market
 // state has loaded; tip-off - 60 min stands in until then, as on the board.
-import { effectiveTime, type Game, type MarketSummary, type Outcome } from '@horagon/sdk'
+import type { Game, MarketSummary, Outcome } from '@horagon/sdk'
+import { effectiveTime } from '@horagon/sdk/math'
 import { timeLeftFraction } from './geometry'
 import {
   type DialState,
@@ -10,6 +11,7 @@ import {
   isTrading,
   needlePrice,
   secsToClose,
+  stillTrades,
 } from './state'
 import { PRE_OPEN_SECS } from './tracks'
 
@@ -41,13 +43,17 @@ export function gameDial(
   const price = needlePrice(state, market, proposed)
   const secsLeft = secsToClose(market, now)
   const tip = Math.floor(Date.parse(game.scheduledTipoff) / 1000)
-  const timeLeft = market
-    ? timeLeftFraction(
-        startTs ?? tip - PRE_OPEN_SECS,
-        market.endTs,
-        effectiveTime(now, market.priceTs ?? 0),
-      )
-    : 1
+  // No time is left once trading stopped (R5c): a close at the final buzzer, before end_ts,
+  // leaves no ring that reads as time still to trade; nor for a game that started with no market.
+  const timeLeft = !stillTrades(state, game, market !== undefined)
+    ? 0
+    : market
+      ? timeLeftFraction(
+          startTs ?? tip - PRE_OPEN_SECS,
+          market.endTs,
+          effectiveTime(now, market.priceTs ?? 0),
+        )
+      : 1
   const label = dialLabel({
     game,
     outcome: market?.outcome ?? null,

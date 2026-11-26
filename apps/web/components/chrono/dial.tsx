@@ -7,7 +7,16 @@ import { liveNumber } from '../../lib/chrono/copy'
 import { useMotionReduced } from '../../lib/chrono/feel'
 import { arcPath, polar, priceToAngle } from '../../lib/chrono/geometry'
 import type { DialState } from '../../lib/chrono/state'
-import { beatArmed, isBeat, needleClass, priceDigits, RING, rimClass } from './dial-look'
+import {
+  beatArmed,
+  isBeat,
+  needleClass,
+  priceDigits,
+  RING,
+  rimClass,
+  ringDash,
+  ringShare,
+} from './dial-look'
 import { Needle } from './needle'
 import { RollingNumber } from './rolling-number'
 
@@ -113,11 +122,11 @@ export function Dial(p: DialProps) {
         )}
         <circle cx={C} cy={C} r={89} fill="none" strokeWidth={3} className="stroke-line" />
         <path
-          d={arcPath(C, C, 89, 0, 360 * p.timeLeft)}
+          d={arcPath(C, C, 89, 0, 360 * ringShare(p.state, p.timeLeft))}
           fill="none"
           strokeWidth={3}
           strokeLinecap="round"
-          strokeDasharray={p.state === 'halted' ? '3 3' : undefined}
+          strokeDasharray={ringDash(p.state)}
           className={RING[p.state]}
           data-ring
         />

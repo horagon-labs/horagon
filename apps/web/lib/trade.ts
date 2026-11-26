@@ -6,6 +6,10 @@
 // simulation refused the submit with slippage and no signature (nothing was broadcast), or the
 // transaction landed and failed with slippage (6007). Everything else is thrown for the
 // UI, which shows `failedSignature(err)` and the SDK's hint.
+//
+// This module signs with web3.js, so no page loads it on its first load (R5c): the crown imports
+// it with the first send, the wallet with the first claim. What the screens need on every load
+// (the stages, the slippage, `failedSignature`) is in lib/trade-shared.ts.
 import {
   errorSignature,
   type HoragonClient,
@@ -17,8 +21,9 @@ import {
 } from '@horagon/sdk'
 import { type Keypair, VersionedTransaction } from '@solana/web3.js'
 import { Buffer } from 'buffer'
+import { DEFAULT_SLIPPAGE_BPS, type TradeStage } from './trade-shared'
 
-export type TradeStage = 'building' | 'signing' | 'submitting' | 'confirming' | 'requoting'
+export { DEFAULT_SLIPPAGE_BPS, failedSignature, type TradeStage } from './trade-shared'
 export type TradeClient = Pick<HoragonClient, 'trade' | 'claims'>
 
 export interface TradeResult {
@@ -28,12 +33,7 @@ export interface TradeResult {
   requoted: boolean
 }
 
-export const DEFAULT_SLIPPAGE_BPS = 200
-
 const isSlippage = (err: unknown) => isHoragonError(err) && err.code === 'SLIPPAGE_EXCEEDED'
-
-/** The transaction an error names (it may still land), or null. Read through the SDK only. */
-export const failedSignature = (err: unknown): string | null => errorSignature(err) ?? null
 
 /** Signs a server-built transaction as `signer` and returns it as base64. */
 export function signBuilt(txBase64: string, signer: Keypair): string {

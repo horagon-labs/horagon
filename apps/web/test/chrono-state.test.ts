@@ -4,6 +4,7 @@ import { proposedOutcome } from '../lib/chrono/evidence'
 import { game as sample } from '../lib/chrono/fixtures'
 import {
   CLOSING_SECS,
+  crownLabel,
   DIAL_STATES,
   deriveDialState,
   dialLabel,
@@ -73,15 +74,26 @@ describe('deriveDialState: the table of spec 4.3, in order', () => {
     expect(state('live', market(), END - CLOSING_SECS - 1)).toBe('live')
   })
 
-  it('rows 8 and 9: live while the game is live or final, pre before tip-off', () => {
+  it('the final buzzer closes an open market before end_ts, before the keeper halt lands (R5c)', () => {
+    // The API can serve a final game with its market still open for a few seconds: the keeper
+    // writes Final, then its halt confirms and reaches the index.
+    expect(state('final', market())).toBe('closed')
+    expect(state('final', market(), END - CLOSING_SECS)).toBe('closed')
+    expect(state('final', market({ priceTs: null }), 0)).toBe('closed')
+    // A result on the market still wins over the buzzer.
+    expect(state('final', market({ status: 'proposed' }))).toBe('proposed')
+    expect(state('final', market({ status: 'finalized', outcome: 'no' }))).toBe('resolved')
+  })
+
+  it('rows 8 and 9: live while the game is live, pre before tip-off', () => {
     expect(state('live', market())).toBe('live')
-    expect(state('final', market())).toBe('live')
     expect(state('scheduled', market())).toBe('pre')
   })
 
-  it('row 10: no market yet is pre', () => {
+  it('row 10: no market yet is pre, also once the game started', () => {
     expect(state('scheduled', undefined)).toBe('pre')
     expect(state('live', undefined)).toBe('pre')
+    expect(state('final', undefined)).toBe('pre')
   })
 
   it('uses chain time when the device clock lags it (effectiveTime)', () => {
@@ -184,9 +196,19 @@ describe('dialLabel (spec 2.6, R5)', () => {
   })
 
   it('says when there is no price, model or market yet', () => {
-    expect(dialLabel({ ...base, price: null, modelProb: null, state: 'pre', secsLeft: null })).toBe(
+    const scheduled = sample({ status: 'scheduled' })
+    const none = { ...base, game: scheduled, price: null, modelProb: null, state: 'pre' as const }
+    expect(dialLabel({ ...none, secsLeft: null })).toBe(
       'CLE to win, no price yet, market opens 60 min before tip-off',
     )
+  })
+
+  it('says a game that started with no market has none, never a past opening (R5c)', () => {
+    const none = { ...base, price: null, modelProb: null, state: 'pre' as const, secsLeft: null }
+    expect(dialLabel(none)).toBe('CLE to win, no price yet, no market for this game')
+    const over = dialLabel({ ...none, game: final(105, 107) })
+    expect(over).toBe('Final, CLE lost, no price yet, no market for this game')
+    expect(over).not.toMatch(/opens|result pending/)
   })
 
   it('names every non-trading state', () => {
@@ -210,7 +232,49 @@ describe('dialLabel (spec 2.6, R5)', () => {
     expect(lost).not.toMatch(/CLE (wins|to win)/)
   })
 
+  it('never says "result pending" next to a proposed or challenged result (R5c)', () => {
+    const over = { ...base, game: final(105, 107), price: 0.74 }
+    expect(dialLabel({ ...over, state: 'proposed' })).toBe(
+      'Final, CLE lost, 74%, model 74%, result proposed',
+    )
+    expect(dialLabel({ ...over, state: 'challenged' })).toBe(
+      'Final, CLE lost, 74%, model 74%, result under review',
+    )
+    // The kind comes from the verdict, not from the caption's words: a game with no winner yet
+    // on the scoreboard says it the same way.
+    const tied = { ...base, game: final(100, 100), price: 0.5 }
+    expect(dialLabel({ ...tied, state: 'proposed' })).toBe('Final, 50%, model 74%, result proposed')
+    expect(dialLabel({ ...tied, state: 'closed' })).toBe(
+      'Final, result pending, 50%, model 74%, trading closed',
+    )
+    for (const state of ['proposed', 'challenged', 'closed'] as const) {
+      const said = dialLabel({ ...over, state })
+      expect(said.match(/result (pending|proposed|under review)/g), state).toHaveLength(1)
+    }
+  })
+
   it('keeps the honest edges of the price', () => {
     expect(dialLabel({ ...base, price: 0.996 })).toMatch(/^CLE to win, >99%/)
+  })
+})
+
+describe('crownLabel (R5c, review finding 4)', () => {
+  const over = sample({ status: 'final', homeScore: 104, awayScore: 110 })
+  const base = { state: 'live' as const, game: sample(), outcome: null, price: 0.77, ghost: null }
+
+  it('reads the caption, the price and the price after the quoted trade', () => {
+    expect(crownLabel(base)).toBe('CLE to win, 77%')
+    expect(crownLabel({ ...base, ghost: 0.79 })).toBe('CLE to win, 77%, after this trade 79%')
+    expect(crownLabel({ ...base, price: null })).toBe('CLE to win, no price yet')
+  })
+
+  it('never reads a side that lost as "to win" once the crown stays on after the buzzer', () => {
+    const said = crownLabel({ ...base, state: 'closed', game: over })
+    expect(said).toBe('Final, CLE lost, result pending, 77%')
+    expect(said).not.toMatch(/to win/)
+    const won = sample({ status: 'final', homeScore: 110, awayScore: 104 })
+    expect(crownLabel({ ...base, state: 'closed', game: won })).toBe(
+      'Final, CLE won, result pending, 77%',
+    )
   })
 })

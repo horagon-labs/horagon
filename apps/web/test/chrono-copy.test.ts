@@ -33,10 +33,9 @@ describe('what the number means (R5, audit section 13)', () => {
 
   it('follows the scoreboard after the final buzzer: never "wins" for the side that lost', () => {
     expect(dialCaption('closed', final(105, 107), null)).toBe('Final · CLE lost · result pending')
-    expect(dialCaption('proposed', final(110, 104), null)).toBe('Final · CLE won · result pending')
-    expect(dialCaption('challenged', final(105, 107), null)).toBe(
-      'Final · CLE lost · result pending',
-    )
+    // A proposed or challenged result has its own state line: no "result pending" over it (R5c).
+    expect(dialCaption('proposed', final(110, 104), null)).toBe('Final · CLE won')
+    expect(dialCaption('challenged', final(105, 107), null)).toBe('Final · CLE lost')
     expect(rowSubject('closed', final(105, 107), null)).toBe('CLE lost')
     expect(rowSubject('closed', final(110, 104), null)).toBe('CLE won')
     for (const state of DIAL_STATES) {

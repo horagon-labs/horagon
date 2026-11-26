@@ -1,6 +1,10 @@
 // DB rows -> API v1 shapes (the zod schemas in @horagon/sdk/schemas). Pure functions.
 import type { GameWithMarkets, MarketRow, SnapshotRow } from '@horagon/db'
 import {
+  etDayRange,
+  etNextDay,
+  etNight,
+  etToday,
   formatAmount,
   type Game,
   type GameDetail,
@@ -65,7 +69,7 @@ export function marketRules(g: Pick<GameWithMarkets, 'home' | 'away'>, kinds: nu
     )
   }
   rules.push(
-    'Trading halts automatically if the game ends before the market closes, if it has not started 24 hours after the scheduled tip-off, if it is postponed or canceled, or if every score feed goes silent for more than 10 minutes in Q4 or overtime.',
+    'A market closes at the final buzzer (the keeper halts it on the first Final read), or 3 hours after the scheduled tip-off at the latest. It also halts if it has not started 24 hours after the scheduled tip-off, if it is postponed or canceled, or if every score feed goes silent for more than 10 minutes in Q4 or overtime.',
     'A guardian can also halt a market by hand, for example when the score feed is down near the close or shows something wrong. A halt cannot be undone.',
     'Postponed games: a makeup game within 7 days of the scheduled tip-off decides the market; otherwise it resolves NO. Redeeming a YES + NO pair for 1 mUSDC works at any time.',
     'Results are proposed with public evidence and can be challenged by a guardian for 15 minutes before they become final. Play money on devnet: no real value, no prizes.',
@@ -125,30 +129,4 @@ export function toHistory(
   }
 }
 
-const ET = 'America/New_York'
-const etDate = new Intl.DateTimeFormat('en-CA', { timeZone: ET })
-const etHour = new Intl.DateTimeFormat('en-US', { timeZone: ET, hour: 'numeric', hourCycle: 'h23' })
-
-/** The calendar day after `date` (YYYY-MM-DD). */
-export function etNextDay(date: string): string {
-  return new Date(Date.parse(`${date}T12:00:00Z`) + 86_400_000).toISOString().slice(0, 10)
-}
-
-/** 00:00 US Eastern time on `date`: 05:00 UTC in winter, 04:00 UTC in summer. */
-function etMidnight(date: string): Date {
-  const at = new Date(`${date}T05:00:00Z`)
-  return new Date(at.getTime() - Number(etHour.format(at)) * 3_600_000)
-}
-
-/**
- * An NBA game date, a US Eastern (ET) calendar day, -> [start, end) in UTC. The day has 23 or
- * 25 hours when the clocks change.
- */
-export function etDayRange(date: string): { from: Date; to: Date } {
-  return { from: etMidnight(date), to: etMidnight(etNextDay(date)) }
-}
-
-/** The ET calendar day (YYYY-MM-DD) at `nowSecs`. */
-export function etToday(nowSecs: number): string {
-  return etDate.format(new Date(nowSecs * 1000))
-}
+export { etDayRange, etNextDay, etNight, etToday }
