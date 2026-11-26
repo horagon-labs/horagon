@@ -87,6 +87,49 @@ export function modelProbability(g: FeedGame, p0: number | null, sigma: number):
 }
 
 const ET = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' })
+const ET_TIME = new Intl.DateTimeFormat('en-US', {
+  timeZone: 'America/New_York',
+  hour: 'numeric',
+  minute: '2-digit',
+  hour12: true,
+})
+
+/** `2026-11-28 02:00 UTC (9:00 PM ET)`: a time in UTC, and the same time in ET. */
+export function utcAndEt(unixSecs: number): string {
+  const d = new Date(unixSecs * 1000)
+  const part = (type: string) => ET_TIME.formatToParts(d).find((p) => p.type === type)?.value
+  const utc = d.toISOString().slice(0, 16).replace('T', ' ')
+  return `${utc} UTC (${part('hour')}:${part('minute')} ${part('dayPeriod')} ET)`
+}
+
+/**
+ * The `draft:` text. A Final draft comes about 60 s after the buzzer, before `end_ts` as a rule,
+ * and `horagon-ops propose` refuses until `end_ts`: so the text says when proposing opens,
+ * rather than asking for a propose now. A draft at or after `end_ts` (overtime past it, a
+ * postponed game) can be proposed at once.
+ */
+export function draftText(
+  g: Pick<GameRow, 'id' | 'away' | 'home'>,
+  a: { status: 'final' | 'postponed'; homeScore: number; awayScore: number },
+  endTs: number | null,
+  now: number,
+): string {
+  if (a.status === 'postponed') {
+    return (
+      `${g.away}@${g.home} was not played within 7 days. Resolve NO:\n` +
+      `horagon-ops propose ${g.id} --postponed --notice <url>`
+    )
+  }
+  const when =
+    endTs !== null && now < endTs
+      ? `Check the box score; proposing opens at ${utcAndEt(endTs)}, then run:`
+      : 'Check the box score, then run:'
+  return (
+    `${g.away}@${g.home} Final ${a.awayScore}-${a.homeScore} (ESPN). ${when}\n` +
+    `horagon-ops propose ${g.id} --box-score <url> --score ${a.homeScore}-${a.awayScore}`
+  )
+}
+
 const sameLive = (a: FeedGame, b: FeedGame) =>
   a.status === b.status &&
   a.homeScore === b.homeScore &&
@@ -576,13 +619,10 @@ export class Keeper {
       sourceUrl: obs?.url ?? espnScoreboardUrl(g.gameDate),
       fetchedAt: new Date((obs?.finalSince ?? now) * 1000),
     })
-    const text =
-      a.status === 'final'
-        ? `${g.away}@${g.home} Final ${a.awayScore}-${a.homeScore} (ESPN). Check the box score, then run:\n` +
-          `horagon-ops propose ${g.id} --box-score <url> --score ${a.homeScore}-${a.awayScore}`
-        : `${g.away}@${g.home} was not played within 7 days. Resolve NO:\n` +
-          `horagon-ops propose ${g.id} --postponed --notice <url>`
-    await this.d.alerts.send(`draft:${g.id}:${roundOf(s)}`, text)
+    // end_ts from the chain (a draft needs the GameMarket), else from the market row.
+    const endTs =
+      s.onchain?.endTs ?? (s.market ? Math.floor(s.market.endTs.getTime() / 1000) : null)
+    await this.d.alerts.send(`draft:${g.id}:${roundOf(s)}`, draftText(g, a, endTs, now))
   }
 
   private async settle(
