@@ -4,13 +4,19 @@
 import { REFERENCE_AGENT_WALLET } from '@horagon/sdk'
 import type { Metadata } from 'next'
 import type { ReactNode } from 'react'
+import { CARD_SIZE } from '../../components/share-card'
 import { BOT_RATE, AGENT_PARAMS as P } from '../../lib/agent'
 import { explorerAddress } from '../../lib/format'
 import { fullTitle, SITE_NAME } from '../../lib/meta'
+import { alt as CARD_ALT } from '../opengraph-image'
 
 const TITLE = 'Reference agent'
 const DESCRIPTION =
   "How Horagon's disclosed reference agent trades, and why it never counts as a fan."
+
+// This page's openGraph and twitter replace the layout's, file images included, so they name the
+// site's card (app/opengraph-image.tsx, app/twitter-image.tsx) themselves: no image route here.
+const card = { width: CARD_SIZE.width, height: CARD_SIZE.height, alt: CARD_ALT }
 
 export const metadata: Metadata = {
   title: TITLE,
@@ -20,8 +26,14 @@ export const metadata: Metadata = {
     description: DESCRIPTION,
     type: 'website',
     siteName: SITE_NAME,
+    images: [{ url: '/opengraph-image', ...card }],
   },
-  twitter: { title: fullTitle(TITLE), description: DESCRIPTION, card: 'summary_large_image' },
+  twitter: {
+    title: fullTitle(TITLE),
+    description: DESCRIPTION,
+    card: 'summary_large_image',
+    images: [{ url: '/twitter-image', ...card }],
+  },
 }
 
 const REPO = 'https://github.com/horagon-labs/horagon/blob/main'

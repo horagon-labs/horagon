@@ -1,10 +1,11 @@
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { REFERENCE_AGENT_WALLET } from '@horagon/sdk'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import { BOT_RATE as COUNT_FANS_BOT_RATE } from '../../../scripts/count-fans.mjs'
 import AgentPage, { metadata } from '../app/agent/page'
+import { alt as ogAlt } from '../app/opengraph-image'
 import { AgentLine, AgentNote } from '../components/chrono/agent-line'
 import { AGENT_DISCLOSURE, AGENT_PARAMS, activityLine, BOT_RATE } from '../lib/agent'
 import { activity } from '../lib/chrono/fixtures'
@@ -219,6 +220,16 @@ describe('/agent: how the reference agent works (R2b)', () => {
     expect(metadata.description).toBe(description)
     expect(metadata.openGraph).toMatchObject({ title: 'Reference agent · Horagon', description })
     expect(metadata.twitter).toMatchObject({ title: 'Reference agent · Horagon', description })
+  })
+
+  it("keeps the site's share image, which its own preview would otherwise drop", () => {
+    // A page's openGraph and twitter replace the layout's, file images included, so /agent names
+    // the root card (app/opengraph-image.tsx, app/twitter-image.tsx) itself. No route of its own.
+    const card = { width: 1200, height: 630, alt: ogAlt }
+    expect(metadata.openGraph?.images).toEqual([{ url: '/opengraph-image', ...card }])
+    expect(metadata.twitter?.images).toEqual([{ url: '/twitter-image', ...card }])
+    expect(existsSync(join(WEB, 'app', 'agent', 'opengraph-image.tsx'))).toBe(false)
+    expect(existsSync(join(WEB, 'app', 'agent', 'twitter-image.tsx'))).toBe(false)
   })
 
   it('shows the full wallet, linked to the explorer', () => {
