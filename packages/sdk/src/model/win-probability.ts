@@ -15,7 +15,8 @@ export interface WinProbabilityInput {
 /**
  * In-game home win probability, Brownian model (Stern 1994):
  * P = Phi((d + mu*tau) / (sigma*sqrt(tau))), tau = minutes left / 48, mu = sigma*Phi^-1(p0),
- * so P = p0 at tip-off with a tied score. Display only: Horagon never trades on it.
+ * so P = p0 at tip-off with a tied score. Shown to fans; the disclosed reference agent
+ * (apps/keeper/src/agent) trades toward it.
  */
 export function winProbability(input: WinProbabilityInput): number {
   const { margin, minutesRemaining, p0, sigma } = input

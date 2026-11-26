@@ -45,7 +45,11 @@ export interface Timings {
   notStartedSecs: number
   /** A postponed game not made up within this long resolves NO (spec 6.2: 7 days). */
   postponedResolveSecs: number
-  /** A draft still unconfirmed this long after Final alerts again (spec 7: 30 min). */
+  /**
+   * A draft still unconfirmed this long after it could first be proposed alerts again (spec 7:
+   * 30 min). That is the later of the draft and end_ts: a game halted at the buzzer drafts before
+   * end_ts, and nobody can propose until end_ts.
+   */
   missingSourceSecs: number
 }
 
@@ -227,13 +231,14 @@ function planGame(s: GameState, input: PlanInput): Action[] {
     } else if (
       draft.state === 'pending' &&
       !draft.alertedAt &&
-      now - Math.floor(draft.fetchedAt.getTime() / 1000) >= t.missingSourceSecs
+      now - Math.max(Math.floor(draft.fetchedAt.getTime() / 1000), chain.endTs) >=
+        t.missingSourceSecs
     ) {
       out.push({
         type: 'alert',
         gameId: g.id,
         key: `unconfirmed:${g.id}`,
-        text: `${g.away}@${g.home}: ${draft.status} draft waiting 30 min for the guardian's box-score check`,
+        text: `${g.away}@${g.home}: ${draft.status} draft open to propose for 30 min, waiting for the guardian's box-score check`,
       })
     }
   }
@@ -286,7 +291,8 @@ function silenceAlert(
   if (feed && feed.status !== 'scheduled' && feed.status !== 'live') return null
   const name = `${g.away}@${g.home}`
   const key = `feed-silent:${g.id}`
-  const halt = `If the game may end before the close: horagon-ops halt ${g.id}`
+  // end_ts is only the latest close: a game read Final is halted at the buzzer long before it.
+  const halt = `If the game may end before end_ts: horagon-ops halt ${g.id}`
   const q4 = q4Silence(s, chain, now)
   if (q4 !== null) {
     if (q4 <= t.feedSilentAlertSecs) return null
@@ -297,7 +303,7 @@ function silenceAlert(
     }
   }
   if (now < chain.endTs - t.feedSilentWatchSecs) return null
-  const closes = `the market closes in ${Math.ceil((chain.endTs - now) / 60)} min and this alert does not halt it`
+  const closes = `end_ts in ${Math.ceil((chain.endTs - now) / 60)} min, and this alert does not halt the market`
   if (!feed || s.feedSeenAt === null) {
     return { key, text: `${name}: no feed read since the keeper started; ${closes}. ${halt}` }
   }

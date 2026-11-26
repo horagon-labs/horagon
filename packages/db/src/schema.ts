@@ -45,7 +45,10 @@ export const games = pgTable(
     featured: boolean('featured').notNull().default(false),
     /** Pre-game home win probability from Elo (spec section 7). */
     p0: doublePrecision('p0'),
-    /** Latest in-game model probability (display only), refreshed by the keeper each tick. */
+    /**
+     * Latest in-game home win probability (the YES side of a winner market), refreshed by the
+     * keeper each tick. Shown to fans, and the target of the reference agent.
+     */
     modelProb: doublePrecision('model_prob'),
     /** Last feed payload that changed this row, for the guardian and the replay archive. */
     feedUpdatedAt: ts('feed_updated_at'),

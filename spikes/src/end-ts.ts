@@ -32,12 +32,15 @@ import { runSpike, SpikeRun } from './lib/results'
 const CHOSEN_MIN = 180
 /** At most this share of games may still be in play at end_ts (their market closes early). */
 const MAX_LATE_SHARE = 0.03
+/** The feed-silent watch starts this long before end_ts (keeper feedSilentWatchSecs 4_800). */
+const WATCH_BEFORE_END_MIN = 80
 /**
  * From here on, a silent feed alerts the guardian whatever quarter it last showed (spec 6.2;
- * keeper feedSilentWatchSecs 4_800 before end_ts, so S + 1h40m). It must come before any game
- * reaches Q4: an outage that spans the start of Q4 would otherwise go unnoticed.
+ * S + 1h40m for the chosen close). It must come before any game reaches Q4: an outage that
+ * spans the start of Q4 would otherwise go unnoticed. Derived from the chosen close, as the
+ * keeper derives it from end_ts, so a re-run that moves CHOSEN_MIN checks the new watch start.
  */
-const WATCH_MIN = 100
+const WATCH_MIN = CHOSEN_MIN - WATCH_BEFORE_END_MIN
 /** The close of 2026-11-19 (S + 2h10m), kept as the baseline row. */
 const OLD_MIN = 130
 const OFFSETS_MIN = [OLD_MIN, 150, 155, 160, 165, 170, 175, 180]

@@ -251,6 +251,12 @@ describe('halt (spec 6.2)', () => {
         text: expect.stringContaining('last seen in Q3'),
       }),
     ])
+    // end_ts is only the latest close (a Final halts at the buzzer), and the text says so.
+    expect(run(watch, open({ feed: q3, feedSeenAt: watch - 121 }))[0]).toMatchObject({
+      text:
+        'MEM@CLE: no feed for 2 min, last seen in Q3; end_ts in 80 min, and this alert does not ' +
+        'halt the market. If the game may end before end_ts: horagon-ops halt nba-401910007',
+    })
     // An outage from Q3 into what may now be Q4 still only alerts: the keeper cannot tell.
     expect(types(run(END - 1, open({ feed: q3, feedSeenAt: watch - 3_600 })))).toEqual(['alert'])
     // Last seen before tip-off, or not read at all since the keeper started.
@@ -381,7 +387,7 @@ describe('draft, finalize, recycle', () => {
     })
   })
 
-  it('reminds once when the guardian has not confirmed 30 min after Final', () => {
+  it('reminds once when the guardian has not confirmed 30 min after a draft made after end_ts', () => {
     const draft = {
       state: 'pending',
       status: 'final',
@@ -396,15 +402,35 @@ describe('draft, finalize, recycle', () => {
       expect.objectContaining({
         type: 'alert',
         key: 'unconfirmed:nba-401910007',
-        text: "MEM@CLE: final draft waiting 30 min for the guardian's box-score check",
+        text: "MEM@CLE: final draft open to propose for 30 min, waiting for the guardian's box-score check",
       }),
     ])
     const nobody = { ...draft, status: 'postponed' } as DraftRow
     expect(run(END + 100 + 1_800, halted({ feed: finalFeed, draft: nobody }))[0]).toMatchObject({
-      text: expect.stringContaining('postponed draft waiting 30 min'),
+      text: expect.stringContaining('postponed draft open to propose for 30 min'),
     })
     const reminded = { ...draft, alertedAt: new Date() } as DraftRow
     expect(run(END + 100 + 3_600, halted({ feed: finalFeed, draft: reminded }))).toEqual([])
+  })
+
+  it('counts the 30 min from end_ts for a draft made before it (a buzzer halt)', () => {
+    // A game that ended at S + 2h30m: drafted 30 min before end_ts, when nobody can propose yet.
+    const draftAt = END - 1_800
+    const draft = {
+      state: 'pending',
+      status: 'final',
+      homeScore: 111,
+      awayScore: 106,
+      alertedAt: null,
+      fetchedAt: new Date(draftAt * 1000),
+    } as DraftRow
+    const s = halted({ feed: finalFeed, finalSince: draftAt - 60, draft })
+    // 30 min after the draft is end_ts itself: no reminder yet.
+    expect(run(draftAt + 1_800, s)).toEqual([])
+    expect(run(END + 1_799, s)).toEqual([])
+    expect(run(END + 1_800, s)).toEqual([
+      expect.objectContaining({ type: 'alert', key: 'unconfirmed:nba-401910007' }),
+    ])
   })
 
   it('finalizes when the dispute window has passed, then recycles', () => {

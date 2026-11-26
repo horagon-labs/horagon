@@ -369,9 +369,13 @@ describe('a challenge', () => {
   /** The guardian proposes the pending draft; ops marks the draft proposed. */
   const propose = () => setDraftState(h.db, ID, { state: 'proposed' })
 
-  /** Round one: propose, a challenge before the next tick, then the keeper's redraft. */
+  /**
+   * Round one: propose at end_ts (the program takes no proposal before it), a challenge before
+   * the next tick, then the keeper's redraft.
+   */
   async function firstChallenge(): Promise<void> {
     await toDraft()
+    now = END
     await propose()
     await updateMarket(h.db, program.addresses(marketId).market.toBase58(), { status: 'proposed' })
     settled = {
@@ -500,7 +504,11 @@ describe('a challenge', () => {
 
   it('reminds about a redraft under a key of its own round', async () => {
     await firstChallenge()
-    now += DEFAULT_TIMINGS.missingSourceSecs
+    // The redraft is of the Final first read at END - 900 (its fetchedAt), before end_ts: its
+    // 30 min count from end_ts, when proposing opened.
+    now = END + DEFAULT_TIMINGS.missingSourceSecs - 1
+    expect(await keeper.tick()).toEqual([])
+    now += 1
     expect(types(await keeper.tick())).toEqual(['alert'])
     expect(alerts.map(([k]) => k).filter((k) => k.startsWith('unconfirmed:'))).toEqual([
       `unconfirmed:${ID}:1`,
@@ -698,10 +706,14 @@ describe('the feed', () => {
 })
 
 describe('a pending draft', () => {
-  it('reminds the guardian once after 30 min unconfirmed', async () => {
+  it('reminds the guardian once, 30 min after end_ts for a draft made at the buzzer', async () => {
+    // toDraft halts on the Final read of END - 900 and drafts from it. Nobody can propose before
+    // end_ts, so the 30 min count from end_ts, not from the draft.
     await toDraft()
     const key = 'unconfirmed:nba-401910007:0'
-    now += DEFAULT_TIMINGS.missingSourceSecs - 61
+    now = END - 900 + DEFAULT_TIMINGS.missingSourceSecs
+    expect(await keeper.tick()).toEqual([])
+    now = END + DEFAULT_TIMINGS.missingSourceSecs - 1
     expect(await keeper.tick()).toEqual([])
     now += 1
     expect(types(await keeper.tick())).toEqual(['alert'])

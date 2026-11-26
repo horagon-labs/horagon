@@ -167,6 +167,9 @@ const NOT_ALERT_WORDS = new Set([
   'actions',
   'feed',
   'alert',
+  // the reference agent's heartbeat row, and the field of its last row after a clean stop
+  'agent',
+  'stopped',
   // market and draft states, halt rules
   'featured',
   'proposed',
