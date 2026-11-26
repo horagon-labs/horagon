@@ -142,6 +142,7 @@ export const GameDetailSchema = GameSchema.extend({
   /** The "Market rules" text, one rule per item (spec section 6.2). */
   rules: z.array(z.string()),
   resolutions: z.array(ResolutionSchema),
+  activity: GameActivitySchema,
 })
 
 export const GamesQuerySchema = z.strictObject({

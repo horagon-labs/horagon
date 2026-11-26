@@ -13,11 +13,13 @@ import {
   ataAddress,
   DEVNET_MUSDC_MINT,
   formatAmount,
+  GameDetailSchema,
   MAINNET_GENESIS_HASH,
   PM_AMM_PROGRAM_ID,
   PROTOCOL_DAO,
   parseAmount,
   quoteSwap,
+  REFERENCE_AGENT_WALLET,
   swapDirectionFor,
   toPoolState,
 } from '@horagon/sdk'
@@ -192,6 +194,69 @@ describe('reads', () => {
     expect(res.status).toBe(200)
     expect(await res.text()).toBe(json)
     expect(res.headers.get('x-evidence-sha256')).toBe('ab'.repeat(32))
+  })
+})
+
+describe('GET /games/{id}: who traded (R2b)', () => {
+  let n = 0
+  /** A swap of `usdc` raw mUSDC on `market` (this game's by default), `secs` after the swap fixture. */
+  const swap = (
+    wallet: string,
+    usdc: bigint,
+    over: { market?: string; secs?: number; botMemo?: boolean } = {},
+  ) => ({
+    sig: `${String(n++).padStart(4, '1')}${'c'.repeat(84)}`,
+    ixIndex: 2,
+    market: over.market ?? env.market.pubkey.toBase58(),
+    wallet,
+    direction: 'usdcToYes',
+    usdcAmount: usdc,
+    usdcDelta: -usdc,
+    yesDelta: usdc,
+    noDelta: 0n,
+    fee: 0n,
+    slot: 1n,
+    blockTime: new Date((env.market.swap.now + (over.secs ?? 0)) * 1000),
+    ...(over.botMemo === undefined ? {} : { botMemo: over.botMemo }),
+  })
+
+  it('returns the agent, fan and other volumes from the stored swaps', async () => {
+    const fan = Keypair.generate().publicKey.toBase58()
+    const memoBot = Keypair.generate().publicKey.toBase58()
+    await insertTrades(env.h.db, [
+      swap(REFERENCE_AGENT_WALLET, 100_000_000n, { secs: 10, botMemo: true }),
+      swap(REFERENCE_AGENT_WALLET, 40_500_000n, { secs: 20 }),
+      swap(fan, 25_000_000n, { secs: 30 }),
+      // Indexed before bot_memo existed: null, a fan.
+      swap(fan, 20_000_000n, { secs: 40 }),
+      // The memo on another game's market makes it a bot on this one too.
+      swap(memoBot, 1_000_000n, { market: 'OtherGameMarket', botMemo: true }),
+      swap(memoBot, 5_000_000n, { secs: 50, botMemo: false }),
+    ])
+    const res = await get(`/games/${GAME_ID}`)
+    expect(res.status).toBe(200)
+    expect(res.headers.get('cache-control')).toBe('s-maxage=1, stale-while-revalidate=5')
+    const body = GameDetailSchema.parse(await res.json())
+    const t0 = env.market.swap.now
+    expect(body.activity).toEqual({
+      agent: { swaps: 2, wallets: 1, volumeUsdc: '140.5', wallet: REFERENCE_AGENT_WALLET },
+      fans: { swaps: 2, wallets: 1, volumeUsdc: '45' },
+      others: { swaps: 1, wallets: 1, volumeUsdc: '5' },
+      lastFanTradeTs: t0 + 40,
+      lastAgentTradeTs: t0 + 20,
+    })
+  })
+
+  it('gives zeros and nulls for a game with no swaps', async () => {
+    const body = GameDetailSchema.parse(await (await get(`/games/${GAME_ID}`)).json())
+    const zero = { swaps: 0, wallets: 0, volumeUsdc: '0' }
+    expect(body.activity).toEqual({
+      agent: { ...zero, wallet: REFERENCE_AGENT_WALLET },
+      fans: zero,
+      others: zero,
+      lastFanTradeTs: null,
+      lastAgentTradeTs: null,
+    })
   })
 })
 

@@ -1,0 +1,22 @@
+{
+  "$schema": "https://turborepo.com/schema.json",
+  "extends": ["//"],
+  "tasks": {
+    "test": {
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/docs/metrics-wallets.json",
+        "$TURBO_ROOT$/scripts/count-fans.mjs",
+        "$TURBO_ROOT$/scripts/count-fans.d.mts"
+      ]
+    },
+    "typecheck": {
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/docs/metrics-wallets.json",
+        "$TURBO_ROOT$/scripts/count-fans.mjs",
+        "$TURBO_ROOT$/scripts/count-fans.d.mts"
+      ]
+    }
+  }
+}

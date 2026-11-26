@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import { REFERENCE_AGENT_WALLET } from '../src'
-import { GameActivitySchema, PubkeySchema, TradeTallySchema } from '../src/schemas'
+import {
+  GameActivitySchema,
+  GameDetailSchema,
+  PubkeySchema,
+  TradeTallySchema,
+} from '../src/schemas'
 
 const tally = { swaps: 12, wallets: 1, volumeUsdc: '840' }
 const activity = {
@@ -36,5 +41,9 @@ describe('the reference agent (R2b)', () => {
     expect(GameActivitySchema.safeParse({ ...activity, lastFanTradeTs: undefined }).success).toBe(
       false,
     )
+  })
+
+  it('requires the activity on a game detail', () => {
+    expect(GameDetailSchema.shape).toHaveProperty('activity', GameActivitySchema)
   })
 })

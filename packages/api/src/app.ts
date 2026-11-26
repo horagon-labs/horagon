@@ -6,9 +6,11 @@ import {
   getHeartbeat,
   latestPrices,
   listGames,
+  listMarketTrades,
   listPricePoints,
   listSnapshots,
   readFlags,
+  walletsWithBotMemo,
 } from '@horagon/db'
 import {
   BuiltTxWireSchema,
@@ -46,6 +48,7 @@ import { cors } from 'hono/cors'
 import { etag, RETAINED_304_HEADERS } from 'hono/etag'
 import { HTTPException } from 'hono/http-exception'
 import { requestId } from 'hono/request-id'
+import { gameActivity } from './activity'
 import { ChainReader } from './chain'
 import type { ApiDeps } from './deps'
 import { claimFaucet } from './faucet'
@@ -257,12 +260,15 @@ export function createApp(deps: ApiDeps) {
     async (c) => {
       const g = await getGame(deps.db, c.req.valid('param').id)
       if (!g) throw new ApiError('NOT_FOUND', 'No such game')
-      const prices = await latestPrices(
-        deps.db,
-        g.markets.map((m) => m.pubkey),
-      )
+      const keys = g.markets.map((m) => m.pubkey)
+      const [prices, trades] = await Promise.all([
+        latestPrices(deps.db, keys),
+        listMarketTrades(deps.db, keys),
+      ])
+      const memo = await walletsWithBotMemo(deps.db, [...new Set(trades.map((t) => t.wallet))])
+      const activity = gameActivity(trades, memo)
       c.header('cache-control', cacheShort)
-      return c.json(toGameDetail(g, prices, deps.publicUrl), 200)
+      return c.json(toGameDetail(g, prices, deps.publicUrl, activity), 200)
     },
   )
 
