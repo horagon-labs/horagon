@@ -11,12 +11,12 @@ const C = 100
 const TICKS = [0, 0.25, 0.5, 0.75, 1]
 
 /**
- * The gauge: the 270-degree scale, an arc up to the price and the needle, lume while the price is
- * a live chance and ash once trading stopped; no arc and no needle without a price.
+ * The gauge: the 270-degree scale, an arc up to the price and the needle, live while the market
+ * trades and muted once trading stopped (light branding review §4.11); no arc and no needle without a price.
  */
 export function ShareGauge(p: { price: number | null; size: number; live?: boolean }) {
   const { price, size } = p
-  const tone = p.live === false ? COLORS['ash-400'] : COLORS['lume-300']
+  const tone = p.live === false ? COLORS['ash-400'] : COLORS.live
   const angle = price === null ? null : priceToAngle(price)
   const tip = angle === null ? null : polar(C, C, 68, angle)
   return (

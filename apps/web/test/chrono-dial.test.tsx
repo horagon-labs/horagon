@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import { Dial, type DialProps } from '../components/chrono/dial'
-import { isBeat, priceDigits, RING, stateLine } from '../components/chrono/dial-look'
+import { isBeat, priceDigits, ringClass, stateLine } from '../components/chrono/dial-look'
 import { MiniDial } from '../components/chrono/mini-dial'
 import { at, game, NOW } from '../lib/chrono/fixtures'
 import { DIAL_STATES } from '../lib/chrono/state'
@@ -70,10 +70,10 @@ describe('Dial (spec 3.2, 4.3)', () => {
       const html = dial({ state })
       expect(html, state).toContain(`dial dial-${state} `)
       expect(html, state).toContain(`data-state="${state}"`)
-      expect(html, state).toMatch(
-        new RegExp(`class="${RING[state].replace('/', '\\/')}" data-ring`),
-      )
+      // A price on the face: `pre` is an open market before tip-off (ringClass).
+      expect(html, state).toMatch(new RegExp(`class="${ringClass(state, true)}" data-ring`))
     }
+    expect(dial({ state: 'pre', price: null })).toMatch(/class="stroke-ash-400" data-ring/)
   })
 
   it('hides the needle of a void game even with a price', () => {
@@ -99,7 +99,9 @@ describe('Dial (spec 3.2, 4.3)', () => {
     const html = dial({ ghostPrice: 0.8 })
     expect(needle(html, 'ghost')).toBe('rotate(81 100 100)')
     expect(html).toContain('data-impact')
-    expect(dial({ ghostPrice: 0.8, ghostPending: true })).toContain('opacity-30')
+    expect(dial({ ghostPrice: 0.8, ghostPending: true })).toMatch(
+      /class="stroke-line" data-needle="ghost"/,
+    )
     expect(dial({ ghostPrice: 0.8, ghostShake: true })).toContain('animate-shake')
   })
 
@@ -144,9 +146,9 @@ describe('MiniDial (spec 3.2)', () => {
     expect(html).not.toContain('NaN')
   })
 
-  it('glows lume when you hold a position', () => {
-    expect(mini({ held: true })).toMatch(/fill-enamel-800 stroke-lume-300" data-rim/)
+  it('keeps one rim whatever you hold: yours is the row’s ◆ (review §4.3)', () => {
     expect(mini()).toMatch(/fill-enamel-800 stroke-line" data-rim/)
+    expect(mini()).not.toContain('lume')
   })
 })
 

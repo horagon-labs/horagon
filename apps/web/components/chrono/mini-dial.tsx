@@ -1,17 +1,16 @@
 'use client'
 // The 48 px dial for list rows (spec 3.2): needle and time ring only, no number and no ghost.
-// The row around it carries the words, so the picture stays hidden from screen readers.
+// The row around it carries the words, so the picture stays hidden from screen readers. Your
+// position is the row's ◆, never the rim (light branding review §4.3).
 import { arcPath, priceToAngle } from '../../lib/chrono/geometry'
 import type { DialState } from '../../lib/chrono/state'
-import { needleClass, RING, rimClass, ringDash, ringShare } from './dial-look'
+import { needleClass, rimClass, ringClass, ringDash, ringShare } from './dial-look'
 import { Needle } from './needle'
 
 export function MiniDial(p: {
   price: number | null
   timeLeft: number
   state: DialState
-  /** You hold a position here: the rim glows lume (spec 3.2). */
-  held?: boolean
   className?: string
 }) {
   return (
@@ -25,8 +24,8 @@ export function MiniDial(p: {
         cx={50}
         cy={50}
         r={48}
-        strokeWidth={p.held ? 2.5 : 1}
-        className={`fill-enamel-800 ${p.held ? 'stroke-lume-300' : rimClass(p.state)}`}
+        strokeWidth={1}
+        className={`fill-enamel-800 ${rimClass(p.state)}`}
         data-rim
       />
       <circle cx={50} cy={50} r={42} fill="none" strokeWidth={4} className="stroke-line" />
@@ -35,7 +34,7 @@ export function MiniDial(p: {
         fill="none"
         strokeWidth={4}
         strokeDasharray={ringDash(p.state)}
-        className={RING[p.state]}
+        className={ringClass(p.state, p.price !== null)}
         data-ring
       />
       {p.price !== null && p.state !== 'void' && (

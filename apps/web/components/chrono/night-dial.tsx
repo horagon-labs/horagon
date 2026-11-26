@@ -5,6 +5,7 @@ import { type KeyboardEvent, type MouseEvent, useId, useState } from 'react'
 import { type BoardItem, itemLabel, rowWords } from '../../lib/chrono/board'
 import { arcPath, etClockAngle, polar } from '../../lib/chrono/geometry'
 import { keyStep } from '../../lib/chrono/keys'
+import { isTrading } from '../../lib/chrono/state'
 import {
   labelIds,
   labelSpots,
@@ -22,13 +23,13 @@ const HUB = 33
 const HOURS = Array.from({ length: 12 }, (_, h) => h)
 
 /**
- * Your games glow lume; amber near the close; brass while open; ash once trading stopped, and for
- * a game that started with no market (`trading`, R5c refix).
+ * One meaning for live (light branding review §3.2, §4.4): an open market, before tip-off too,
+ * closing included, is live; a halt is ink; everything else (no market yet, a game that started
+ * with none, trading stopped, a result) is muted. Yours is the ◆ on the label, not the arc.
  */
-function arcClass(item: BoardItem, lit: boolean): string {
-  if (item.held) return 'stroke-lume-300'
-  if (item.state === 'closing' || item.state === 'halted') return 'stroke-amber-400'
-  if (item.trading) return lit ? 'stroke-brass-400' : 'stroke-brass-500'
+function arcClass(item: BoardItem): string {
+  if (item.state === 'halted') return 'stroke-amber-400'
+  if (item.market && isTrading(item.state)) return 'stroke-live'
   return 'stroke-ash-400'
 }
 
@@ -135,9 +136,7 @@ export function NightDial(p: {
                   fill="none"
                   strokeWidth={lit ? 5 : 3.5}
                   strokeDasharray={s.pre ? '2 2.5' : undefined}
-                  className={[arcClass(t.item, lit), s.past && 'opacity-35']
-                    .filter(Boolean)
-                    .join(' ')}
+                  className={[arcClass(t.item), s.past && 'opacity-35'].filter(Boolean).join(' ')}
                   pointerEvents="none"
                 />
                 {/* A full ring pitch wide, so a thumb can hit it (neighbours never overlap). */}
@@ -157,18 +156,22 @@ export function NightDial(p: {
             )
           }),
         )}
-        {spots.map((s) => (
-          <text
-            key={s.id}
-            x={s.x}
-            y={s.y}
-            textAnchor={s.anchor}
-            dominantBaseline="middle"
-            className="fill-ivory-100 font-mono text-[8px]"
-          >
-            {tracks.find((t) => t.item.id === s.id)?.item.game.home}
-          </text>
-        ))}
+        {spots.map((s) => {
+          const item = tracks.find((t) => t.item.id === s.id)?.item
+          return (
+            <text
+              key={s.id}
+              x={s.x}
+              y={s.y}
+              textAnchor={s.anchor}
+              dominantBaseline="middle"
+              className="fill-ivory-100 font-mono text-[8px]"
+            >
+              {item?.held && <tspan className="fill-live">◆ </tspan>}
+              {item?.game.home}
+            </text>
+          )
+        })}
         <circle
           cx={C}
           cy={C}

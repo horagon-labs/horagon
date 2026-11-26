@@ -1,6 +1,7 @@
 'use client'
 // The game-day chip on the header (spec 3.2): open positions and what they are worth now,
-// "◆ 3 · 142.50". The wallet button shows it only once a wallet exists.
+// "◆ 3 · 142.50", the ◆ in live like every mark of yours (light branding review §3.2). The wallet
+// button shows it only once a wallet exists.
 import type { PositionsResponse } from '@horagon/sdk'
 import { yourHour } from '../../lib/chrono/board'
 
@@ -15,7 +16,7 @@ export function YourHour(p: { portfolio: PositionsResponse | undefined; onOpen: 
       aria-label={`${hour.count} open ${noun}, worth ${hour.value} mUSDC`}
       className="min-h-11 rounded-full border border-lume-300/40 px-3 font-mono text-13 text-lume-300 tabular-nums"
     >
-      ◆ {hour.count} · {hour.value}
+      <span className="text-live">◆</span> {hour.count} · {hour.value}
     </button>
   )
 }

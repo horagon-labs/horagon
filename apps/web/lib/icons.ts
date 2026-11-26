@@ -16,10 +16,10 @@ export function iconSize(file: string): IconSize | null {
   return ICON_SIZES.find((px) => iconFile(px) === file) ?? null
 }
 
-/** The brand palette of every home-screen icon: enamel, its face, the brass bezel, a lume needle. */
+/** The brand palette of every home-screen icon: the page, its face, the brass bezel, a live needle. */
 export const ICON_COLORS = {
   bg: COLORS['enamel-950'],
   face: COLORS['enamel-800'],
   ring: COLORS['brass-500'],
-  needle: COLORS['lume-300'],
+  needle: COLORS.live,
 }

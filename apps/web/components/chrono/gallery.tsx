@@ -299,7 +299,6 @@ export function Gallery() {
               price={SAMPLES[state].price}
               timeLeft={SAMPLES[state].timeLeft}
               state={state}
-              held={state === 'live'}
             />
           ))}
         </div>

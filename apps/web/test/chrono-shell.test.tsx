@@ -59,7 +59,7 @@ describe('app shell (spec 2.7, 3.2)', () => {
     expect(html).toContain('data-home-icon="512"')
     expect(html).toContain(`d="${MARK_NEEDLE}"`)
     expect(html).toContain('width="420"')
-    expect(html).toContain(COLORS['lume-300'])
+    expect(html).toContain(`stroke="${COLORS.live}"`)
   })
 
   it('answers 404 for an icon size it does not draw', async () => {
@@ -126,7 +126,7 @@ describe('YourHour (spec 3.2)', () => {
 
   it('shows the open positions and their value now', () => {
     const html = renderToStaticMarkup(<YourHour portfolio={two} onOpen={noop} />)
-    expect(html).toContain('>◆ 2 · 12.90</button>')
+    expect(html).toContain('><span class="text-live">◆</span> 2 · 12.90</button>')
     expect(html).toContain('aria-label="2 open positions, worth 12.90 mUSDC"')
   })
 

@@ -118,10 +118,11 @@ describe('NightDial (spec 3.2, 4.1)', () => {
     expect(html).not.toContain('stroke-amber-400')
   })
 
-  it('draws one arc per segment on its ring and lights your game in lume', () => {
+  it('draws one arc per segment on its ring, open markets live and the rest muted', () => {
     const html = night()
-    expect(html).toMatch(/class="stroke-lume-300 opacity-35"/)
-    expect(html).toMatch(/stroke-dasharray="2 2.5" class="stroke-brass-500"/)
+    expect(html).toMatch(/class="stroke-live opacity-35"/)
+    expect(html).toMatch(/stroke-dasharray="2 2.5" class="stroke-ash-400"/)
+    expect(html).not.toContain('lume')
     expect(html).toMatch(/data-id="nba-401810001" data-ring="1"/)
     expect(html).toContain('data-id="nba-401810004"')
     expect(html).toContain('data-now')
@@ -198,8 +199,10 @@ describe('DialRow (spec 3.2)', () => {
     const rowOf = (g: ReturnType<typeof game>) =>
       renderToStaticMarkup(<DialRow item={boardItem(g, held, NOW)} />)
     // Minutes from end_ts, the game still in play: the time stays.
+    // In its last five minutes it counts down instead (review §10 item 9).
     const closing = game({ markets: [market({ endTs: NOW + 130 })] })
-    expect(rowOf(closing)).toContain('latest 9:10 PM ET')
+    expect(rowOf(closing)).toContain('>closes in 2:10<')
+    expect(rowOf(closing)).not.toContain('latest')
     // Halted at the final buzzer, then proposed: trading is over, and R5 says what comes next.
     for (const status of ['halted', 'proposed'] as const) {
       const html = rowOf(game({ status: 'final', markets: [market({ status })] }))

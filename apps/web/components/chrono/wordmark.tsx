@@ -9,7 +9,7 @@ export function Wordmark() {
         size={20}
         face={COLORS['enamel-800']}
         ring="currentColor"
-        needle={COLORS['lume-300']}
+        needle={COLORS.live}
         className="size-5"
       />
       <span className="text-15 font-semibold tracking-[0.35em]">HORAGON</span>

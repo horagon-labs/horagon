@@ -131,7 +131,7 @@ describe('PositionCard (spec 3.2)', () => {
     expect(html).not.toContain('pays')
   })
 
-  it('lists the winner market only, with a lume diamond for home and brass for away', () => {
+  it('lists the winner market only, with the same live diamond for either side', () => {
     const html = card({
       portfolio: portfolio([
         position(),
@@ -141,7 +141,8 @@ describe('PositionCard (spec 3.2)', () => {
     })
     expect(html).not.toContain('7.00 shares')
     expect(html.match(/<li /g)).toHaveLength(2)
-    expect(html).toMatch(/text-lume-300"[^>]*>\s*◆[\s\S]*text-brass-500"[^>]*>\s*◆/)
+    expect(html.match(/class="text-live">◆</g)).toHaveLength(2)
+    expect(html).not.toMatch(/(?:lume-300|brass-500)"[^>]*>◆/)
   })
 
   it('hides Sell once the market stopped trading, and says when there is nothing', () => {

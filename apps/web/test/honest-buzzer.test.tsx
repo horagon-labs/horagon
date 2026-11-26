@@ -228,7 +228,7 @@ describe('no time left once trading stopped (item 3)', () => {
   it('draws no time ring arc for it', () => {
     const item = boardItem(atBuzzer, undefined, NOW)
     const mini = renderToStaticMarkup(
-      <MiniDial price={item.price} timeLeft={item.timeLeft} state={item.state} held={false} />,
+      <MiniDial price={item.price} timeLeft={item.timeLeft} state={item.state} />,
     )
     expect(mini).toMatch(/<path d=""[^>]*data-ring/)
   })
@@ -411,7 +411,7 @@ describe('a game that started with no market does not trade (refix)', () => {
         .map((m) => m[1] ?? '')
     expect(arcs('nba-none').length).toBeGreaterThan(0)
     for (const c of arcs('nba-none')) expect(c).toMatch(/stroke-ash-400/)
-    expect(arcs('nba-live').some((c) => /stroke-brass-500/.test(c))).toBe(true)
+    expect(arcs('nba-live').some((c) => /stroke-live/.test(c))).toBe(true)
     const track = packTracks([live, none], NOW).tracks.find((t) => t.item.id === 'nba-none')
     expect(track?.to).toBe(NOW)
   })

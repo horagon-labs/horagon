@@ -60,7 +60,7 @@ describe('a halted market under a final game reads closed (R1 ruling)', () => {
       'Trading closed · result pending',
     )
     const mini = renderToStaticMarkup(
-      <MiniDial price={item.price} timeLeft={item.timeLeft} state={item.state} held={false} />,
+      <MiniDial price={item.price} timeLeft={item.timeLeft} state={item.state} />,
     )
     expect(mini).not.toContain('stroke-amber-400')
     expect(mini).not.toContain('stroke-dasharray="3 3"')

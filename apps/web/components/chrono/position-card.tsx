@@ -41,10 +41,8 @@ export function PositionCard(p: PositionCardProps) {
             const down = x.pnlUsdc.startsWith('-')
             return (
               <li key={`${x.market}-${x.side}`} className="flex items-center gap-3 py-2">
-                <span
-                  aria-hidden="true"
-                  className={x.side === 'home' ? 'text-lume-300' : 'text-brass-500'}
-                >
+                {/* Yours, one live ◆ for either side: teams have no colour (review §3.2). */}
+                <span aria-hidden="true" className="text-live">
                   ◆
                 </span>
                 <div className="min-w-0 flex-1 font-mono text-13 tabular-nums">

@@ -12,8 +12,8 @@ import {
   isBeat,
   needleClass,
   priceDigits,
-  RING,
   rimClass,
+  ringClass,
   ringDash,
   ringShare,
 } from './dial-look'
@@ -32,7 +32,7 @@ export interface DialProps {
   state: DialState
   /** Where the price would move after the quoted trade (spec 5.5). */
   ghostPrice?: number | null
-  /** A newer quote is on its way: the ghost dims (spec 5.5). */
+  /** A newer quote is on its way: the ghost turns to the plain rule (spec 5.5, review §3.4). */
   ghostPending?: boolean
   /** SLIPPAGE_EXCEEDED: the ghost shakes (spec 6.1). */
   ghostShake?: boolean
@@ -122,7 +122,7 @@ export function Dial(p: DialProps) {
           strokeWidth={3}
           strokeLinecap="round"
           strokeDasharray={ringDash(p.state)}
-          className={RING[p.state]}
+          className={ringClass(p.state, price !== null)}
           data-ring
         />
         <g className={`stroke-ash-400 ${blink}`}>
@@ -188,9 +188,13 @@ export function Dial(p: DialProps) {
           <Needle
             angle={priceToAngle(ghost)}
             kind="ghost"
-            className={`stroke-lume-300 ${p.ghostPending ? 'opacity-30' : 'opacity-70'} ${
-              p.ghostShake ? 'animate-shake' : ''
-            }`}
+            // Priced: live and whole; a newer quote on its way: the plain rule (review §3.4).
+            className={[
+              p.ghostPending ? 'stroke-line' : 'stroke-live',
+              p.ghostShake && 'animate-shake',
+            ]
+              .filter(Boolean)
+              .join(' ')}
           >
             <line x1={C} y1={C} x2={C} y2={C - 70} strokeWidth={1.5} strokeDasharray="4 3" />
           </Needle>

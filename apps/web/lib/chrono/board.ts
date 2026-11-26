@@ -3,7 +3,7 @@
 import type { Game, MarketSummary, PositionsResponse } from '@horagon/sdk'
 import { formatAmount, parseAmount } from '@horagon/sdk/amount'
 import { effectiveTime } from '@horagon/sdk/math'
-import { isTonight, percent, usdc } from '../format'
+import { countdown, isTonight, percent, usdc } from '../format'
 import { rowSubject, started } from './copy'
 import { timeLeftFraction } from './geometry'
 import {
@@ -116,7 +116,7 @@ export function yourHour(
 /**
  * A row's three right-hand lines (R5, audit section 13): whose chance the number is, the number
  * in percent, and the close. "MEM to win · 62% · latest 10:40 PM ET" while it trades (it closes
- * at the final buzzer, end_ts at the latest, R1); once the final buzzer went, "CHA lost · 74% ·
+ * at the final buzzer, end_ts at the latest, R1), "closes in 2:10" in its last five minutes; once the final buzzer went, "CHA lost · 74% ·
  * result pending"; after the result, "Resolved: MEM won" with no number. A market that stopped
  * names no time. A game that started with no market says so (R5c), never a past opening time.
  */
@@ -129,8 +129,10 @@ export function rowWords(i: BoardItem): { subject: string; value: string; note: 
   const pending = i.game.status === 'final' || i.state === 'proposed' || i.state === 'challenged'
   if (pending) return { subject, value, note: 'result pending' }
   if (!i.market) return { subject, value, note: `opens ${etClock(i.interval.start)}` }
-  const latest = `latest ${etClock(i.interval.end)}`
-  if (isTrading(i.state)) return { subject, value, note: latest }
+  // The last five minutes count down, in the dial's own words (light branding review §10 item 9).
+  if (i.state === 'closing')
+    return { subject, value, note: `closes in ${countdown(i.secsLeft ?? 0, 0)}` }
+  if (isTrading(i.state)) return { subject, value, note: `latest ${etClock(i.interval.end)}` }
   return { subject, value, note: i.state === 'halted' ? 'trading halted' : 'trading closed' }
 }
 

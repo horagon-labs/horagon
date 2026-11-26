@@ -6,6 +6,9 @@ import { cents } from '../format'
 import type { Run } from './runs'
 import { COLORS } from './tokens'
 
+/** The market line: live, 2 px, the one solid line (light branding review §4.6). */
+export const MARKET_LINE = { color: COLORS.live, lineWidth: 2 } as const
+
 /** Below this distance from 0 or 1, a chart price is float noise from the axis arithmetic. */
 const NOISE = 1e-9
 

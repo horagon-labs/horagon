@@ -31,7 +31,7 @@ export function DialRow(p: {
       onBlur={() => p.onHover?.(null)}
       className="flex min-h-16 items-center gap-3 rounded-card border border-brass-500/15 px-3 py-2 hover:bg-enamel-800 data-[lit=true]:bg-enamel-800"
     >
-      <MiniDial price={item.price} timeLeft={item.timeLeft} state={item.state} held={item.held} />
+      <MiniDial price={item.price} timeLeft={item.timeLeft} state={item.state} />
       <span className="min-w-0 flex-1">
         <span className="block truncate text-15 text-ivory-100">
           {g.away} @ {g.home}
@@ -53,7 +53,8 @@ export function DialRow(p: {
         )}
         {words.note && <span className="block font-mono text-12 text-ash-400">{words.note}</span>}
       </span>
-      {item.held && <span className="text-15 text-lume-300">◆</span>}
+      {/* Yours: a live ◆, told from the live needle by its shape (review §3.2 row 15). */}
+      {item.held && <span className="text-15 text-live">◆</span>}
     </Link>
   )
 }

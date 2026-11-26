@@ -141,8 +141,9 @@ describe('CrownPanel (spec 3.2, 5.5)', () => {
     expect(html).toContain('aria-valuenow="25"')
   })
 
-  it('dims the ghost while the next quote loads', () => {
-    expect(panel({ quotePending: true })).toContain('opacity-30')
+  it('turns the ghost to the plain rule while the next quote loads, and live once priced', () => {
+    expect(panel({ quotePending: true })).toMatch(/class="stroke-line" data-needle="ghost"/)
+    expect(panel()).toMatch(/class="stroke-live" data-needle="ghost"/)
   })
 
   it('sells a share of the position with percentage presets', () => {

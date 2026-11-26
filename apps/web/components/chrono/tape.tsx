@@ -1,6 +1,6 @@
 'use client'
-// The Tape (spec 3.2): lightweight-charts 5.3.0 in Chronometer colors. Market line lume, model
-// line brass, a dashed line where each quarter starts (a series primitive, the v5 plugin API),
+// The Tape (spec 3.2): lightweight-charts 5.3.0 in Chronometer colors. Market line live, model
+// line ink, a dashed line where each quarter starts (a series primitive, the v5 plugin API),
 // run markers from runs.ts (createSeriesMarkers), and the time axis in ET (spec 5.4). Its
 // numbers are in JetBrains Mono, like every number on the page.
 import type { GameHistory } from '@horagon/sdk'
@@ -22,6 +22,7 @@ import { useEffect, useRef } from 'react'
 import { chartSeries, type Point } from '../../lib/chart'
 import { findRuns } from '../../lib/chrono/runs'
 import {
+  MARKET_LINE,
   type PeriodStart,
   periodStarts,
   runMarkers,
@@ -151,7 +152,7 @@ export function Tape(props: {
       rightPriceScale: { borderColor: COLORS.line, scaleMargins: { top: 0.05, bottom: 0.05 } },
     })
     const line = { priceFormat, autoscaleInfoProvider: fullRange }
-    const market = chart.addSeries(LineSeries, { ...line, color: COLORS['lume-300'], lineWidth: 2 })
+    const market = chart.addSeries(LineSeries, { ...line, ...MARKET_LINE })
     const model = chart.addSeries(LineSeries, {
       ...line,
       color: COLORS['brass-500'],
@@ -193,7 +194,7 @@ export function Tape(props: {
     <figure>
       <div ref={box} className="h-56 w-full" />
       <figcaption className="mt-1 flex flex-wrap gap-x-4 font-mono text-12 text-ash-400">
-        <span className="text-lume-300">━ Market ({props.home} to win)</span>
+        <span className="text-live">━ Market ({props.home} to win)</span>
         <span className="text-brass-500">┅ Model</span>
         <span>Times in ET</span>
       </figcaption>

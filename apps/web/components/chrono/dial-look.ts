@@ -2,10 +2,15 @@
 import type { Game, GameHistory } from '@horagon/sdk'
 import { NO_MARKET, started } from '../../lib/chrono/copy'
 import type { Run } from '../../lib/chrono/runs'
-import type { DialState } from '../../lib/chrono/state'
+import { type DialState, isTrading } from '../../lib/chrono/state'
 import { cents, countdown, gameClock } from '../../lib/format'
 
-/** The time ring: lume while live, amber near the close or halted, ash otherwise. */
+/**
+ * The time ring (light branding review §4.2): live while the market is open, closing included
+ * (width, the blinking ticks and "closes in" tell it apart); ink and hatched while halted; muted
+ * once trading stopped. `pre` here is the face with no market; one with a market reads live
+ * through `ringClass`.
+ */
 export const RING: Record<DialState, string> = {
   resolved: 'stroke-ash-400',
   challenged: 'stroke-red-400',
@@ -13,8 +18,8 @@ export const RING: Record<DialState, string> = {
   void: 'stroke-ash-400/40',
   halted: 'stroke-amber-400',
   closed: 'stroke-ash-400',
-  closing: 'stroke-amber-400',
-  live: 'stroke-lume-300',
+  closing: 'stroke-live',
+  live: 'stroke-live',
   pre: 'stroke-ash-400',
 }
 
@@ -34,9 +39,20 @@ export const ringDash = (state: DialState): string | undefined =>
 export const rimClass = (state: DialState): string =>
   state === 'challenged' ? 'stroke-red-400' : 'stroke-line'
 
-/** The needle's color: lume while it can move, ash before tip-off and once trading stopped. */
+/**
+ * The ring's color on a face: `open` is "this face has a price", and a market opens 60 min before
+ * tip-off (the keeper creates it then), so `pre` with a price is an open market and reads live;
+ * `pre` with none waits, muted (review §3.2). Every other state reads its RING entry.
+ */
+export const ringClass = (state: DialState, open: boolean): string =>
+  state === 'pre' ? (open ? 'stroke-live' : 'stroke-ash-400') : RING[state]
+
+/**
+ * The needle's color: live while the market trades, before tip-off too (a `pre` needle is drawn
+ * only with a market, `needlePrice`), muted once trading stopped.
+ */
 export const needleClass = (state: DialState): string =>
-  state === 'live' || state === 'closing' ? 'stroke-lume-300' : 'stroke-ash-400'
+  isTrading(state) ? 'stroke-live' : 'stroke-ash-400'
 
 /** The big number: whole cents with honest edges, or an em dash for no price, never NaN. */
 export const priceDigits = (price: number | null): string =>
