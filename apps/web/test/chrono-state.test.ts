@@ -51,9 +51,15 @@ describe('deriveDialState: the table of spec 4.3, in order', () => {
     expect(state('canceled', market({ status: 'challenged' }))).toBe('challenged')
   })
 
-  it('row 5: halted', () => {
+  it('row 5: halted while the game is on the court', () => {
     expect(state('live', market({ status: 'halted' }))).toBe('halted')
     expect(state('live', market({ status: 'halted' }), END + 50)).toBe('halted')
+    expect(state('scheduled', market({ status: 'halted' }))).toBe('halted')
+  })
+
+  it('row 5 at the final buzzer (R1): a halt under a final game is the normal close', () => {
+    expect(state('final', market({ status: 'halted' }))).toBe('closed')
+    expect(state('final', market({ status: 'halted' }), END + 50)).toBe('closed')
   })
 
   it('row 6: open at or after end_ts is closed', () => {
@@ -198,9 +204,9 @@ describe('dialLabel (spec 2.6, R5)', () => {
 
   it('never says the losing side wins once the game is over (audit finding 2)', () => {
     const lost = dialLabel({ ...base, game: final(105, 107), state: 'closed', price: 0.74 })
-    expect(lost).toBe(
-      'Final, CLE lost, result pending, 74%, model 74%, trading closed, result pending',
-    )
+    // "result pending" once: the caption says it (R5 review finding 5).
+    expect(lost).toBe('Final, CLE lost, result pending, 74%, model 74%, trading closed')
+    expect(lost.match(/result pending/g)).toHaveLength(1)
     expect(lost).not.toMatch(/CLE (wins|to win)/)
   })
 

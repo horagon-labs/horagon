@@ -161,6 +161,7 @@ export function useTrade(game: GameDetail, market: MarketSummary, opts: TradeOpt
   })
   const quoted = useDebounced(check.quote ? amount.trim() : null, QUOTE_DEBOUNCE_MS)
   const key = quoteKey(market.pubkey, side, action, quoted)
+    gameStatus: game.status,
   const poll = usePoll(
     key,
     async () => ({

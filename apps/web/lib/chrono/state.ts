@@ -31,6 +31,14 @@ export const DIAL_STATES: readonly DialState[] = [
 /** Row 7: five minutes or less before `end_ts`. */
 export const CLOSING_SECS = 300
 
+/**
+ * The market still trades: before tip-off, live, or in its last minutes before end_ts. It closes
+ * at the final buzzer (R1), end_ts at the latest. Every other state is after trading: closed or
+ * halted (at the buzzer too), a result proposed, under review or final, or a void game.
+ */
+export const isTrading = (state: DialState): boolean =>
+  state === 'pre' || state === 'live' || state === 'closing'
+
 type GameFields = Pick<Game, 'status'>
 type MarketFields = Pick<MarketSummary, 'status' | 'endTs' | 'priceTs'>
 
@@ -38,6 +46,10 @@ type MarketFields = Pick<MarketSummary, 'status' | 'endTs' | 'priceTs'>
  * Rows 1-3 (a result on the market) come before row 4 (a void game) on purpose: a game
  * postponed for more than 7 days resolves NO (the keeper's postponedResolveSecs), and whoever
  * holds the winning side must still see Claim all.
+ *
+ * Row 5 and the final buzzer (R1): the keeper halts a market on the first Final read, so a halt
+ * under a final game is the normal close and reads as closed, with the final caption. Only a
+ * halt while the game is still on the court is the amber "Trading halted".
  */
 export function deriveDialState(
   game: GameFields,
@@ -50,7 +62,7 @@ export function deriveDialState(
   if (game.status === 'postponed' || game.status === 'canceled') return 'void'
   // Row 10: no market yet; it opens 60 min before tip-off.
   if (!market) return 'pre'
-  if (market.status === 'halted') return 'halted'
+  if (market.status === 'halted') return game.status === 'final' ? 'closed' : 'halted'
   const now = effectiveTime(nowSecs, market.priceTs ?? 0)
   if (now >= market.endTs) return 'closed'
   if (market.endTs - now <= CLOSING_SECS) return 'closing'
@@ -91,7 +103,8 @@ export interface DialLabelInput {
   secsLeft: number | null
 }
 
-function stateWords(i: DialLabelInput): string {
+/** `pendingSaid`: the caption already says "result pending" (after the final buzzer). */
+function stateWords(i: DialLabelInput, pendingSaid: boolean): string {
   switch (i.state) {
     case 'resolved':
       return 'result final'
@@ -104,7 +117,7 @@ function stateWords(i: DialLabelInput): string {
     case 'halted':
       return 'trading halted'
     case 'closed':
-      return 'trading closed, result pending'
+      return pendingSaid ? 'trading closed' : 'trading closed, result pending'
     default:
       if (i.secsLeft === null) return 'market opens 60 min before tip-off'
       // An open market closes at the final buzzer; in its last 5 min before end_ts, at end_ts.
@@ -126,6 +139,6 @@ export function dialLabel(i: DialLabelInput): string {
     parts.push(i.price === null ? 'no price yet' : percent(i.price))
   }
   if (i.modelProb !== null) parts.push(`model ${percent(i.modelProb)}`)
-  parts.push(stateWords(i))
+  parts.push(stateWords(i, caption.endsWith('result pending')))
   return parts.join(', ')
 }

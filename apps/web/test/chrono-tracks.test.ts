@@ -32,10 +32,10 @@ describe('gameInterval (spec 3.1)', () => {
     })
   })
 
-  it('estimates the close as tip-off + 2 h 10 min before a market exists', () => {
+  it('estimates the close as tip-off + 3 h before a market exists, the keeper’s end_ts (R1)', () => {
     const iv = gameInterval(game(), undefined)
     expect(iv.end - iv.tip).toBe(EST_LENGTH_SECS)
-    expect(EST_LENGTH_SECS).toBe(7_800)
+    expect(EST_LENGTH_SECS).toBe(10_800)
   })
 })
 
@@ -116,7 +116,7 @@ describe('segments', () => {
   it('leaves a game that has not opened yet whole and ahead of the hand', () => {
     expect(segments(trackOf('nba-401810004'), NOW)).toEqual([
       { from: at('2026-11-25T02:30:00Z'), to: at('2026-11-25T03:30:00Z'), pre: true, past: false },
-      { from: at('2026-11-25T03:30:00Z'), to: at('2026-11-25T05:40:00Z'), pre: false, past: false },
+      { from: at('2026-11-25T03:30:00Z'), to: at('2026-11-25T06:30:00Z'), pre: false, past: false },
     ])
   })
 
@@ -160,6 +160,40 @@ describe('labels (spec 3.1)', () => {
       'nba-401810002',
       'nba-401810003',
     ])
+  })
+
+  it('never gives the centre to a game that stopped trading while another trades (R1)', () => {
+    // BOS @ MIL closes soonest; halted at the final buzzer it reads closed and steps aside.
+    const buzzer = evening().map((g) =>
+      g.id === 'nba-401810003'
+        ? {
+            ...g,
+            status: 'final' as const,
+            markets: g.markets.map((m) => ({ ...m, status: 'halted' as const })),
+          }
+        : g,
+    )
+    const stopped = buzzer.map((g) => boardItem(g, undefined, NOW))
+    expect(stopped.find((i) => i.id === 'nba-401810003')?.state).toBe('closed')
+    const tracks = packTracks(stopped, NOW).tracks
+    const opts = { selectedId: null, hoverId: null, now: NOW }
+    expect(labelIds(tracks, opts)).toEqual(['nba-401810001'])
+    for (const state of [
+      'closed',
+      'halted',
+      'proposed',
+      'challenged',
+      'resolved',
+      'void',
+    ] as const) {
+      const one = items().map((i) => (i.id === 'nba-401810003' ? { ...i, state } : i))
+      expect(labelIds(packTracks(one, NOW).tracks, opts), state).toEqual(['nba-401810001'])
+    }
+    // The arc itself still runs to end_ts: the summary has no halt time.
+    expect(tracks.find((t) => t.item.id === 'nba-401810003')?.to).toBe(NOW + 130)
+    // With nothing trading, the soonest end_ts ahead still holds the centre.
+    const none = items().map((i) => ({ ...i, state: 'closed' as const }))
+    expect(labelIds(packTracks(none, NOW).tracks, opts)).toEqual(['nba-401810003'])
   })
 
   it('ignores ids that have no arc on the dial', () => {

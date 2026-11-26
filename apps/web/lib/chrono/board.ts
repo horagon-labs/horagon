@@ -11,7 +11,14 @@ import {
 import { isTonight, percent, usdc } from '../format'
 import { rowSubject } from './copy'
 import { timeLeftFraction } from './geometry'
-import { type DialState, deriveDialState, dialLabel, needlePrice, secsToClose } from './state'
+import {
+  type DialState,
+  deriveDialState,
+  dialLabel,
+  isTrading,
+  needlePrice,
+  secsToClose,
+} from './state'
 import { etClock, etDay, etDayLabel } from './time'
 import { gameInterval, type Interval } from './tracks'
 
@@ -99,9 +106,6 @@ export function yourHour(
   return { count: open.length, value: usdc(formatAmount(value)) }
 }
 
-/** A market in these states still trades: it closes at the final buzzer, at the latest at end_ts (R1). */
-const TRADING: readonly DialState[] = ['pre', 'live', 'closing']
-
 /**
  * A row's three right-hand lines (R5, audit section 13): whose chance the number is, the number
  * in percent, and the close. "MEM to win · 62% · latest 10:40 PM ET" while it trades (it closes
@@ -118,7 +122,7 @@ export function rowWords(i: BoardItem): { subject: string; value: string; note: 
   if (pending) return { subject, value, note: 'result pending' }
   if (!i.market) return { subject, value, note: `opens ${etClock(i.interval.start)}` }
   const latest = `latest ${etClock(i.interval.end)}`
-  if (TRADING.includes(i.state)) return { subject, value, note: latest }
+  if (isTrading(i.state)) return { subject, value, note: latest }
   return { subject, value, note: i.state === 'halted' ? 'trading halted' : 'trading closed' }
 }
 

@@ -1,6 +1,6 @@
 // What the trade button may do right now, and why not. The API and the program enforce all
 // of this again; the form only saves a round trip and says it in words.
-import { type MarketStatus, parseAmount, type TradeAction } from '@horagon/sdk'
+import { type GameStatus, type MarketStatus, parseAmount, type TradeAction } from '@horagon/sdk'
 
 export interface TradeFormInput {
   action: TradeAction
@@ -10,6 +10,8 @@ export interface TradeFormInput {
   /** Shares held on the chosen side; undefined for none. */
   shares: string | undefined
   marketStatus: MarketStatus
+  /** The game's status: a halt under a final game is the close at the final buzzer (R1). */
+  gameStatus?: GameStatus
   endTs: number
   nowSecs: number
 }
@@ -26,6 +28,9 @@ export interface TradeCheck {
 const AMOUNT = /^(0|[1-9]\d{0,11})(\.\d{1,6})?$/
 
 export function checkTrade(i: TradeFormInput): TradeCheck {
+  if (i.marketStatus === 'halted' && i.gameStatus === 'final') {
+    return { ok: false, quote: false, reason: 'Trading closed at the final buzzer.' }
+  }
   if (i.marketStatus === 'halted') {
     return { ok: false, quote: false, reason: 'Trading is halted while the result is checked.' }
   }

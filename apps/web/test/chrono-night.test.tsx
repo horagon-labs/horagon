@@ -100,6 +100,24 @@ describe('NightDial (spec 3.2, 4.1)', () => {
     expect(html).toContain('>MIL to win<')
   })
 
+  it('passes over a game halted at the final buzzer for one that still trades (R1)', () => {
+    const buzzer = evening().map((g) =>
+      g.id === 'nba-401810003'
+        ? {
+            ...g,
+            status: 'final' as const,
+            markets: [market({ ...g.markets[0], status: 'halted' })],
+          }
+        : g,
+    )
+    const html = night({ items: buzzer.map((g) => boardItem(g, undefined, NOW)) })
+    expect(html).toContain('>MEM @ CLE<')
+    expect(html).toContain('>CLE to win<')
+    expect(html).not.toContain('>BOS @ MIL<')
+    // Its arc reads closed in ash, never the amber of an emergency halt.
+    expect(html).not.toContain('stroke-amber-400')
+  })
+
   it('draws one arc per segment on its ring and lights your game in lume', () => {
     const html = night()
     expect(html).toMatch(/class="stroke-lume-300 opacity-35"/)

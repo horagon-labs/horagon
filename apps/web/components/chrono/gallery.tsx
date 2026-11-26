@@ -155,6 +155,7 @@ function useDemoTrade(): Trade & { sent: number } {
       balance: DEMO_BALANCE,
       shares: held?.shares,
       marketStatus: m.status,
+      gameStatus: g.status,
       endTs: m.endTs,
       nowSecs: NOW,
     }),

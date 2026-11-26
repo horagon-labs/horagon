@@ -2,15 +2,16 @@
 // at most 8 rings, cut into its pre-open, past and future parts, and the few that get a label.
 import type { Game, MarketSummary } from '@horagon/sdk'
 import { nightAngle, polar } from './geometry'
+import { type DialState, isTrading } from './state'
 
 /** The market opens 60 min before tip-off (as the game cards said). */
 export const PRE_OPEN_SECS = 3_600
 /**
- * The arc's close before a market exists: tip-off + 2 h 10 min, the end_ts rule until
- * 2026-11-26. The keeper now sets end_ts = tip-off + 3 h and closes at the final buzzer before
- * that; this estimate is part of the dial geometry and stays as drawn.
+ * The arc's close before a market exists: tip-off + 3 h, the end_ts the keeper sets (its
+ * endOffsetSecs, 10,800 since R1), so the arc does not jump when the market is created. The
+ * market closes at the final buzzer before that.
  */
-export const EST_LENGTH_SECS = 7_800
+export const EST_LENGTH_SECS = 10_800
 /** The face shows [now - 2 h, now + 10 h]: exactly 12 hours, one turn. */
 export const WINDOW_BEFORE_SECS = 7_200
 export const WINDOW_AFTER_SECS = 36_000
@@ -48,6 +49,8 @@ export const nightWindow = (now: number): NightWindow => ({
 export interface Placeable {
   id: string
   interval: Interval
+  /** The game's dial state, when known: a game that stopped trading never takes the centre. */
+  state?: DialState
 }
 
 export interface Track<T extends Placeable> {
@@ -128,16 +131,22 @@ export const segmentAngles = (s: Pick<Segment, 'from' | 'to'>, now: number) => (
 
 /**
  * Labels stay few (spec 3.1): the selected arc, the hovered or focused one, and the one that
- * closes soonest, in that order, without repeats.
+ * closes soonest, in that order, without repeats. The first is the Night dial's centre.
+ *
+ * "Closes soonest" counts only games that still trade (`isTrading`): a game halted at the final
+ * buzzer, or closed, or waiting for or holding its result, never holds the centre while another
+ * still trades; with none trading, the soonest end_ts ahead stands. A stopped game's arc still
+ * runs to its end_ts: the summary carries no halt time to end it at.
  */
 export function labelIds(
   tracks: readonly Track<Placeable>[],
   opts: { selectedId: string | null; hoverId: string | null; now: number },
 ): string[] {
   const placed = new Set(tracks.map((t) => t.item.id))
-  const next = tracks
+  const ahead = tracks
     .filter((t) => t.item.interval.end > opts.now)
-    .sort((a, b) => a.item.interval.end - b.item.interval.end)[0]
+    .sort((a, b) => a.item.interval.end - b.item.interval.end)
+  const next = ahead.find((t) => t.item.state === undefined || isTrading(t.item.state)) ?? ahead[0]
   const ids = [opts.selectedId, opts.hoverId, next?.item.id ?? null]
   return [...new Set(ids.filter((id): id is string => id !== null && placed.has(id)))]
 }

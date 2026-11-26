@@ -27,8 +27,19 @@ describe('checkTrade', () => {
       quote: false,
       reason: /halted/,
     })
+    expect(check({ marketStatus: 'halted', gameStatus: 'live' })).toMatchObject({
+      reason: /halted/,
+    })
     expect(check({ marketStatus: 'proposed' })).toMatchObject({ ok: false, reason: /closed/ })
     expect(check({ nowSecs: 2_000 })).toMatchObject({ ok: false, quote: false, reason: /closed/ })
+  })
+
+  it('says a halt under a final game is the close at the final buzzer (R1), not a halt', () => {
+    expect(check({ marketStatus: 'halted', gameStatus: 'final' })).toEqual({
+      ok: false,
+      quote: false,
+      reason: 'Trading closed at the final buzzer.',
+    })
   })
 
   it('rejects amounts that are not plain decimals with at most 6 places', () => {
