@@ -370,6 +370,8 @@ describe('indexOnce does not skip past a transaction it could not read', () => {
   let order: string[]
   let failed: Set<string>
   let shortBatch: boolean
+  /** Answer each batch in reverse, as devnet may (JSON-RPC lets a node answer in any order). */
+  let reversedBatch: boolean
   let signatureCalls: number
   let requested: string[]
   let sent: string[]
@@ -410,7 +412,8 @@ describe('indexOnce does not skip past a transaction it could not read', () => {
       getTransactions: async (sigs: string[]) => {
         requested.push(...sigs)
         const txs = sigs.map((x) => chain.get(x) ?? null)
-        return shortBatch ? txs.slice(0, 1) : txs
+        if (shortBatch) return txs.slice(0, 1)
+        return reversedBatch ? txs.reverse() : txs
       },
       getMultipleAccountsInfo: async (keys: PublicKey[]) =>
         keys.map((k) => accountFor(k.toBase58())),
@@ -482,6 +485,7 @@ describe('indexOnce does not skip past a transaction it could not read', () => {
     order = ['s1', 's2', 's3']
     failed = new Set()
     shortBatch = false
+    reversedBatch = false
     signatureCalls = 0
     requested = []
     sent = []
@@ -689,7 +693,20 @@ describe('indexOnce does not skip past a transaction it could not read', () => {
     expect(skip[0]?.[1]).toContain('instruction 0')
   })
 
-  it('stops on a short batch, a missing meta, and a transaction that is not the one asked for', async () => {
+  it('reads a batch answered out of order whole, in signature order', async () => {
+    chain = new Map([
+      ['s1', readable('s1', 1, 1_795_000_001)],
+      ['s2', readable('s2', 2, 1_795_000_002)],
+      ['s3', readable('s3', 3, 1_795_000_003)],
+    ])
+    reversedBatch = true
+    await indexOnce(deps())
+    expect(requested).toEqual(['s1', 's2', 's3'])
+    expect(await sigsIndexed()).toEqual(['s1', 's2', 's3'])
+    expect(await cursor()).toBe('s3')
+  })
+
+  it('stops at the first signature a short batch, a missing meta, or a foreign answer leaves unread', async () => {
     chain = new Map([
       ['s1', readable('s1', 1, 1_795_000_001)],
       ['s2', readable('s2', 2, 1_795_000_002)],
@@ -697,8 +714,8 @@ describe('indexOnce does not skip past a transaction it could not read', () => {
     ])
     shortBatch = true
     await indexOnce(deps())
-    expect(await sigsIndexed()).toEqual([])
-    expect(await cursor()).toBeNull()
+    expect(await sigsIndexed()).toEqual(['s1'])
+    expect(await cursor()).toBe('s1')
     shortBatch = false
     await indexOnce(deps())
     expect(await cursor()).toBe('s3')

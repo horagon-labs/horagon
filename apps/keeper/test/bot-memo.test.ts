@@ -192,10 +192,13 @@ describe('backfillBotMemo', () => {
   let h: DbHandle
   let chain: Map<string, VersionedTransactionResponse | null>
   let calls: string[][]
+  /** Answer each batch in reverse, as devnet may (JSON-RPC lets a node answer in any order). */
+  let reversed: boolean
   beforeEach(async () => {
     h = await createTestDb()
     chain = new Map()
     calls = []
+    reversed = false
   })
   afterEach(async () => {
     await h.close()
@@ -224,7 +227,8 @@ describe('backfillBotMemo', () => {
     db: h.db,
     getTransactions: async (sigs: string[]) => {
       calls.push(sigs)
-      return sigs.map((s) => chain.get(s) ?? null)
+      const txs = sigs.map((s) => chain.get(s) ?? null)
+      return reversed ? txs.reverse() : txs
     },
   })
   const memos = async () =>
@@ -283,13 +287,28 @@ describe('backfillBotMemo', () => {
     expect(await backfillBotMemo(deps())).toEqual({ read: 2, bots: 0, left: 0 })
   })
 
-  it('refuses a response for another transaction', async () => {
+  it('reads a response for another transaction as not available', async () => {
     await insertTrades(h.db, [row('s1', 2, 1)])
     chain.set('s1', response(swapMessage(), 'other'))
     await expect(backfillBotMemo(deps())).rejects.toThrow(
-      'the RPC returned another transaction for s1',
+      'transaction s1 is not available from the RPC; run again later',
     )
     expect(await memos()).toEqual([['s1', 2, null]])
+  })
+
+  it('pairs a batch answered out of order with its signatures', async () => {
+    await insertTrades(h.db, [row('s1', 2, 1), row('s2', 2, 2), row('s3', 2, 3)])
+    onChain('s1', true)
+    onChain('s2', false)
+    onChain('s3', false)
+    reversed = true
+    expect(await backfillBotMemo(deps())).toEqual({ read: 3, bots: 1, left: 0 })
+    expect(calls).toEqual([['s1', 's2', 's3']])
+    expect(await memos()).toEqual([
+      ['s1', 2, true],
+      ['s2', 2, false],
+      ['s3', 2, false],
+    ])
   })
 
   it('reads in batches of the size it is given, logging each', async () => {

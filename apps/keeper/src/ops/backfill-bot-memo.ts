@@ -9,11 +9,11 @@ import {
   tradeSigsWithoutBotMemo,
 } from '@horagon/db'
 import type { VersionedTransactionResponse } from '@solana/web3.js'
-import { hasBotMemo } from '../indexer'
+import { hasBotMemo, inRequestOrder } from '../indexer'
 
 export interface BackfillDeps {
   db: Db
-  /** One response per signature, in order; null when the node does not have it. */
+  /** The batch answer, in any order; a signature with no matching response is not available. */
   getTransactions(sigs: string[]): Promise<Array<VersionedTransactionResponse | null>>
   /** Progress, one line per batch. */
   log?: (line: string) => void
@@ -35,13 +35,11 @@ export async function backfillBotMemo(deps: BackfillDeps, batch = 50): Promise<B
   for (;;) {
     const sigs = await tradeSigsWithoutBotMemo(deps.db, batch)
     if (sigs.length === 0) break
-    const txs = await deps.getTransactions(sigs)
+    // Paired by signature: the RPC may answer the batch in any order.
+    const txs = inRequestOrder(sigs, await deps.getTransactions(sigs))
     for (const [i, sig] of sigs.entries()) {
       const tx = txs[i]
       if (!tx) throw new Error(`transaction ${sig} is not available from the RPC; run again later`)
-      if (tx.transaction.signatures[0] !== sig) {
-        throw new Error(`the RPC returned another transaction for ${sig}`)
-      }
       const memo = hasBotMemo(tx)
       // Zero rows set would list the same signature again forever.
       if ((await setTradeBotMemo(deps.db, sig, memo)) === 0) {
