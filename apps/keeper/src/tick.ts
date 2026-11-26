@@ -1,12 +1,16 @@
 // One keeper tick (spec 7, every 5 s): read the feed, refresh live game rows and the model
 // probability, read every GameMarket on chain, plan, then perform each action. An action that
-// fails is logged and retried on a later tick; it never stops the others.
+// fails is logged and retried on a later tick; it never stops the others. With auto-propose
+// (R6), the attestor also proposes checked Final results, asks balldontlie for its own final, and
+// pages a guardian whenever the two sources disagree or no second source answered.
 import {
   type Db,
   type GameRow,
   type GameWithMarkets,
   getDraft,
   getEvidence,
+  getHeartbeat,
+  heartbeat,
   insertSnapshot,
   listGames,
   logOps,
@@ -26,17 +30,52 @@ import {
   type HoragonProgram,
   marketIdFor,
   marketName,
+  outcomeFor,
+  parseResolutionEvidence,
   winProbability,
 } from '@horagon/sdk'
 import { toHex } from '@horagon/sdk/evidence'
 import type { Keypair } from '@solana/web3.js'
 import type { Logger } from 'pino'
+import { z } from 'zod'
 import type { Alerter } from './alerts'
+import type { AutoProposeConfig } from './config'
 import { ProgramFailure, type TxSender } from './executor'
 import { espnScoreboardUrl } from './feeds/espn'
 import { type Feed, type FeedGame, gameIdOf } from './feeds/types'
-import { type Action, type GameState, plan, type SeedPolicy, type Timings } from './planner'
+import {
+  type Action,
+  type GameState,
+  plan,
+  type Score,
+  type SecondSourceState,
+  type SeedPolicy,
+  type Timings,
+} from './planner'
+import { type ConfirmSource, type ProposeOutcome, proposeResult } from './propose'
+import {
+  BdlError,
+  bdlGameUrl,
+  type DateGames,
+  findGame,
+  secondGame,
+} from './second-source/balldontlie'
+import { type Verdict, verdictOf } from './second-source/check'
 import { isMissingAccount } from './treasury'
+
+/** A second source: one ET date's games, or null when that date is not due yet. */
+export interface SecondSource {
+  games(etDate: string, now: number): Promise<DateGames | null>
+}
+
+/** Auto-propose (R6), on or dry. Absent from KeeperDeps, the keeper never proposes. */
+export interface AutoProposeDeps {
+  mode: 'on' | 'dry'
+  /** `evidenceUri` of the game, from HORAGON_PUBLIC_URL. */
+  evidenceUri: (gameId: string) => string
+  /** balldontlie; null without BALLDONTLIE_API_KEY (the verdict is then `off`). */
+  secondSource: SecondSource | null
+}
 
 export interface KeeperDeps {
   db: Db
@@ -55,7 +94,37 @@ export interface KeeperDeps {
   priority: { normal: number; halt: number }
   /** ESPN is read at most this often (spec 6.1: every 15 s). */
   feedEverySecs?: number
+  /** Auto-propose (R6); absent means off. */
+  autoPropose?: AutoProposeDeps
 }
+
+/** One second-source check of a game's draft, kept in memory like `Keeper.observed`. */
+interface Check {
+  verdict: Verdict
+  /** Unix seconds since this verdict holds for this draft score. */
+  since: number
+  /** The draft score it was checked against (home-away). */
+  draft: Score
+  /** The second source's final totals, when it had them. */
+  second: Score | null
+  /** balldontlie's game id: `sources[1]` of a checked proposal. */
+  bdlId: number | null
+  /** When that answer was read (unix seconds). */
+  fetchedAt: number
+}
+
+const sameScore = (a: Score, b: Score) => a.home === b.home && a.away === b.away
+
+/** `keeper_heartbeats.process` of a game's held result, which a restart must not forget. */
+export const heldRecordKey = (gameId: string) => `second-source:${gameId}`
+
+const ScoreSchema = z.object({ home: z.number().int(), away: z.number().int() })
+/** The held result: balldontlie's contradicting final, or null once it agreed with the draft. */
+const HeldRecordSchema = z.object({
+  draft: ScoreSchema,
+  second: ScoreSchema.nullable(),
+  since: z.number(),
+})
 
 interface Observed {
   game: FeedGame
@@ -113,7 +182,18 @@ export function draftText(
   a: { status: 'final' | 'postponed'; homeScore: number; awayScore: number },
   endTs: number | null,
   now: number,
+  /**
+   * Set when the keeper will propose this draft itself (auto-propose on, a Final, round 0, NBA):
+   * from when (max(Final held 60 s, end_ts)) and with which second source.
+   */
+  auto: { from: number; secondSource: 'balldontlie' | 'off' } | null = null,
 ): string {
+  if (auto && a.status === 'final') {
+    return (
+      `${g.away}@${g.home} Final ${a.awayScore}-${a.homeScore} (ESPN). Auto-propose from ` +
+      `${utcAndEt(auto.from)}, second source ${auto.secondSource}. Nothing to do unless paged.`
+    )
+  }
   if (a.status === 'postponed') {
     return (
       `${g.away}@${g.home} was not played within 7 days. Resolve NO:\n` +
@@ -128,6 +208,118 @@ export function draftText(
     `${g.away}@${g.home} Final ${a.awayScore}-${a.homeScore} (ESPN). ${when}\n` +
     `horagon-ops propose ${g.id} --box-score <url> --score ${a.homeScore}-${a.awayScore}`
   )
+}
+
+/** basketball-reference spells three home teams its own way. */
+const BOX_SCORE_CODES: Readonly<Record<string, string>> = { BKN: 'BRK', CHA: 'CHO', PHX: 'PHO' }
+
+/** The box score a guardian checks by hand: a link for a person, never fetched by the keeper. */
+export function boxScoreLink(g: Pick<GameRow, 'gameDate' | 'home'>): string {
+  const home = BOX_SCORE_CODES[g.home] ?? g.home
+  return `https://www.basketball-reference.com/boxscores/${g.gameDate.replaceAll('-', '')}0${home}.html`
+}
+
+type PageGame = Pick<GameRow, 'id' | 'away' | 'home' | 'gameDate'>
+type DraftScore = { homeScore: number; awayScore: number }
+
+/** "YES for MEM@CLE, Final 106-111 (ESPN)": the outcome kind 0 gives the draft. */
+const proposedWhat = (g: PageGame, d: DraftScore) =>
+  `${outcomeFor(0, d.homeScore, d.awayScore, []).toUpperCase()} for ${g.away}@${g.home}, Final ${d.awayScore}-${d.homeScore} (ESPN)`
+
+const uncheckedCause = (reason: 'match' | 'off' | 'pending', waitSecs: number) =>
+  reason === 'off'
+    ? 'BALLDONTLIE_API_KEY is not set'
+    : `balldontlie had no final score ${Math.round(waitSecs / 60)} min after proposing opened`
+
+export interface ProposedPage {
+  check: 'match' | 'unchecked'
+  reason: 'match' | 'off' | 'pending'
+  hashHex: string
+  /** proposed_at + the dispute window (unix seconds). */
+  closesAt: number
+  /** secondSourceWaitSecs, named in a CHECK page for a silent second source. */
+  waitSecs: number
+}
+
+/** The `auto-proposed:` page once the keeper's proposal landed: checked, or CHECK. */
+export function autoProposedText(g: PageGame, d: DraftScore, p: ProposedPage): string {
+  const what = proposedWhat(g, d)
+  if (p.check === 'match') {
+    return (
+      `Proposed ${what}. ESPN and balldontlie agree. Nothing to do. The challenge window closes at ` +
+      `${utcAndEt(p.closesAt)}. sha256 ${p.hashHex.slice(0, 8)}...${p.hashHex.slice(-4)}. ` +
+      `If wrong: horagon-ops challenge ${g.id}`
+    )
+  }
+  return (
+    `CHECK: proposed ${what}, with no second source: ${uncheckedCause(p.reason, p.waitSecs)}. ` +
+    `Check the box score: ${boxScoreLink(g)}. If wrong, challenge before ${utcAndEt(p.closesAt)}: ` +
+    `horagon-ops challenge ${g.id}`
+  )
+}
+
+/** The `auto-proposed:` page of a dry run: what the keeper would have proposed. */
+export function dryRunText(
+  g: PageGame,
+  d: DraftScore,
+  a: Pick<Extract<Action, { type: 'propose' }>, 'check' | 'reason'>,
+  waitSecs: number,
+): string {
+  const checked =
+    a.check === 'match'
+      ? 'ESPN and balldontlie agree'
+      : `with no second source: ${uncheckedCause(a.reason, waitSecs)}`
+  return (
+    `DRY RUN: would propose ${proposedWhat(g, d)}, ${checked}. Nothing was sent; propose by hand: ` +
+    `horagon-ops propose ${g.id} --box-score <url> --score ${d.homeScore}-${d.awayScore}`
+  )
+}
+
+/** `source-held:`: the second source contradicts the draft, so nothing was proposed. */
+export function heldText(
+  g: PageGame,
+  a: Pick<Extract<Action, { type: 'hold' }>, 'espn' | 'second'>,
+): string {
+  return (
+    `HELD: ${g.away}@${g.home} ESPN ${a.espn.away}-${a.espn.home} vs balldontlie ` +
+    `${a.second.away}-${a.second.home}, nothing proposed. Check the box score (${boxScoreLink(g)}), ` +
+    `then: horagon-ops propose ${g.id} --box-score <url> --score <h>-<a> [--periods ...]`
+  )
+}
+
+/** `source-mismatch:`: the second source contradicts a proposal still open to challenge. */
+export function mismatchText(
+  g: PageGame,
+  a: Pick<Extract<Action, { type: 'mismatch' }>, 'proposed' | 'second' | 'challengeBy'>,
+): string {
+  return (
+    `MISMATCH: ${g.away}@${g.home} balldontlie ${a.second.away}-${a.second.home} vs proposed ` +
+    `${a.proposed.away}-${a.proposed.home}. Challenge before ${utcAndEt(a.challengeBy)}: ` +
+    `horagon-ops challenge ${g.id}, then runbook C.`
+  )
+}
+
+/**
+ * What the keeper says at start about auto-propose: the `auto-propose-off` alert when it is off,
+ * and a log warning when it is on (or dry) with nobody to page (no TELEGRAM_*).
+ */
+export function autoProposeNotices(
+  auto: AutoProposeConfig,
+  paged: boolean,
+): { alert: string | null; warn: string | null } {
+  if (auto.mode === 'off') {
+    const why = auto.off ?? 'KEEPER_AUTO_PROPOSE=off'
+    return {
+      alert: `Auto-propose is off (${why}): propose every result by hand (runbook A).`,
+      warn: null,
+    }
+  }
+  return {
+    alert: null,
+    warn: paged
+      ? null
+      : `auto-propose is ${auto.mode} but TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID are not set: its pages reach this log only`,
+  }
 }
 
 const sameLive = (a: FeedGame, b: FeedGame) =>
@@ -207,6 +399,18 @@ export class Keeper {
   private readonly lastFetch = new Map<string, number>()
   private window: { secs: number; at: number } | null = null
   private treasuryFailures = 0
+  /** Second-source checks by game id (R6). */
+  private readonly checks = new Map<string, Check>()
+  /** Why the last auto-propose of a game did not land; cleared when one lands. */
+  private readonly proposeErrors = new Map<string, string>()
+  /** `<gameId>:<round>` of the dry-run pages already sent. */
+  private readonly dryPaged = new Set<string>()
+  /** Games whose held-result record was read since the keeper started. */
+  private readonly holdsRead = new Set<string>()
+  /** `<gameId>:<round>:<evidence hash>` of the keeper's proposals whose page was delivered. */
+  private readonly paged = new Set<string>()
+  /** The Final score of the stored evidence behind each proposal on chain, by its hash. */
+  private readonly proposals = new Map<string, { hash: string; score: Score }>()
 
   constructor(private readonly d: KeeperDeps) {}
 
@@ -352,12 +556,21 @@ export class Keeper {
         }
       }),
     )
+    await this.readHolds(states)
+    await this.readProposed(states, now, disputeWindowSecs)
+    await this.checkSecondSource(now, states, disputeWindowSecs)
+    for (const s of states) {
+      s.secondSource = this.secondSourceOf(s, now, disputeWindowSecs)
+      s.proposeError = this.proposeErrors.get(s.game.id) ?? null
+      s.pageOwed = this.pageOwed(s)
+    }
     const planned = plan({
       now,
       states,
       timings: this.d.timings,
       seeds: this.d.seeds,
       disputeWindowSecs,
+      autoPropose: this.d.autoPropose?.mode ?? 'off',
     })
     // The plan comes halts first, then syncs: the drift syncs join right after the halts.
     const halts = planned.filter((a) => a.type === 'halt')
@@ -401,7 +614,19 @@ export class Keeper {
       case 'recycle':
         return this.settle(a, s)
       case 'sync':
-        return this.sync(s)
+        await this.sync(s)
+        return
+      case 'propose':
+        return this.propose(a, s, now)
+      case 'hold':
+        await this.d.alerts.send(`source-held:${a.gameId}`, heldText(s.game, a))
+        return
+      case 'mismatch':
+        await this.d.alerts.send(`source-mismatch:${a.gameId}`, mismatchText(s.game, a))
+        return
+      case 'announce':
+        if (s.onchain) await this.page(s, s.onchain, a.closesAt)
+        return
       case 'alert': {
         const unconfirmed = a.key.startsWith('unconfirmed:')
         await this.d.alerts.send(unconfirmed ? `${a.key}:${roundOf(s)}` : a.key, a.text)
@@ -413,6 +638,351 @@ export class Keeper {
 
   private get conn() {
     return this.d.sender.connection
+  }
+
+  /**
+   * `proposed` of each proposal still inside its window: the Final score of the stored evidence
+   * whose hash is on chain, read once per hash. Other evidence than the chain's leaves it null
+   * (sync pages `evidence-mismatch:`), so nothing is checked against a score not on chain.
+   */
+  private async readProposed(
+    states: readonly GameState[],
+    now: number,
+    windowSecs: number,
+  ): Promise<void> {
+    if (!this.d.autoPropose?.secondSource) return
+    for (const s of states) {
+      const gm = s.onchain
+      if (gm?.status !== 'proposed' || now >= gm.proposedAt + windowSecs) continue
+      const hash = toHex(gm.evidenceHash)
+      const known = this.proposals.get(s.game.id)
+      if (known?.hash === hash) {
+        s.proposed = known.score
+        continue
+      }
+      // One game's unreadable row skips its check; it never stops the tick (and every halt).
+      try {
+        const stored = await getEvidence(this.d.db, s.game.id, 0)
+        if (stored?.hash !== hash) continue
+        const ev = parseResolutionEvidence(JSON.parse(stored.json))
+        if (ev.status !== 'final') continue
+        const score = { home: ev.homeScore, away: ev.awayScore }
+        this.proposals.set(s.game.id, { hash, score })
+        s.proposed = score
+      } catch (err) {
+        this.d.log.warn(
+          { gameId: s.game.id, error: errorSummary(err).message },
+          'proposed evidence unreadable',
+        )
+      }
+    }
+  }
+
+  /**
+   * The score the second source should check for this game, or null: a pending Final draft the
+   * keeper may propose (round 0), or, inside the window, the Final on chain (`proposed`).
+   */
+  private checkScore(s: GameState, now: number, windowSecs: number): Score | null {
+    const { draft, onchain: chain, game: g } = s
+    if (g.league !== 'NBA' || !chain) return null
+    if (chain.status === 'proposed')
+      return now < chain.proposedAt + windowSecs ? (s.proposed ?? null) : null
+    const proposable =
+      draft?.state === 'pending' &&
+      draft.status === 'final' &&
+      (chain.status === 'open' || chain.status === 'halted') &&
+      chain.challengeCount === 0
+    return proposable ? { home: draft.homeScore, away: draft.awayScore } : null
+  }
+
+  /**
+   * Games whose score the second source should check (checkScore). A match against the same
+   * score ends the checks; a mismatch keeps them going, so the sources can come to agree.
+   */
+  private wantsCheck(s: GameState, now: number, windowSecs: number): boolean {
+    const score = this.checkScore(s, now, windowSecs)
+    if (!score) return false
+    const c = this.checks.get(s.game.id)
+    return !(c?.verdict === 'match' && sameScore(c.draft, score))
+  }
+
+  /**
+   * Asks the second source about every game that wants a check, one request per ET date (its
+   * client spaces them), and keeps each verdict. A verdict that changes writes one ops line.
+   */
+  private async checkSecondSource(
+    now: number,
+    states: readonly GameState[],
+    windowSecs: number,
+  ): Promise<void> {
+    const client = this.d.autoPropose?.secondSource
+    if (!client) return
+    const byDate = new Map<string, GameState[]>()
+    for (const s of states) {
+      if (!this.wantsCheck(s, now, windowSecs)) continue
+      byDate.set(s.game.gameDate, [...(byDate.get(s.game.gameDate) ?? []), s])
+    }
+    for (const [date, group] of byDate) {
+      let got: DateGames | null
+      try {
+        got = await client.games(date, now)
+      } catch (err) {
+        // BdlError messages carry the HTTP status only, never the key.
+        const status = err instanceof BdlError ? err.status : null
+        this.d.log.warn(
+          { date, status, error: errorSummary(err).message },
+          'second source read failed',
+        )
+        // A refused key fails every check until a person fixes it: a CHECK page would only say
+        // balldontlie had no final score.
+        if (status === 401 || status === 403) {
+          await this.d.alerts.send(
+            'second-source-refused',
+            `balldontlie refused BALLDONTLIE_API_KEY (HTTP ${status}): it checks no result until the key in .env.keeper is fixed and the keeper restarted, so every proposal pages CHECK`,
+          )
+        }
+        continue
+      }
+      if (!got) continue
+      for (const s of group) {
+        const score = this.checkScore(s, now, windowSecs)
+        if (score) await this.recordCheck(s, got, score)
+      }
+    }
+  }
+
+  /**
+   * After a restart, the hold of each pending Final draft balldontlie contradicted, read once per
+   * game: without it, a balldontlie that stays silent after the restart would let the keeper
+   * propose that result unchecked once the wait has passed.
+   */
+  private async readHolds(states: readonly GameState[]): Promise<void> {
+    if (this.d.autoPropose?.mode !== 'on' || !this.d.autoPropose.secondSource) return
+    for (const s of states) {
+      const { game: g, draft } = s
+      if (draft?.state !== 'pending' || draft.status !== 'final') continue
+      if (g.league !== 'NBA' || this.checks.has(g.id) || this.holdsRead.has(g.id)) continue
+      const row = await getHeartbeat(this.d.db, heldRecordKey(g.id))
+      this.holdsRead.add(g.id)
+      const held = HeldRecordSchema.safeParse(row?.info)
+      const score = { home: draft.homeScore, away: draft.awayScore }
+      if (!held.success || !held.data.second || !sameScore(held.data.draft, score)) continue
+      const { since, second } = held.data
+      this.checks.set(g.id, {
+        verdict: 'mismatch',
+        since,
+        draft: score,
+        second,
+        bdlId: null,
+        fetchedAt: since,
+      })
+    }
+  }
+
+  private async recordCheck(s: GameState, got: DateGames, score: Score): Promise<void> {
+    const g = s.game
+    const found = findGame(got.games, g.home, g.away)
+    const game = found ? secondGame(found) : null
+    const verdict = verdictOf({ homeScore: score.home, awayScore: score.away }, game)
+    const second =
+      game && game.homeScore !== null && game.awayScore !== null
+        ? { home: game.homeScore, away: game.awayScore }
+        : null
+    const prev = this.checks.get(g.id)
+    const held = prev?.verdict === 'mismatch' && sameScore(prev.draft, score)
+    // A hold ends only when balldontlie agrees with the draft: a game it no longer lists, or no
+    // final from it, is silence, not agreement.
+    if (held && verdict === 'pending') return
+    const same = prev !== undefined && prev.verdict === verdict && sameScore(prev.draft, score)
+    const since = same ? prev.since : got.fetchedAt
+    this.checks.set(g.id, {
+      verdict,
+      since,
+      draft: score,
+      second,
+      bdlId: game?.id ?? null,
+      fetchedAt: got.fetchedAt,
+    })
+    // The hold outlives a restart (readHolds): written when it starts or its score changes, and
+    // cleared when balldontlie comes to agree. A dry run proposes nothing, so it keeps none.
+    const moved =
+      verdict === 'mismatch'
+        ? !(same && prev.second && second && sameScore(prev.second, second))
+        : held
+    if (moved && this.d.autoPropose?.mode === 'on') {
+      await heartbeat(this.d.db, heldRecordKey(g.id), {
+        draft: score,
+        second: verdict === 'mismatch' ? second : null,
+        since,
+      })
+    }
+    if (same) return
+    await logOps(this.d.db, {
+      actor: 'keeper',
+      action: 'second-source',
+      gameId: g.id,
+      market: s.market?.pubkey ?? null,
+      sig: null,
+      detail: {
+        source: 'balldontlie',
+        verdict,
+        draft: `${score.home}-${score.away}`,
+        second: second ? `${second.home}-${second.away}` : null,
+        ...(game ? { id: game.id, state: game.state } : {}),
+      },
+    })
+  }
+
+  /**
+   * The planner's view of the second source for this game's current draft, or inside the window
+   * for the proposal on chain.
+   */
+  private secondSourceOf(s: GameState, now: number, windowSecs: number): SecondSourceState | null {
+    const auto = this.d.autoPropose
+    if (!auto) return null
+    if (!auto.secondSource) return { verdict: 'off', since: now }
+    const c = this.checks.get(s.game.id)
+    const gm = s.onchain
+    const d = s.draft
+    const score =
+      gm?.status === 'proposed' && now < gm.proposedAt + windowSecs
+        ? (s.proposed ?? null)
+        : d
+          ? { home: d.homeScore, away: d.awayScore }
+          : null
+    if (!c || !score || !sameScore(c.draft, score)) return null
+    if (c.verdict === 'mismatch')
+      return c.second ? { verdict: 'mismatch', since: c.since, score: c.second } : null
+    return { verdict: c.verdict, since: c.since }
+  }
+
+  /**
+   * Auto-propose (R6): the shared propose core with the attestor, as `horagon-ops propose` does
+   * it. A dry run pages once per game and round, and sends and writes nothing. A chain clock
+   * still before end_ts (or a market no longer proposable) is a skip, retried next tick; a
+   * rejected send throws, so the tick's `fail:propose:` alert goes out.
+   */
+  private async propose(
+    a: Extract<Action, { type: 'propose' }>,
+    s: GameState,
+    now: number,
+  ): Promise<void> {
+    const auto = this.d.autoPropose
+    const draft = s.draft
+    if (!auto || !draft) return
+    const g = s.game
+    const round = roundOf(s)
+    const waitSecs = this.d.timings.secondSourceWaitSecs
+    if (auto.mode === 'dry') {
+      const once = `${g.id}:${round}`
+      if (this.dryPaged.has(once)) return
+      this.d.log.info(
+        { gameId: g.id, check: a.check, reason: a.reason },
+        'auto-propose dry run: would propose',
+      )
+      await this.d.alerts.send(`auto-proposed:${g.id}:${round}`, dryRunText(g, draft, a, waitSecs))
+      this.dryPaged.add(once)
+      return
+    }
+    const c = this.checks.get(g.id)
+    let confirm: ConfirmSource | null = null
+    if (a.check === 'match') {
+      if (c?.verdict !== 'match' || c.bdlId === null)
+        throw new Error(`${g.id}: a checked propose without a balldontlie match`)
+      confirm = {
+        name: 'balldontlie',
+        url: bdlGameUrl(c.bdlId),
+        at: new Date(c.fetchedAt * 1000),
+      }
+    }
+    let out: ProposeOutcome
+    try {
+      out = await proposeResult(
+        {
+          db: this.d.db,
+          connection: this.conn,
+          program: this.d.program,
+          sender: this.d.sender,
+          signer: this.d.attestor,
+          actor: 'keeper',
+          priorityMicroLamports: this.d.priority.normal,
+          now: () => new Date(this.d.now() * 1000),
+        },
+        {
+          gameId: g.id,
+          uri: auto.evidenceUri(g.id),
+          wish: {
+            gameId: g.id,
+            status: 'final',
+            home: draft.homeScore,
+            away: draft.awayScore,
+            periods: null,
+            sourceUrl: draft.sourceUrl,
+          },
+          confirm,
+          replace: false,
+          keepStored: true,
+        },
+      )
+    } catch (err) {
+      this.proposeErrors.set(g.id, errorSummary(err).message)
+      throw err
+    }
+    if (out.kind !== 'landed') {
+      const why =
+        out.kind === 'not-yet'
+          ? 'the chain clock is still before end_ts'
+          : `the market is ${out.status ?? 'missing'} on chain`
+      this.proposeErrors.set(g.id, why)
+      this.d.log.info({ gameId: g.id, why }, 'auto-propose skipped')
+      return
+    }
+    this.proposeErrors.delete(g.id)
+    // The row gets proposed_at and the evidence check at once, not a tick later. If this read or
+    // the page fails, the planner's `announce` sends the page on a later tick.
+    const gm = await this.sync(s)
+    if (gm?.status === 'proposed')
+      await this.page(s, gm, gm.proposedAt + (await this.disputeWindowSecs(now)))
+  }
+
+  private pagedKey(gameId: string, gm: GameMarketAccount): string {
+    return `${gameId}:${gm.challengeCount}:${toHex(gm.evidenceHash)}`
+  }
+
+  /** A proposal on chain that the keeper's attestor made, whose page was not delivered yet. */
+  private pageOwed(s: GameState): boolean {
+    const gm = s.onchain
+    if (this.d.autoPropose?.mode !== 'on' || gm?.status !== 'proposed') return false
+    if (!gm.proposer.equals(this.d.attestor.publicKey)) return false
+    return !this.paged.has(this.pagedKey(s.game.id, gm))
+  }
+
+  /**
+   * The `auto-proposed:` page of the keeper's proposal on chain, built from the evidence whose
+   * hash is on chain: checked when it cites balldontlie too, else CHECK. Kept as delivered once
+   * the alerter says so; until then the planner asks for it again each tick (`announce`).
+   */
+  private async page(s: GameState, gm: GameMarketAccount, closesAt: number): Promise<void> {
+    const g = s.game
+    const key = this.pagedKey(g.id, gm)
+    if (this.paged.has(key)) return
+    const hashHex = toHex(gm.evidenceHash)
+    const stored = await getEvidence(this.d.db, g.id, 0)
+    // Other evidence than the chain's is `evidence-mismatch:` (sync), not a page to build.
+    if (stored?.hash !== hashHex) return
+    const ev = parseResolutionEvidence(JSON.parse(stored.json))
+    const checked = ev.sources.length > 1
+    const delivered = await this.d.alerts.send(
+      `auto-proposed:${g.id}:${gm.challengeCount}`,
+      autoProposedText(g, ev, {
+        check: checked ? 'match' : 'unchecked',
+        reason: checked ? 'match' : this.d.autoPropose?.secondSource ? 'pending' : 'off',
+        hashHex,
+        closesAt,
+        waitSecs: this.d.timings.secondSourceWaitSecs,
+      }),
+    )
+    if (delivered !== false) this.paged.add(key)
   }
 
   /** The first salted market id that is free or already ours (spec 5.1). */
@@ -622,7 +1192,18 @@ export class Keeper {
     // end_ts from the chain (a draft needs the GameMarket), else from the market row.
     const endTs =
       s.onchain?.endTs ?? (s.market ? Math.floor(s.market.endTs.getTime() / 1000) : null)
-    await this.d.alerts.send(`draft:${g.id}:${roundOf(s)}`, draftText(g, a, endTs, now))
+    // The keeper proposes this one itself: from max(Final held 60 s, end_ts).
+    const auto = this.d.autoPropose
+    const own =
+      auto?.mode === 'on' && a.status === 'final' && roundOf(s) === 0 && g.league === 'NBA'
+    const from =
+      own && endTs !== null
+        ? {
+            from: Math.max((obs?.finalSince ?? now) + this.d.timings.finalStableSecs, endTs),
+            secondSource: auto.secondSource ? ('balldontlie' as const) : ('off' as const),
+          }
+        : null
+    await this.d.alerts.send(`draft:${g.id}:${roundOf(s)}`, draftText(g, a, endTs, now, from))
   }
 
   private async settle(
@@ -668,22 +1249,24 @@ export class Keeper {
   /**
    * The API serves the stored evidence (kind 0): it must be the one whose hash is on chain, or
    * nobody can verify the result. Read only when a sync sees a hash on chain, never per tick.
+   * True when the stored evidence is the chain's.
    */
-  private async checkEvidence(s: GameState, chainHash: string): Promise<void> {
+  private async checkEvidence(s: GameState, chainHash: string): Promise<boolean> {
     const stored = await getEvidence(this.d.db, s.game.id, 0)
-    if (stored?.hash === chainHash) return
+    if (stored?.hash === chainHash) return true
     await this.d.alerts.send(
       `evidence-mismatch:${s.game.id}`,
       `Evidence mismatch: ${s.game.away}@${s.game.home} has sha256 ${chainHash} on chain, but the ` +
         `API serves ${stored ? `sha256 ${stored.hash}` : 'no evidence'}. Check it before the dispute window closes.`,
     )
+    return false
   }
 
-  /** Copy the GameMarket's status, outcome and times into the DB row. */
-  private async sync(s: GameState): Promise<void> {
-    if (!s.market) return
+  /** Copy the GameMarket's status, outcome and times into the DB row; returns what it read. */
+  private async sync(s: GameState): Promise<GameMarketAccount | null> {
+    if (!s.market) return null
     const gm = await this.d.program.fetchGameMarket(this.conn, BigInt(s.market.marketId))
-    if (!gm) return
+    if (!gm) return null
     // A challenge rejects the draft. The planner ignores only rejected drafts and upsertDraft
     // never overwrites a proposed one, so without this the market would wait on the challenged
     // draft forever. A challenge is a status change into `challenged`, or a count that grew (a
@@ -698,7 +1281,11 @@ export class Keeper {
       await setDraftState(this.d.db, s.game.id, { state: 'rejected' })
     const evidenceHash = gm.evidenceHash.some((b) => b !== 0) ? toHex(gm.evidenceHash) : null
     // Checked before the row is synced: if the read fails, the next tick syncs (and checks) again.
-    if (evidenceHash) await this.checkEvidence(s, evidenceHash)
+    const ours = evidenceHash !== null && (await this.checkEvidence(s, evidenceHash))
+    // A proposal of the stored evidence whose writes after landing failed (or a crash before
+    // them) leaves its draft pending: the second-source check of the window needs it proposed.
+    if (ours && gm.status === 'proposed' && s.draft?.state === 'pending')
+      await setDraftState(this.d.db, s.game.id, { state: 'proposed' })
     const settled = gm.status === 'finalized' || gm.status === 'recycled'
     await updateMarket(this.d.db, s.market.pubkey, {
       status: gm.status,
@@ -722,5 +1309,6 @@ export class Keeper {
           : `Challenged: ${name} was challenged and has been re-proposed (now ${gm.status}). Check the new proposal.`,
       )
     }
+    return gm
   }
 }

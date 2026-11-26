@@ -6,9 +6,11 @@ import {
   getHeartbeat,
   latestPrices,
   listGames,
+  listMarketTrades,
   listPricePoints,
   listSnapshots,
   readFlags,
+  walletsWithBotMemo,
 } from '@horagon/db'
 import {
   BuiltTxWireSchema,
@@ -30,6 +32,7 @@ import {
   MARKET_KIND_CODE,
   MarketKindSchema,
   MarketStateSchema,
+  MeResponseSchema,
   marketKindName,
   PositionsResponseSchema,
   PubkeySchema,
@@ -46,10 +49,13 @@ import { cors } from 'hono/cors'
 import { etag, RETAINED_304_HEADERS } from 'hono/etag'
 import { HTTPException } from 'hono/http-exception'
 import { requestId } from 'hono/request-id'
+import { gameActivity } from './activity'
 import { ChainReader } from './chain'
 import type { ApiDeps } from './deps'
+import { disputeWindowReader } from './dispute-window'
 import { claimFaucet } from './faucet'
-import { flagsOf, provideFlags } from './flags'
+import { flagsOf, provideFlags, requireFlags } from './flags'
+import { MeQuerySchema, meFor, positionsAndNights } from './me'
 import { ApiError, problemResponse } from './problem'
 import {
   buildClaims,
@@ -118,6 +124,8 @@ function clientIp(headers: Headers): string {
 export function createApp(deps: ApiDeps) {
   const ctx: Ctx = { deps, chain: new ChainReader(deps.connection) }
   const marketSet = new MarketSet(deps)
+  // One reader per app: the on-chain challenge window, kept 600 s (dispute-window.ts).
+  const disputeWindow = disputeWindowReader(deps)
   const app = new OpenAPIHono<Env>({
     defaultHook: (result, c) => {
       if (!result.success) {
@@ -195,6 +203,8 @@ export function createApp(deps: ApiDeps) {
       ],
     }),
   )
+  // My Game-day (R7): 404 problem+json while FLAG_ME is off, before any input check.
+  app.use('/me/*', requireFlags('FLAG_ME'))
   app.onError((err, c) => {
     const rid = c.get('requestId')
     // Hono's 4xx are the client's mistake: answer them, nothing to log.
@@ -257,12 +267,15 @@ export function createApp(deps: ApiDeps) {
     async (c) => {
       const g = await getGame(deps.db, c.req.valid('param').id)
       if (!g) throw new ApiError('NOT_FOUND', 'No such game')
-      const prices = await latestPrices(
-        deps.db,
-        g.markets.map((m) => m.pubkey),
-      )
+      const keys = g.markets.map((m) => m.pubkey)
+      const [prices, trades] = await Promise.all([
+        latestPrices(deps.db, keys),
+        listMarketTrades(deps.db, keys),
+      ])
+      const memo = await walletsWithBotMemo(deps.db, [...new Set(trades.map((t) => t.wallet))])
+      const activity = gameActivity(trades, memo)
       c.header('cache-control', cacheShort)
-      return c.json(toGameDetail(g, prices, deps.publicUrl), 200)
+      return c.json(toGameDetail(g, prices, deps.publicUrl, activity), 200)
     },
   )
 
@@ -422,11 +435,40 @@ export function createApp(deps: ApiDeps) {
     }),
     async (c) => {
       const wallet = c.req.valid('param').wallet
-      const [positions, usdcBalance] = await Promise.all([
-        positionsFor(ctx, wallet),
+      // The nights ride along only while My Game-day is on, so the header links it only then. A
+      // flag read that fails leaves them out rather than failing the wallet's positions.
+      const me = await flagsOf(c).then(
+        (f) => f.FLAG_ME,
+        () => false,
+      )
+      const [held, usdcBalance] = await Promise.all([
+        me
+          ? positionsAndNights(deps.db, wallet)
+          : positionsFor(ctx, wallet).then((positions) => ({ positions })),
         usdcBalanceOf(ctx, wallet),
       ])
-      return c.json({ wallet, usdcBalance, positions }, 200)
+      return c.json({ wallet, usdcBalance, ...held }, 200)
+    },
+  )
+
+  app.openapi(
+    createRoute({
+      method: 'get',
+      path: '/me/{wallet}',
+      request: { params: z.object({ wallet: PubkeySchema }), query: MeQuerySchema },
+      responses: { 200: json(MeResponseSchema, 'My Game-day: tonight against the model') },
+    }),
+    async (c) => {
+      const { wallet } = c.req.valid('param')
+      const { teams } = c.req.valid('query')
+      const body = await meFor(deps.db, {
+        wallet,
+        teams: teams ?? [],
+        now: deps.now(),
+        disputeWindow,
+      })
+      c.header('cache-control', 'no-store')
+      return c.json(body, 200)
     },
   )
 

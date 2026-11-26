@@ -358,7 +358,8 @@ describe('the first wallet action waits for its code, and checks again before it
     )
     expect(importErrorText('nope')).toBe(SOMETHING_WRONG)
     expect(SOMETHING_WRONG).toBe('Something went wrong. Try again.')
-    expect(source('components/wallet-sheet.tsx')).toContain('setImportError(importErrorText(err))')
+    // The Export / Import block moved to key-backup.tsx (R7), the same code.
+    expect(source('components/key-backup.tsx')).toContain('setImportError(importErrorText(err))')
   })
 })
 

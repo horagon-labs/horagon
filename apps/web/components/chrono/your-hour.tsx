@@ -5,7 +5,11 @@
 import type { PositionsResponse } from '@horagon/sdk'
 import { yourHour } from '../../lib/chrono/board'
 
-export function YourHour(p: { portfolio: PositionsResponse | undefined; onOpen: () => void }) {
+export function YourHour(p: {
+  portfolio: PositionsResponse | undefined
+  onOpen: () => void
+  className?: string
+}) {
   const hour = yourHour(p.portfolio)
   if (!hour) return null
   const noun = hour.count === 1 ? 'position' : 'positions'
@@ -14,7 +18,7 @@ export function YourHour(p: { portfolio: PositionsResponse | undefined; onOpen: 
       type="button"
       onClick={p.onOpen}
       aria-label={`${hour.count} open ${noun}, worth ${hour.value} mUSDC`}
-      className="min-h-11 rounded-full border border-line px-3 font-mono text-13 text-ivory-100 tabular-nums"
+      className={`min-h-11 shrink-0 whitespace-nowrap rounded-full border border-line px-3 font-mono text-13 text-ivory-100 tabular-nums ${p.className ?? ''}`.trim()}
     >
       <span className="text-live">◆</span> {hour.count} · {hour.value}
     </button>

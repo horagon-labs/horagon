@@ -105,9 +105,10 @@ describe('the share card (review §4.11)', () => {
 })
 
 describe('404 and error pages, light only (review §4.12)', () => {
-  it('says "No game here" on paper with the mark and a way back to tonight’s games', () => {
+  it('says Air ball on paper with the mark and a way back to tonight’s games', () => {
     const html = renderToStaticMarkup(<NotFound />)
-    expect(html).toContain('No game here')
+    // The copy is culture A3's string 24 (R7); this test keeps it on paper with the mark.
+    expect(html).toContain('Air ball. Nothing on the clock at this address.')
     expect(html).toContain('href="/"')
     expect(html).toContain("Back to tonight's games".replace("'", '&#x27;'))
     expect(html).toContain('data-mark')

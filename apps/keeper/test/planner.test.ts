@@ -479,6 +479,15 @@ describe('draft, finalize, recycle', () => {
     expect(run(now, halted({ feed: finalFeed, finalSince: now - 600, draft: proposed }))).toEqual(
       [],
     )
+    // A guardian's reading (propose --periods, citing a box score) is never redrafted from ESPN:
+    // its propose may be in flight.
+    const box = 'https://www.basketball-reference.com/boxscores/202611180CLE.html'
+    const guardian = { ...old, sourceUrl: box } as DraftRow
+    expect(
+      run(now, halted({ feed: finalFeed, finalSince: now - 600, draft: guardian })).map(
+        (a) => a.type,
+      ),
+    ).not.toContain('draft')
   })
 
   it('alerts when ESPN corrects the Final score to periods that do not add up', () => {
@@ -542,5 +551,299 @@ describe('draft, finalize, recycle', () => {
     expect(types(run(now, state({ ...base, draft: rejected })))).toEqual(['draft'])
     const pending = { ...rejected, state: 'pending', fetchedAt: new Date(now * 1000) } as DraftRow
     expect(run(now, state({ ...base, draft: pending }))).toEqual([])
+  })
+})
+
+describe('auto-propose (R6)', () => {
+  const ID = 'nba-401910007'
+  // A buzzer halt: Final read 16 min before end_ts, drafted 60 s later.
+  const pending = {
+    state: 'pending',
+    status: 'final',
+    homeScore: 111,
+    awayScore: 106,
+    alertedAt: null,
+    fetchedAt: new Date((END - 900) * 1000),
+  } as DraftRow
+  const ready = (patch: Partial<GameState> = {}) =>
+    state({
+      market: market('halted'),
+      onchain: chain('halted'),
+      feed: finalFeed,
+      finalSince: END - 960,
+      draft: pending,
+      ...patch,
+    })
+  const auto = (
+    now: number,
+    mode: PlanInput['autoPropose'],
+    ...states: GameState[]
+  ): ReturnType<typeof plan> =>
+    plan({
+      now,
+      states,
+      timings: DEFAULT_TIMINGS,
+      seeds: DEFAULT_SEEDS,
+      disputeWindowSecs: 900,
+      autoPropose: mode,
+    })
+  const match = { verdict: 'match', since: END - 300 } as const
+  const off = { verdict: 'off', since: END - 300 } as const
+  const waiting = { verdict: 'pending', since: END - 300 } as const
+  const mismatch = {
+    verdict: 'mismatch',
+    since: END - 300,
+    score: { home: 110, away: 106 },
+  } as const
+  const propose = (check: 'match' | 'unchecked', reason: 'match' | 'off' | 'pending') => ({
+    type: 'propose',
+    gameId: ID,
+    marketId: 7n,
+    check,
+    reason,
+  })
+
+  it('proposes at end_ts, and from the second source decides how', () => {
+    expect(auto(END - 1, 'on', ready({ secondSource: match }))).toEqual([])
+    expect(auto(END, 'on', ready({ secondSource: match }))).toEqual([propose('match', 'match')])
+    expect(auto(END, 'on', ready({ secondSource: off }))).toEqual([propose('unchecked', 'off')])
+    expect(auto(END, 'dry', ready({ secondSource: match }))).toEqual([propose('match', 'match')])
+  })
+
+  it('waits for Final held 60 s when that is later than end_ts', () => {
+    const late = ready({ finalSince: END + 200, secondSource: match })
+    expect(auto(END + 259, 'on', late)).toEqual([])
+    expect(auto(END + 260, 'on', late)).toEqual([propose('match', 'match')])
+    expect(auto(END + 260, 'on', ready({ finalSince: null, secondSource: match }))).toEqual([])
+  })
+
+  it('waits 600 s for a silent second source, then proposes unchecked', () => {
+    for (const secondSource of [waiting, null, undefined]) {
+      const s = ready({ secondSource })
+      expect(auto(END + 599, 'on', s)).toEqual([])
+      expect(auto(END + 600, 'on', s)).toEqual([propose('unchecked', 'pending')])
+    }
+  })
+
+  it('holds a draft the second source contradicts, and proposes nothing', () => {
+    expect(auto(END + 10, 'on', ready({ secondSource: mismatch }))).toEqual([
+      {
+        type: 'hold',
+        gameId: ID,
+        espn: { home: 111, away: 106 },
+        second: { home: 110, away: 106 },
+      },
+    ])
+    expect(auto(END - 1, 'on', ready({ secondSource: mismatch }))).toEqual([])
+  })
+
+  it('proposes nothing with the mode off, as before', () => {
+    expect(auto(END + 600, 'off', ready({ secondSource: match }))).toEqual([])
+    expect(auto(END + 600, undefined, ready({ secondSource: match }))).toEqual([])
+    expect(run(END + 600, ready({ secondSource: match }))).toEqual([])
+  })
+
+  it('leaves to a guardian what the keeper must not propose', () => {
+    const now = END + 600
+    const blocked: Array<[string, GameState]> = [
+      ['another league', ready({ game: game({ league: 'WNBA' }) })],
+      ['after a challenge', ready({ onchain: chain('halted', { challengeCount: 1 }) })],
+      [
+        'a challenged market',
+        ready({
+          market: market('challenged'),
+          onchain: chain('challenged', { challengeCount: 1 }),
+        }),
+      ],
+      ['a postponed draft', ready({ draft: { ...pending, status: 'postponed' } as DraftRow })],
+      ['a proposed draft', ready({ draft: { ...pending, state: 'proposed' } as DraftRow })],
+      ['a rejected draft', ready({ draft: { ...pending, state: 'rejected' } as DraftRow })],
+      ['a feed no longer Final', ready({ feed: feed({ ...finalFeed, status: 'live' }) })],
+      [
+        'periods that no longer add up',
+        ready({ feed: feed({ ...finalFeed, periods: QUARTERS.slice(0, 3) }) }),
+      ],
+    ]
+    for (const [why, s] of blocked) {
+      const kinds = auto(now, 'on', { ...s, secondSource: match }).map((a) => a.type)
+      expect(kinds, why).not.toContain('propose')
+      expect(kinds, why).not.toContain('hold')
+    }
+    // A corrected score is drafted again, not proposed.
+    const corrected = ready({ feed: feed({ ...finalFeed, homeScore: 112 }), secondSource: match })
+    expect(types(auto(now, 'on', corrected))).not.toContain('propose')
+  })
+
+  it('proposes on an open market too, and sorts the propose after recycle and before create', () => {
+    const open = ready({ market: market('open'), onchain: chain('open'), secondSource: match })
+    expect(auto(END, 'on', open)).toEqual([propose('match', 'match')])
+    const recycle = state({
+      game: game({ id: 'nba-401910008' }),
+      market: market('finalized'),
+      onchain: chain('finalized'),
+    })
+    const create = state({
+      game: game({ id: 'nba-401910009', scheduledTipoff: new Date((END + 1_800) * 1000) }),
+    })
+    expect(types(auto(END, 'on', create, ready({ secondSource: match }), recycle))).toEqual([
+      'recycle',
+      'propose',
+      'create',
+    ])
+  })
+
+  it('pages a mismatch seen after the proposal while the window is open', () => {
+    const proposedAt = END + 100
+    const proposed = ready({
+      market: market('proposed'),
+      onchain: chain('proposed', { proposedAt }),
+      // The draft row can differ from the chain (a redraft raced a hand propose): the page names
+      // the score of the evidence on chain.
+      draft: { ...pending, homeScore: 120, state: 'proposed' } as DraftRow,
+      proposed: { home: 111, away: 106 },
+      secondSource: mismatch,
+    })
+    const page = {
+      type: 'mismatch',
+      gameId: ID,
+      proposed: { home: 111, away: 106 },
+      second: { home: 110, away: 106 },
+      challengeBy: proposedAt + 900,
+    }
+    expect(auto(proposedAt + 60, 'on', proposed)).toEqual([page])
+    expect(auto(proposedAt + 899, 'dry', proposed)).toEqual([page])
+    expect(types(auto(proposedAt + 900, 'on', proposed))).toEqual(['finalize'])
+    expect(auto(proposedAt + 60, 'on', { ...proposed, secondSource: match })).toEqual([])
+    expect(auto(proposedAt + 60, 'off', proposed)).toEqual([])
+    // No Final evidence matches the chain: nothing to compare, no page.
+    expect(auto(proposedAt + 60, 'on', { ...proposed, proposed: null })).toEqual([])
+  })
+
+  it('pages the keeper proposal until its page is delivered, inside the window', () => {
+    const proposedAt = END + 100
+    const owed = ready({
+      market: market('proposed'),
+      onchain: chain('proposed', { proposedAt }),
+      draft: { ...pending, state: 'proposed' } as DraftRow,
+      pageOwed: true,
+    })
+    const announce = { type: 'announce', gameId: ID, closesAt: proposedAt + 900 }
+    expect(auto(proposedAt, 'on', owed)).toEqual([announce])
+    expect(auto(proposedAt + 899, 'on', owed)).toEqual([announce])
+    // Its draft may still read pending when the writes after landing failed.
+    expect(auto(proposedAt + 5, 'on', { ...owed, draft: pending })).toEqual([announce])
+    expect(types(auto(proposedAt + 900, 'on', owed))).toEqual(['finalize'])
+    expect(auto(proposedAt + 5, 'on', { ...owed, pageOwed: false })).toEqual([])
+    expect(auto(proposedAt + 5, 'off', owed)).toEqual([])
+    expect(auto(proposedAt + 5, 'on', { ...owed, onchain: chain('halted') })).not.toContainEqual(
+      announce,
+    )
+  })
+
+  describe('the 30-min reminder names why nothing was proposed', () => {
+    const at = END + 1_800
+    const cmd = `Propose by hand: horagon-ops propose ${ID} --box-score <url> --score 111-106`
+    const reminder = (mode: PlanInput['autoPropose'], s: GameState) =>
+      auto(at, mode, s).find((a) => a.type === 'alert')
+    const opened = 'not proposed 30 min after proposing opened'
+
+    it('says nothing while the keeper is about to propose', () => {
+      expect(auto(at, 'on', ready({ secondSource: match }))).toEqual([propose('match', 'match')])
+    })
+
+    it('counts from the draft when it came after end_ts', () => {
+      const after = ready({
+        finalSince: END + 200,
+        draft: { ...pending, fetchedAt: new Date((END + 260) * 1000) } as DraftRow,
+        secondSource: mismatch,
+      })
+      expect(types(auto(END + 260 + 1_799, 'on', after))).toEqual(['hold'])
+      expect(types(auto(END + 260 + 1_800, 'on', after))).toEqual(['hold', 'alert'])
+    })
+
+    const cases: Array<[string, PlanInput['autoPropose'], GameState, string]> = [
+      [
+        'a dry run',
+        'dry',
+        ready({ secondSource: match }),
+        `MEM@CLE: final draft ${opened}: auto-propose is a dry run. ${cmd}`,
+      ],
+      [
+        'held',
+        'on',
+        ready({ secondSource: mismatch }),
+        `MEM@CLE: final draft ${opened}: held: ESPN 106-111 vs balldontlie 106-110. ${cmd}`,
+      ],
+      [
+        'failing',
+        'on',
+        ready({ secondSource: match, proposeError: 'propose nba-401910007: custom program error' }),
+        `MEM@CLE: final draft ${opened}: auto-propose failing: propose nba-401910007: custom program error. ${cmd}`,
+      ],
+      [
+        'after a challenge',
+        'on',
+        ready({ onchain: chain('halted', { challengeCount: 1 }), secondSource: match }),
+        `MEM@CLE: final draft ${opened}: after a challenge a guardian proposes. ${cmd}`,
+      ],
+      [
+        'another league',
+        'on',
+        ready({ game: game({ league: 'WNBA' }), secondSource: match }),
+        `MEM@CLE: final draft ${opened}: auto-propose covers NBA games only. ${cmd}`,
+      ],
+      [
+        'a feed no longer Final',
+        'on',
+        ready({ feed: feed({ ...finalFeed, status: 'live' }), secondSource: match }),
+        `MEM@CLE: final draft ${opened}: ESPN no longer shows a consistent Final at the draft score. ${cmd}`,
+      ],
+      [
+        'a broken Final run',
+        'on',
+        ready({ finalSince: null, secondSource: match }),
+        `MEM@CLE: final draft ${opened}: ESPN no longer shows a consistent Final at the draft score. ${cmd}`,
+      ],
+      [
+        'a chain clock before end_ts',
+        'on',
+        ready({ secondSource: match, proposeError: 'the chain clock is still before end_ts' }),
+        `MEM@CLE: final draft ${opened}: auto-propose failing: the chain clock is still before end_ts. ${cmd}`,
+      ],
+      [
+        'a postponed draft',
+        'on',
+        ready({ draft: { ...pending, status: 'postponed' } as DraftRow, secondSource: match }),
+        `MEM@CLE: postponed draft ${opened}: a postponed result is proposed by hand. Propose by hand: horagon-ops propose ${ID} --postponed --notice <url>`,
+      ],
+    ]
+    for (const [why, mode, s, text] of cases) {
+      it(why, () => {
+        expect(reminder(mode, s)).toEqual({
+          type: 'alert',
+          gameId: ID,
+          key: `unconfirmed:${ID}`,
+          text,
+        })
+      })
+    }
+
+    it('says when it knows no cause', () => {
+      // ESPN read Final again 30 s ago (a flicker reset the run): not yet held 60 s.
+      const flicker = ready({ finalSince: at - 30, secondSource: match })
+      expect(reminder('on', flicker)?.text).toBe(
+        `MEM@CLE: final draft ${opened}: cause unknown, see the keeper log. ${cmd}`,
+      )
+    })
+
+    it('fires alongside a propose that keeps failing, and keeps the old text with the mode off', () => {
+      const failing = ready({ secondSource: match, proposeError: 'x' })
+      expect(types(auto(at, 'on', failing))).toEqual(['propose', 'alert'])
+      expect(reminder('off', ready({ secondSource: match }))?.text).toBe(
+        "MEM@CLE: final draft open to propose for 30 min, waiting for the guardian's box-score check",
+      )
+      const reminded = { ...pending, alertedAt: new Date() } as DraftRow
+      expect(reminder('on', ready({ draft: reminded, secondSource: mismatch }))).toBeUndefined()
+    })
   })
 })

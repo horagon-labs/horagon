@@ -199,6 +199,24 @@ function deltas(tx: VersionedTransactionResponse, owner: string, mint: string): 
 }
 
 /**
+ * Pairs a getTransactions batch with the signatures asked for. JSON-RPC 2.0 lets a node answer a
+ * batch in any order, devnet does (measured 2026-11-26: ids 0,2,1 and 2,1,0), and web3.js keeps
+ * the order it received. So each signature gets the response whose first signature (the
+ * transaction id) is it, or null: a missing, short or foreign answer reads as not available.
+ */
+export function inRequestOrder<T extends { transaction: { signatures: string[] } }>(
+  sigs: readonly string[],
+  txs: ReadonlyArray<T | null>,
+): Array<T | null> {
+  const bySig = new Map<string, T>()
+  for (const tx of txs) {
+    const id = tx?.transaction.signatures[0]
+    if (tx && id !== undefined && !bySig.has(id)) bySig.set(id, tx)
+  }
+  return sigs.map((sig) => bySig.get(sig) ?? null)
+}
+
+/**
  * The transaction carries the top-level `horagon:bot` SPL Memo, with no accounts and that exact
  * data: bot rule (a) of docs/metrics.md, read the way scripts/count-fans.mjs reads it.
  */
@@ -467,18 +485,31 @@ async function indexMarket(
   const skipped: Array<{ sig: string; ixIndex: number }> = []
   scan: for (let i = 0; i < ordered.length; i += 50) {
     const chunk = ordered.slice(i, i + 50)
-    const txs = await deps.connection.getTransactions(chunk, {
-      maxSupportedTransactionVersion: 0,
-      commitment: 'confirmed',
-    })
+    let answer: Array<VersionedTransactionResponse | null>
+    try {
+      answer = await deps.connection.getTransactions(chunk, {
+        maxSupportedTransactionVersion: 0,
+        commitment: 'confirmed',
+      })
+    } catch (err) {
+      // web3.js fails the whole batch on one error entry (a rate limit, a node hiccup). Read it
+      // as nothing available: the scan stops at the chunk's first signature, the cursor keeps
+      // what earlier chunks read, and a market that keeps failing reaches index-stuck.
+      deps.log.warn(
+        { market: m.pubkey, sig: chunk[0], size: chunk.length, error: errorSummary(err).message },
+        'transaction batch read failed',
+      )
+      answer = []
+    }
+    const txs = inRequestOrder(chunk, answer)
     for (const [j, sig] of chunk.entries()) {
       const tx = txs[j]
-      // Not yet available, no block time or meta, or not the transaction asked for (a short or
-      // reordered batch): stop here and leave the rest for the next tick. Inserts are
-      // idempotent, so reading a later transaction again is harmless.
+      // Not yet available (missing from the answer, or the node has not got it), or no block
+      // time or meta: stop here and leave the rest for the next tick. Inserts are idempotent, so
+      // reading a later transaction again is harmless. The signature check cannot fail after
+      // inRequestOrder; it stays as a guard on what gets written under `sig`.
       if (
         !tx ||
-        txs.length !== chunk.length ||
         tx.blockTime === null ||
         tx.blockTime === undefined ||
         !tx.meta ||

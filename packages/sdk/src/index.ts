@@ -2,6 +2,7 @@
 // fee and accrual math in `@horagon/sdk/math`, hashing (`sha256`, `toHex`) in
 // `@horagon/sdk/evidence`, PDA seed bytes (`u64Le`) in `@horagon/sdk/pm-amm`, Borsh in
 // `@horagon/sdk/program`. `@horagon/sdk/errors` holds the error types alone.
+export * from './agent'
 export * from './amount'
 export * from './client'
 export * from './cluster'
@@ -31,6 +32,7 @@ export {
   type SwapQuote,
 } from './math'
 export * from './model'
+export * from './nights'
 export * from './notice'
 export * from './pm-amm/constants'
 export * from './pm-amm/errors'

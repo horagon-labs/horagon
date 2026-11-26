@@ -12,7 +12,6 @@ import {
   type Db,
   FLAG_NAMES,
   getDraft,
-  getGame,
   getHeartbeat,
   listGames,
   logOps,
@@ -24,16 +23,12 @@ import {
   updateMarket,
 } from '@horagon/db'
 import {
-  authorityOutcomeAtaIxs,
   DEVNET_MUSDC_MINT,
-  errorSummary,
   GameIdSchema,
   HEAVY_IX_COMPUTE_UNITS,
   HoragonProgram,
   LIGHT_IX_COMPUTE_UNITS,
-  MAX_EVIDENCE_URI_LEN,
 } from '@horagon/sdk'
-import { toHex } from '@horagon/sdk/evidence'
 import { type Connection, PublicKey, SystemProgram } from '@solana/web3.js'
 import { type Alerter, logAlerter, personAlertWindow, telegramAlerter } from '../alerts'
 import {
@@ -47,9 +42,16 @@ import {
   telegramSettings,
   timingsFrom,
 } from '../config'
-import { buildEvidence, type SealedEvidence, sealEvidence } from '../evidence'
-import { ProgramFailure, type SendResult, TxSender } from '../executor'
+import { TxSender } from '../executor'
 import { periodsConsistent } from '../feeds/types'
+import {
+  attemptLookups,
+  type ConfirmSource,
+  evidenceUri,
+  marketOf,
+  proposeResult,
+  refusalText,
+} from '../propose'
 import {
   boxScoreUrl,
   disputeWindowArg,
@@ -61,23 +63,15 @@ import {
   parsePeriods,
   parseScore,
   publicKeyArg,
-  signatureIn,
   solToLamports,
 } from './args'
 import { backfillBotMemo } from './backfill-bot-memo'
 import { DEPLOY_CHECK_BACK_SECS, deployBlockers, deployCheckLines } from './deploy-check'
 import {
   type AttemptLookups,
-  chooseAndStoreEvidence,
   type DraftWish,
-  endAttempt,
-  nextDraft,
-  type ProposeAttempt,
-  pendingAttempt,
   proposeStatusLine,
   readProposeRecord,
-  startAttempt,
-  writeProposeRecord,
 } from './propose-evidence'
 import { watchdogRun } from './watchdog'
 
@@ -177,37 +171,6 @@ async function setup(defaultKey: string, keypair: string | undefined) {
 
 type Ctx = Awaited<ReturnType<typeof setup>>
 
-async function marketOf(db: Db, gameId: string) {
-  if (!GameIdSchema.safeParse(gameId).success) throw new Error(`"${gameId}" is not a game id`)
-  const game = await getGame(db, gameId)
-  if (!game) throw new Error(`no game ${gameId}`)
-  const market = game.markets.find((m) => m.kind === 0)
-  if (!market) throw new Error(`${gameId} has no winner market`)
-  return { game, market, marketId: BigInt(market.marketId) }
-}
-
-async function chainNow(connection: Connection): Promise<number> {
-  const t = await connection.getBlockTime(await connection.getSlot('confirmed'))
-  if (t === null) throw new Error('could not read the chain clock')
-  return t
-}
-
-/** The API's base URL for the evidence link: https (http only on localnet), no trailing slash. */
-function publicBaseUrl(): string {
-  const raw = need('HORAGON_PUBLIC_URL')
-  let url: URL
-  try {
-    url = new URL(raw)
-  } catch {
-    throw new Error('HORAGON_PUBLIC_URL is not a URL')
-  }
-  const http = url.protocol === 'http:' && cluster() === 'localnet'
-  if (url.protocol !== 'https:' && !http) throw new Error('HORAGON_PUBLIC_URL must be https')
-  return url.href.replace(/\/+$/, '')
-}
-
-const PROPOSABLE: ReadonlySet<string> = new Set(['open', 'halted', 'challenged'])
-
 type ProposeArgs = { uri: string; replace: boolean } & (
   | { status: 'postponed'; notice: string }
   | {
@@ -222,9 +185,7 @@ type ProposeArgs = { uri: string; replace: boolean } & (
 /** Every `propose` flag, checked before anything connects. */
 function proposeArgs(gameId: string, v: Values): ProposeArgs {
   if (!GameIdSchema.safeParse(gameId).success) throw new Error(`"${gameId}" is not a game id`)
-  const uri = `${publicBaseUrl()}/api/v1/evidence/${gameId}/winner`
-  if (uri.length > MAX_EVIDENCE_URI_LEN)
-    throw new Error(`the evidence URI is longer than ${MAX_EVIDENCE_URI_LEN} characters: ${uri}`)
+  const uri = evidenceUri(need('HORAGON_PUBLIC_URL'), cluster(), gameId)
   const replace = v['replace-evidence'] === true
   if (v.postponed) {
     if (v['box-score'] || v.score || v.periods) throw new Error('--postponed takes --notice only')
@@ -239,157 +200,41 @@ function proposeArgs(gameId: string, v: Values): ProposeArgs {
   return { uri, replace, status: 'final', box, home, away, periods }
 }
 
+/** `propose`, through the core the keeper shares (propose.ts): same output, refusals and exits. */
 async function propose(c: Ctx, gameId: string, a: ProposeArgs): Promise<void> {
-  const { uri } = a
-  const { game, market, marketId } = await marketOf(c.db, gameId)
-  const gm = await c.program.fetchGameMarket(c.connection, marketId)
-  if (!gm || !PROPOSABLE.has(gm.status)) {
-    throw new Error(`${gameId}: market is ${gm?.status ?? 'missing'}, nothing to propose`)
-  }
-  const now = await chainNow(c.connection)
-  if (now < gm.endTs) {
-    throw new Error(
-      `${gameId}: proposing opens at end_ts ${new Date(gm.endTs * 1000).toISOString()}`,
-    )
-  }
-  // The draft this run proposes (nextDraft), built in memory. `newDraft` is written only once
-  // `chooseAndStoreEvidence` accepts the run: a refused run leaves the stored draft, and the
-  // evidence rebuilt from it, as they were.
-  const prior = await getDraft(c.db, gameId)
-  let confirmUrl: string
-  let confirmSource: string
-  let wish: DraftWish
-  if (a.status === 'postponed') {
-    confirmUrl = a.notice
-    confirmSource = 'notice'
-    wish = { gameId, status: 'postponed', notice: a.notice }
-  } else {
-    if (a.box.warning) console.warn(`warning: ${a.box.warning}`)
-    confirmUrl = a.box.url
-    confirmSource = a.box.source
-    wish = {
-      gameId,
-      status: 'final',
-      home: a.home,
-      away: a.away,
-      periods: a.periods,
-      sourceUrl: a.box.url,
-    }
-  }
-  const { draft, newDraft } = nextDraft(prior, wish, new Date())
-  const round = gm.challengeCount
-  const record = await readProposeRecord(c.db, gameId)
-  const startedAt = Math.floor(Date.now() / 1000)
-  let started: ReturnType<typeof startAttempt> | undefined
-  // A re-run sends the evidence already stored, or refuses (propose-evidence.ts). Evidence,
-  // draft and the attempt's record commit together, before the send: a later --replace-evidence
-  // must know the attempt may land, and the hash on chain must be fetchable.
-  const { sealed, write } = await chooseAndStoreEvidence(c.db, {
-    gameId,
-    newDraft,
-    seal: (confirmedAt) =>
-      sealEvidence(buildEvidence({ game, draft, kind: 0, confirmUrl, confirmSource, confirmedAt })),
-    now: new Date(),
-    replace: a.replace,
-    pending: () => pendingAttempt(record, round, attemptLookups(c.connection), startedAt),
-    record: (s) => {
-      started = startAttempt(record, s.hashHex, round, startedAt)
-      return started.record
+  const confirm: ConfirmSource =
+    a.status === 'postponed'
+      ? { name: 'notice', url: a.notice }
+      : {
+          name: a.box.source,
+          url: a.box.url,
+          ...(a.box.warning ? { warning: a.box.warning } : {}),
+        }
+  const wish: DraftWish =
+    a.status === 'postponed'
+      ? { gameId, status: 'postponed', notice: a.notice }
+      : {
+          gameId,
+          status: 'final',
+          home: a.home,
+          away: a.away,
+          periods: a.periods,
+          sourceUrl: a.box.url,
+        }
+  const out = await proposeResult(
+    {
+      db: c.db,
+      connection: c.connection,
+      program: c.program,
+      sender: c.sender,
+      signer: c.signer,
+      actor: 'guardian',
+      say: (line) => console.log(line),
+      warn: (line) => console.warn(line),
     },
-  })
-  if (!started) throw new Error('internal: the propose record was not built')
-  const attempt = started
-  if (!write)
-    console.log(`sending the evidence an earlier propose stored (sha256 ${sealed.hashHex})`)
-  const ended = async (end: Omit<ProposeAttempt, 'at' | 'ended'>) => {
-    const last = endAttempt(attempt.record, attempt.index, {
-      ...end,
-      ended: Math.floor(Date.now() / 1000),
-    })
-    await writeProposeRecord(c.db, gameId, last).catch((err) =>
-      console.warn(`warning: the propose record was not updated: ${errorSummary(err).message}`),
-    )
-  }
-  let res: SendResult
-  try {
-    res = await sendPropose(c, gameId, marketId, sealed, uri)
-  } catch (err) {
-    if (err instanceof ProgramFailure) {
-      // Rejected: the sender proves nothing it sent is still in flight before it throws this.
-      await ended({ state: 'failed' })
-    } else {
-      // Unresolved, or gave up: whatever was sent took its blockhash before this height read,
-      // so it cannot land once the chain is ATTEMPT_EXPIRY_BLOCKS past it.
-      const sig = signatureIn(errorSummary(err).message)
-      const height = await c.connection.getBlockHeight('confirmed').catch(() => undefined)
-      await ended({
-        state: 'unresolved',
-        ...(sig ? { sig } : {}),
-        ...(height !== undefined ? { height } : {}),
-      })
-    }
-    throw err
-  }
-  await ended({ state: 'landed', ...(res.signature ? { sig: res.signature } : {}) })
-  console.log(
-    `proposed ${sealed.evidence.outcome.toUpperCase()} for ${game.away}@${game.home} (${res.signature ?? 'already on chain'})`,
+    { gameId, uri: a.uri, wish, confirm, replace: a.replace },
   )
-  console.log(`evidence ${uri}  sha256 ${sealed.hashHex}`)
-  await setDraftState(c.db, gameId, { state: 'proposed' })
-  await updateMarket(c.db, market.pubkey, {
-    status: 'proposed',
-    evidenceHash: sealed.hashHex,
-    ...(res.signature ? { proposeSig: res.signature } : {}),
-  })
-  await logOps(c.db, {
-    actor: 'guardian',
-    action: 'propose',
-    gameId,
-    market: market.pubkey,
-    sig: res.signature,
-    detail: { outcome: sealed.evidence.outcome, hash: sealed.hashHex },
-  })
-}
-
-/** What the chain says about an earlier propose attempt. */
-const attemptLookups = (connection: Connection): AttemptLookups => ({
-  status: async (sig) =>
-    (await connection.getSignatureStatuses([sig], { searchTransactionHistory: true })).value[0] ??
-    null,
-  blockHeight: () => connection.getBlockHeight('confirmed'),
-})
-
-function sendPropose(
-  c: Ctx,
-  gameId: string,
-  marketId: bigint,
-  sealed: SealedEvidence,
-  uri: string,
-): Promise<SendResult> {
-  return c.sender.send({
-    label: `propose ${gameId}`,
-    instructions: [
-      ...authorityOutcomeAtaIxs(c.signer.publicKey, {
-        marketId,
-        programId: c.program.programId,
-        pmAmmProgramId: c.program.pmAmmProgramId,
-      }),
-      c.program.ix.proposeResult({
-        signer: c.signer.publicKey,
-        marketId,
-        outcome: sealed.evidence.outcome,
-        evidenceHash: sealed.hash,
-        evidenceUri: uri,
-      }),
-    ],
-    computeUnits: LIGHT_IX_COMPUTE_UNITS,
-    priorityMicroLamports: 10_000,
-    // Only this proposal counts: proposed, with this evidence hash.
-    isDone: async () => {
-      const after = await c.program.fetchGameMarket(c.connection, marketId)
-      return after?.status === 'proposed' && toHex(after.evidenceHash) === sealed.hashHex
-    },
-  })
+  if (out.kind !== 'landed') throw new Error(refusalText(gameId, out))
 }
 
 async function challenge(c: Ctx, gameId: string): Promise<void> {

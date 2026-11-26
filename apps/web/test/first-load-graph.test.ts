@@ -30,6 +30,7 @@ const ENTRIES = [
   'app/layout.tsx',
   'app/page.tsx',
   'app/game/[id]/page.tsx',
+  'app/me/page.tsx',
   // Every route's tree also holds the error boundary and the 404 (light branding review §4.12).
   'app/error.tsx',
   'app/not-found.tsx',
@@ -149,7 +150,12 @@ describe('the first load of / and /game/[id] has no web3.js (R5c)', () => {
     expect(resolveLocal(from, '@horagon/no-such-package')).toBeNull()
     // SDK_ENTRIES (from tsup.config.ts) has every entry, each a real export of the SDK.
     expect(Object.keys(SDK_ENTRIES)).toEqual(
-      expect.arrayContaining(['@horagon/sdk', '@horagon/sdk/client', '@horagon/sdk/notice']),
+      expect.arrayContaining([
+        '@horagon/sdk',
+        '@horagon/sdk/client',
+        '@horagon/sdk/notice',
+        '@horagon/sdk/et',
+      ]),
     )
     for (const spec of Object.keys(SDK_ENTRIES)) {
       expect(workspaceExport(spec), spec).toMatch(/dist[\\/][\w-]+\.js$/)

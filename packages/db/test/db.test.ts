@@ -3,7 +3,9 @@ import { PgDialect } from 'drizzle-orm/pg-core'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import {
   atasClosedAway,
+  type Db,
   type DbHandle,
+  gamesByIds,
   getDraft,
   getEvidence,
   getGame,
@@ -184,6 +186,31 @@ describe('games', () => {
     expect((await listGames(h.db, { from, to, statuses: ['live'] })).map((g) => g.id)).toEqual([
       'nba-1',
     ])
+  })
+
+  it('gamesByIds reads the asked games with their markets, earliest tip-off first (R7)', async () => {
+    await upsertScheduledGames(h.db, [
+      game('nba-1', { scheduledTipoff: new Date('2026-11-20T02:00:00Z') }),
+      game('nba-2'),
+      game('nba-3'),
+    ])
+    await upsertMarket(h.db, market('M2', 'nba-2'))
+    await upsertMarket(h.db, { ...baseMarket('M2h', 'nba-2', 1) })
+    const rows = await gamesByIds(h.db, ['nba-1', 'nba-2', 'nba-9', 'nba-2'])
+    expect(rows.map((g) => g.id)).toEqual(['nba-2', 'nba-1'])
+    // The shape getGame returns, markets by kind.
+    expect(rows[0]).toEqual(await getGame(h.db, 'nba-2'))
+    expect(rows[0]?.markets.map((m) => m.pubkey)).toEqual(['M2', 'M2h'])
+    expect(rows[1]?.markets).toEqual([])
+  })
+
+  it('gamesByIds runs no query for an empty list', async () => {
+    const none = new Proxy({} as Db, {
+      get() {
+        throw new Error('no query expected')
+      },
+    })
+    await expect(gamesByIds(none, [])).resolves.toEqual([])
   })
 
   it('setFeatured marks exactly the given games of that date', async () => {

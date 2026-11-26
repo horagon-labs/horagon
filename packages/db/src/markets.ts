@@ -156,6 +156,19 @@ export async function countTradesWithoutBotMemo(db: Db): Promise<number> {
   return row?.n ?? 0
 }
 
+/**
+ * The wallets of `wallets` that sent a swap with the `horagon:bot` memo on any market
+ * (docs/metrics.md bot rule (a), per wallet). A null memo counts as false.
+ */
+export async function walletsWithBotMemo(db: Db, wallets: string[]): Promise<Set<string>> {
+  if (wallets.length === 0) return new Set()
+  const rows = await db
+    .selectDistinct({ wallet: trades.wallet })
+    .from(trades)
+    .where(and(inArray(trades.wallet, wallets), eq(trades.botMemo, true)))
+  return new Set(rows.map((r) => r.wallet))
+}
+
 export async function marketsByPubkeys(db: Db, pubkeys: string[]) {
   if (pubkeys.length === 0) return []
   return db.select().from(markets).where(inArray(markets.pubkey, pubkeys))

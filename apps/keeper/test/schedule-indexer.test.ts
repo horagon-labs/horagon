@@ -52,6 +52,7 @@ import {
   decodeTransaction,
   type IndexerDeps,
   indexOnce,
+  inRequestOrder,
   STUCK_AFTER,
   wholeTxFlows,
 } from '../src/indexer'
@@ -317,6 +318,38 @@ describe('indexer decodeTransaction', () => {
   })
 })
 
+describe('inRequestOrder', () => {
+  const tx = (id?: string) => ({ transaction: { signatures: id === undefined ? [] : [id] } })
+
+  it('puts each answer at the signature it carries, whatever order it came in', () => {
+    const [a, b, c] = [tx('a'), tx('b'), tx('c')]
+    expect(inRequestOrder(['a', 'b', 'c'], [c, a, b])).toEqual([a, b, c])
+    // The two orders measured on devnet: 0,2,1 keeps the first answer in place, 2,1,0 does not.
+    expect(inRequestOrder(['a', 'b', 'c'], [a, c, b])).toEqual([a, b, c])
+    expect(inRequestOrder(['a', 'b', 'c'], [c, b, a])).toEqual([a, b, c])
+  })
+
+  it('keys a sponsored trade on its id, the fee payer signature, not a later signer', () => {
+    const sponsored = { transaction: { signatures: ['id', 'user'] } }
+    expect(inRequestOrder(['id'], [sponsored])).toEqual([sponsored])
+    expect(inRequestOrder(['user'], [sponsored])).toEqual([null])
+  })
+
+  it('reads a null, a short answer, a foreign answer and an empty signature list as missing', () => {
+    const b = tx('b')
+    expect(inRequestOrder(['a', 'b', 'c'], [null, b])).toEqual([null, b, null])
+    expect(inRequestOrder(['a'], [tx('x')])).toEqual([null])
+    expect(inRequestOrder(['a'], [tx()])).toEqual([null])
+    expect(inRequestOrder(['a', 'b'], [])).toEqual([null, null])
+  })
+
+  it('keeps the first of two answers for one signature', () => {
+    const first = tx('a')
+    const second = tx('a')
+    expect(inRequestOrder(['a'], [first, second])[0]).toBe(first)
+  })
+})
+
 describe('indexOnce does not skip past a transaction it could not read', () => {
   const program = new HoragonProgram({ collateralMint: DEVNET_MUSDC_MINT })
   const sponsor = Keypair.generate().publicKey
@@ -370,6 +403,10 @@ describe('indexOnce does not skip past a transaction it could not read', () => {
   let order: string[]
   let failed: Set<string>
   let shortBatch: boolean
+  /** Answer each batch in reverse, as devnet may (JSON-RPC lets a node answer in any order). */
+  let reversedBatch: boolean
+  /** The whole batch call throws when it asks for one of these (web3.js on an error entry). */
+  let throwOn: Set<string>
   let signatureCalls: number
   let requested: string[]
   let sent: string[]
@@ -409,8 +446,10 @@ describe('indexOnce does not skip past a transaction it could not read', () => {
       },
       getTransactions: async (sigs: string[]) => {
         requested.push(...sigs)
+        if (sigs.some((x) => throwOn.has(x))) throw new Error('429 Too Many Requests')
         const txs = sigs.map((x) => chain.get(x) ?? null)
-        return shortBatch ? txs.slice(0, 1) : txs
+        if (shortBatch) return txs.slice(0, 1)
+        return reversedBatch ? txs.reverse() : txs
       },
       getMultipleAccountsInfo: async (keys: PublicKey[]) =>
         keys.map((k) => accountFor(k.toBase58())),
@@ -482,6 +521,8 @@ describe('indexOnce does not skip past a transaction it could not read', () => {
     order = ['s1', 's2', 's3']
     failed = new Set()
     shortBatch = false
+    reversedBatch = false
+    throwOn = new Set()
     signatureCalls = 0
     requested = []
     sent = []
@@ -689,7 +730,74 @@ describe('indexOnce does not skip past a transaction it could not read', () => {
     expect(skip[0]?.[1]).toContain('instruction 0')
   })
 
-  it('stops on a short batch, a missing meta, and a transaction that is not the one asked for', async () => {
+  it('reads a batch answered out of order whole, in signature order', async () => {
+    chain = new Map([
+      ['s1', readable('s1', 1, 1_795_000_001)],
+      ['s2', readable('s2', 2, 1_795_000_002)],
+      ['s3', readable('s3', 3, 1_795_000_003)],
+    ])
+    reversedBatch = true
+    await indexOnce(deps())
+    expect(requested).toEqual(['s1', 's2', 's3'])
+    // Each row carries its own transaction's slot and block time, not a neighbour's.
+    const rows = await listMarketTrades(h.db, [market.toBase58()])
+    expect(rows.map((t) => [t.sig, Number(t.slot), t.blockTime.getTime() / 1000]).sort()).toEqual([
+      ['s1', 1, 1_795_000_001],
+      ['s2', 2, 1_795_000_002],
+      ['s3', 3, 1_795_000_003],
+    ])
+    expect(await cursor()).toBe('s3')
+  })
+
+  it('pairs an out-of-order answer that holds a null by signature, as devnet sends it', async () => {
+    chain = new Map([
+      ['s1', null],
+      ['s2', readable('s2', 2, 1_795_000_002)],
+      ['s3', readable('s3', 3, 1_795_000_003)],
+    ])
+    reversedBatch = true
+    // Answer [s3, s2, null]: the null is s1's, so nothing is read past it.
+    await indexOnce(deps())
+    expect(await sigsIndexed()).toEqual([])
+    expect(await cursor()).toBeNull()
+
+    chain.set('s1', readable('s1', 1, 1_795_000_001))
+    chain.set('s2', null)
+    // Answer [s3, null, s1]: s1 is read, the scan stops at s2.
+    await indexOnce(deps())
+    expect(await sigsIndexed()).toEqual(['s1'])
+    expect(await cursor()).toBe('s1')
+
+    chain.set('s2', readable('s2', 2, 1_795_000_002))
+    await indexOnce(deps())
+    expect(await sigsIndexed()).toEqual(['s1', 's2', 's3'])
+    expect(await cursor()).toBe('s3')
+  })
+
+  it('keeps the chunks it read when a later batch call fails, and counts the stop', async () => {
+    order = Array.from({ length: 60 }, (_, i) => `b${String(i).padStart(2, '0')}`)
+    chain = new Map(order.map((sig, i) => [sig, readable(sig, i + 1, 1_795_000_001 + i)]))
+    throwOn = new Set(['b55'])
+    await indexOnce(deps())
+    expect(await sigsIndexed()).toEqual(order.slice(0, 50))
+    expect(await cursor()).toBe('b49')
+    expect(stops.get(market.toBase58())).toMatchObject({ sig: 'b50', count: 1 })
+    expect(warns.find((w) => w.msg === 'transaction batch read failed')?.obj).toMatchObject({
+      market: market.toBase58(),
+      sig: 'b50',
+      size: 10,
+      error: expect.stringContaining('429'),
+    })
+    expect(warns.some((w) => w.msg === 'index failed')).toBe(false)
+
+    throwOn = new Set()
+    await indexOnce(deps())
+    expect(await sigsIndexed()).toEqual(order)
+    expect(await cursor()).toBe('b59')
+    expect(stops.has(market.toBase58())).toBe(false)
+  })
+
+  it('stops at the first signature a short batch, a missing meta, or a foreign answer leaves unread', async () => {
     chain = new Map([
       ['s1', readable('s1', 1, 1_795_000_001)],
       ['s2', readable('s2', 2, 1_795_000_002)],
@@ -697,8 +805,8 @@ describe('indexOnce does not skip past a transaction it could not read', () => {
     ])
     shortBatch = true
     await indexOnce(deps())
-    expect(await sigsIndexed()).toEqual([])
-    expect(await cursor()).toBeNull()
+    expect(await sigsIndexed()).toEqual(['s1'])
+    expect(await cursor()).toBe('s1')
     shortBatch = false
     await indexOnce(deps())
     expect(await cursor()).toBe('s3')

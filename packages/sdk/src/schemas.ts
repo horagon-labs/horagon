@@ -116,10 +116,33 @@ export const ResolutionSchema = z.object({
   externalLp: z.boolean(),
 })
 
+const CountSchema = z.number().int().nonnegative()
+/** Swaps on a game's markets, the wallets that sent them and their USDC volume. */
+export const TradeTallySchema = z.object({
+  swaps: CountSchema,
+  wallets: CountSchema,
+  /** The absolute USDC leg of every buy and sell; a YES<->NO swap adds 0. */
+  volumeUsdc: AmountSchema,
+})
+
+/**
+ * Who traded a game (R2b): the reference agent is its wallet exactly; `others` holds the other
+ * team wallets and the bots (the `horagon:bot` memo on any market, or 20 swaps on this game
+ * within 300 s); everyone else is a fan. A live display: `scripts/count-fans.mjs` is the count.
+ */
+export const GameActivitySchema = z.object({
+  agent: TradeTallySchema.extend({ wallet: PubkeySchema }),
+  fans: TradeTallySchema,
+  others: TradeTallySchema,
+  lastFanTradeTs: UnixSecondsSchema.nullable(),
+  lastAgentTradeTs: UnixSecondsSchema.nullable(),
+})
+
 export const GameDetailSchema = GameSchema.extend({
   /** The "Market rules" text, one rule per item (spec section 6.2). */
   rules: z.array(z.string()),
   resolutions: z.array(ResolutionSchema),
+  activity: GameActivitySchema,
 })
 
 export const GamesQuerySchema = z.strictObject({
@@ -264,6 +287,83 @@ export const PositionsResponseSchema = z.object({
   /** mUSDC in the wallet's token account ("0" if it has none); null while RPC is down. */
   usdcBalance: AmountSchema.nullable(),
   positions: z.array(PositionSchema),
+  /**
+   * The NBA nights the wallet made calls on (`MeResponseSchema.nights`), sent only while My
+   * Game-day is on (FLAG_ME): the header shows its chip only then.
+   */
+  nights: z.number().int().nonnegative().optional(),
+})
+
+/**
+ * A position's state on My Game-day (R7): `final` once resolved, then `challenged`, `proposed`,
+ * `closed` (the game is final, the market halted, or past `end_ts`), otherwise `open`.
+ */
+export const MeStatusSchema = z.enum(['open', 'closed', 'proposed', 'challenged', 'final'])
+
+/**
+ * One call: a buy of a side, scored against the model. `model` is the side's model win chance at
+ * the buys, weighted by the shares each one gained; `points` = round(100 * (won ? 1 : 0) - 100 *
+ * model), null until the result is final (and for a postponed or canceled game, never scored).
+ */
+export const MeCallSchema = z.object({
+  model: ProbabilitySchema.nullable(),
+  result: z.enum(['won', 'lost']).nullable(),
+  points: z.number().int().nullable(),
+})
+
+export const MePositionSchema = PositionSchema.extend({
+  /** The team the side stands for. */
+  team: z.string(),
+  /** cost / shares; null without shares. */
+  avgPrice: ProbabilitySchema.nullable(),
+  status: MeStatusSchema,
+  /** proposed_at + the on-chain dispute window, while proposed; null when either is unknown. */
+  challengeEndsAt: UnixSecondsSchema.nullable(),
+  call: MeCallSchema.nullable(),
+})
+
+/** What the positions held pay if that side wins, and the net after their cost; null once settled. */
+export const MeIfWinsSchema = z
+  .object({
+    payoutUsdc: AmountSchema,
+    netUsdc: z.string().regex(/^-?(0|[1-9]\d*)(\.\d{1,6})?$/),
+  })
+  .nullable()
+
+export const MeGameSchema = z.object({
+  game: GameSchema,
+  /** A Practice game (league PRACTICE): scored apart, never counted in `nights`. */
+  practice: z.boolean(),
+  positions: z.array(MePositionSchema),
+  ifHomeWins: MeIfWinsSchema,
+  ifAwayWins: MeIfWinsSchema,
+})
+
+/** `GET /api/v1/me/{wallet}`: My Game-day, tonight's games of one wallet (R7, FLAG_ME). */
+export const MeResponseSchema = z.object({
+  wallet: PubkeySchema,
+  /** The night (`etNight(now)`): the ET date of now - 6 h. */
+  night: z.iso.date(),
+  now: UnixSecondsSchema,
+  /** Distinct ET tip-off dates of the NBA markets the wallet swapped on, from FIRST_COUNTED_NIGHT. */
+  nights: z.number().int().nonnegative(),
+  /** Tonight's NBA games the wallet holds, then its Practice games. */
+  games: z.array(MeGameSchema),
+  vsModel: z.object({
+    /** round(100 * sum(result - model)) over tonight's settled NBA calls; null with none. */
+    points: z.number().int().nullable(),
+    settled: z.number().int().nonnegative(),
+    pending: z.number().int().nonnegative(),
+    /** The same sum over the Practice calls, apart; null with none settled. */
+    practicePoints: z.number().int().nullable(),
+  }),
+  /**
+   * Claimable positions on no card above: earlier nights, and the markets the cards leave out
+   * (a second-half market of tonight's game). The field keeps its name; the page says "more".
+   */
+  earlierClaimable: z.number().int().nonnegative(),
+  /** The next scheduled NBA game of each followed or held team, at most 5, by tip-off. */
+  nextGames: z.array(GameSchema),
 })
 
 export const FaucetRequestSchema = z.strictObject({ wallet: PubkeySchema })
@@ -320,6 +420,8 @@ export type Outcome = z.infer<typeof OutcomeSchema>
 export type MarketSummary = z.infer<typeof MarketSummarySchema>
 export type Game = z.infer<typeof GameSchema>
 export type GameDetail = z.infer<typeof GameDetailSchema>
+export type GameActivity = z.infer<typeof GameActivitySchema>
+export type TradeTally = z.infer<typeof TradeTallySchema>
 export type Resolution = z.infer<typeof ResolutionSchema>
 export type GameHistory = z.infer<typeof HistorySchema>
 export type MarketState = z.infer<typeof MarketStateSchema>
@@ -331,6 +433,12 @@ export type ClaimBuildResponse = z.infer<typeof ClaimBuildResponseSchema>
 export type TxStatus = z.infer<typeof TxStatusSchema>
 export type Position = z.infer<typeof PositionSchema>
 export type PositionsResponse = z.infer<typeof PositionsResponseSchema>
+export type MeStatus = z.infer<typeof MeStatusSchema>
+export type MeCall = z.infer<typeof MeCallSchema>
+export type MePosition = z.infer<typeof MePositionSchema>
+export type MeIfWins = z.infer<typeof MeIfWinsSchema>
+export type MeGame = z.infer<typeof MeGameSchema>
+export type MeResponse = z.infer<typeof MeResponseSchema>
 export type FaucetResponse = z.infer<typeof FaucetResponseSchema>
 export type Health = z.infer<typeof HealthSchema>
 export type Problem = z.infer<typeof ProblemSchema>

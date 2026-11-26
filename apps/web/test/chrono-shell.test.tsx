@@ -135,6 +135,23 @@ describe('YourHour (spec 3.2)', () => {
     expect(one).toContain('aria-label="1 open position, worth 10.85 mUSDC"')
     expect(renderToStaticMarkup(<YourHour portfolio={undefined} onOpen={noop} />)).toBe('')
   })
+
+  it('fits the 375 px header with a wallet: chips never wrap, YourHour and the address from sm', () => {
+    const html = renderToStaticMarkup(
+      <YourHour portfolio={two} onOpen={noop} className="hidden sm:inline-flex" />,
+    )
+    expect(html).toMatch(/class="[^"]*shrink-0 whitespace-nowrap[^"]*hidden sm:inline-flex"/)
+    const button = readFileSync(
+      join(import.meta.dirname, '..', 'components', 'wallet-button.tsx'),
+      'utf8',
+    )
+    // Below sm the sheet lists the positions and shows the address: the balance pill alone fits.
+    expect(button).toContain(
+      '<YourHour portfolio={own} onOpen={() => open(true)} className="hidden sm:inline-flex" />',
+    )
+    expect(button).toMatch(/className="[^"]*shrink-0 whitespace-nowrap[^"]*"\s*>\s*\{balance/)
+    expect(button).toContain('<span className="hidden sm:inline"> · {shortKey(address)}</span>')
+  })
 })
 
 describe('FeelForm (spec 2.5)', () => {

@@ -862,7 +862,8 @@ describe('telegramAlerter', () => {
         throw new Error('https://api.telegram.org/botT/sendMessage unreachable')
       }) as unknown as typeof fetch,
     })
-    await expect(down.send('k', 'x')).resolves.toBeUndefined()
+    // It resolves, saying the message was not delivered.
+    await expect(down.send('k', 'x')).resolves.toBe(false)
   })
 
   it('never logs the bot token, on a network error or a rejection', async () => {

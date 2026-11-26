@@ -6,7 +6,7 @@
 // verified in the Task 24 e2e run.
 import type { Game, Side, TradeAction } from '@horagon/sdk'
 import { type ReactNode, useState } from 'react'
-import { dialCaption } from '../../lib/chrono/copy'
+import { faceCaption } from '../../lib/chrono/copy'
 import {
   detail,
   evening,
@@ -251,7 +251,7 @@ export function Gallery() {
                   modelProb={0.74}
                   timeLeft={s.timeLeft}
                   state={state}
-                  caption={dialCaption(state, s.game, state === 'resolved' ? 'yes' : null)}
+                  caption={faceCaption(state, s.game, state === 'resolved' ? 'yes' : null)}
                   liveDot={s.game.status === 'live'}
                   label={dialLabel({
                     game: s.game,

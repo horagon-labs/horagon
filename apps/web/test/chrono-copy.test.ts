@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { boardItem, rowWords } from '../lib/chrono/board'
 import {
   dialCaption,
+  faceCaption,
   homeWonOnScore,
   liveNumber,
   MODEL_HINT,
@@ -33,6 +34,10 @@ describe('what the number means (R5, audit section 13)', () => {
 
   it('follows the scoreboard after the final buzzer: never "wins" for the side that lost', () => {
     expect(dialCaption('closed', final(105, 107), null)).toBe('Final · CLE lost · result pending')
+    // On the dial face the state line under it says "result pending": one line at 375 px.
+    expect(faceCaption('closed', final(105, 107), null)).toBe('Final · CLE lost')
+    expect(faceCaption('resolved', final(105, 107), 'no')).toBe('Resolved: MEM won')
+    expect(faceCaption('live', game(), null)).toBe('CLE to win')
     // A proposed or challenged result has its own state line: no "result pending" over it (R5c).
     expect(dialCaption('proposed', final(110, 104), null)).toBe('Final · CLE won')
     expect(dialCaption('challenged', final(105, 107), null)).toBe('Final · CLE lost')

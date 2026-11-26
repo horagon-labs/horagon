@@ -437,6 +437,67 @@ describe('loadConfig', () => {
     expect(() => loadConfig(env({ KEEPER_TIMINGS: 'not json' }))).toThrow('KEEPER_TIMINGS')
   })
 
+  it('turns auto-propose on with a usable HORAGON_PUBLIC_URL, and off with the reason without', () => {
+    expect(loadConfig(env()).autoPropose).toEqual({
+      mode: 'off',
+      publicUrl: null,
+      off: 'HORAGON_PUBLIC_URL is not set',
+    })
+    const url = { HORAGON_PUBLIC_URL: 'https://www.horagon.xyz/' }
+    expect(loadConfig(env(url)).autoPropose).toEqual({
+      mode: 'on',
+      publicUrl: 'https://www.horagon.xyz',
+      off: null,
+    })
+    // A blank line keeps the default.
+    expect(loadConfig(env({ ...url, KEEPER_AUTO_PROPOSE: '' })).autoPropose.mode).toBe('on')
+    expect(loadConfig(env({ ...url, KEEPER_AUTO_PROPOSE: 'dry' })).autoPropose.mode).toBe('dry')
+    expect(loadConfig(env({ ...url, KEEPER_AUTO_PROPOSE: 'off' })).autoPropose).toEqual({
+      mode: 'off',
+      publicUrl: null,
+      off: 'KEEPER_AUTO_PROPOSE=off',
+    })
+    expect(() => loadConfig(env({ ...url, KEEPER_AUTO_PROPOSE: 'yes' }))).toThrow(
+      'KEEPER_AUTO_PROPOSE',
+    )
+    // A URL the evidence link cannot use turns it off; the keeper still starts.
+    expect(
+      loadConfig(env({ HORAGON_PUBLIC_URL: 'http://www.horagon.xyz' })).autoPropose,
+    ).toMatchObject({ mode: 'off', off: 'HORAGON_PUBLIC_URL must be https' })
+    expect(loadConfig(env({ HORAGON_PUBLIC_URL: 'not a url' })).autoPropose.off).toBe(
+      'HORAGON_PUBLIC_URL is not a URL',
+    )
+    const long = `https://www.horagon.xyz/${'a'.repeat(60)}`
+    expect(loadConfig(env({ HORAGON_PUBLIC_URL: long })).autoPropose.off).toMatch(
+      /^the evidence URI is longer than 128 characters/,
+    )
+  })
+
+  it('reads BALLDONTLIE_API_KEY, a blank one as unset, and never prints a bad one', () => {
+    expect(loadConfig(env()).balldontlieKey).toBeNull()
+    expect(loadConfig(env({ BALLDONTLIE_API_KEY: '' })).balldontlieKey).toBeNull()
+    const key = 'x'.repeat(16)
+    expect(loadConfig(env({ BALLDONTLIE_API_KEY: key })).balldontlieKey).toBe(key)
+    const short = 'y'.repeat(7)
+    let message = ''
+    try {
+      loadConfig(env({ BALLDONTLIE_API_KEY: short }))
+    } catch (err) {
+      message = (err as Error).message
+    }
+    expect(message).toContain('BALLDONTLIE_API_KEY')
+    expect(message).not.toContain(short)
+  })
+
+  it('reads the second-source wait of auto-propose from KEEPER_TIMINGS', () => {
+    expect(DEFAULT_TIMINGS.secondSourceWaitSecs).toBe(600)
+    const c = loadConfig(env({ KEEPER_TIMINGS: '{"secondSourceWaitSecs":300}' }))
+    expect(c.timings.secondSourceWaitSecs).toBe(300)
+    expect(() => loadConfig(env({ KEEPER_TIMINGS: '{"secondSourceWaitSecs":-1}' }))).toThrow(
+      'KEEPER_TIMINGS',
+    )
+  })
+
   it('needs both Telegram values or neither, and reads the sponsor public key', () => {
     const sponsor = Keypair.generate().publicKey.toBase58()
     const c = loadConfig(

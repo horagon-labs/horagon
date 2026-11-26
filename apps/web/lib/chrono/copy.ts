@@ -73,6 +73,15 @@ export function dialCaption(state: DialState, g: VerdictGame, outcome: Outcome |
 }
 
 /**
+ * The caption on the dial face: dialCaption without "result pending", which the state line under
+ * it already says ("Trading closed · result pending"), so the caption holds one line at 375 px.
+ */
+export function faceCaption(state: DialState, g: VerdictGame, outcome: Outcome | null): string {
+  const v = verdict(state, g, outcome)
+  return v.kind === 'final' ? finalWords(g, v.homeWon) : dialCaption(state, g, outcome)
+}
+
+/**
  * A position's market status in the wallet sheet (R5c, review finding 2): the keeper's halt is
  * the normal close at the final buzzer, so `halted` reads "trading closed". A Position carries no
  * game status to tell that from a halt mid-game; the game page says which one it was. An `open`

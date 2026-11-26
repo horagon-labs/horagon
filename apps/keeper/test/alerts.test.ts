@@ -44,6 +44,8 @@ describe('personAlertWindow', () => {
       'tick-failing',
       'index-failing',
       'evidence-mismatch:nba-1',
+      'source-held:nba-1',
+      'second-source-refused',
     ]) {
       expect(personAlertWindow(key), key).toBe(PERSON_ALERT_SECS)
     }
@@ -56,6 +58,9 @@ describe('personAlertWindow', () => {
       'challenge:nba-1:1',
       'draft:nba-1:0',
       'unconfirmed:nba-1:0',
+      'source-mismatch:nba-1',
+      'auto-proposed:nba-1:0',
+      'auto-propose-off',
       'treasury-low',
       'tx:create nba-1',
       'archived',
@@ -107,5 +112,23 @@ describe('telegramAlerter dedupeFor', () => {
     a.clock.t += 3_600
     await a.send('archive')
     expect(a.keys).toHaveLength(2)
+  })
+})
+
+describe('telegramAlerter delivery', () => {
+  it('says whether the message reached Telegram, until the key is tried again', async () => {
+    let up = false
+    const a = alerter({ ok: () => up })
+    expect(await a.send('auto-proposed:nba-1:0')).toBe(false)
+    // Within the 60 s before a retry, nothing is sent and the message is still not delivered.
+    a.clock.t += 30
+    expect(await a.send('auto-proposed:nba-1:0')).toBe(false)
+    up = true
+    a.clock.t += 30
+    expect(await a.send('auto-proposed:nba-1:0')).toBe(true)
+    // A repeat of a delivered key is dropped as delivered.
+    a.clock.t += 5
+    expect(await a.send('auto-proposed:nba-1:0')).toBe(true)
+    expect(a.keys).toEqual(['auto-proposed:nba-1:0', 'auto-proposed:nba-1:0'])
   })
 })

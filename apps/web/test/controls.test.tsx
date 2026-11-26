@@ -230,9 +230,9 @@ describe('the four control states (review §4.5)', () => {
       [
         'chrono/crown-panel.tsx', // Buy/Sell chips
         'chrono/crown-panel.tsx', // the inline faucet link
+        'key-backup.tsx', // Import, moved out of the wallet sheet by R7 (My Game-day)
         'positions.tsx',
         'wallet-button.tsx',
-        'wallet-sheet.tsx',
         'wallet-sheet.tsx',
       ].sort(),
     )

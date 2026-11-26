@@ -27,6 +27,8 @@ import {
   type MarketKind,
   type MarketState,
   MarketStateSchema,
+  type MeResponse,
+  MeResponseSchema,
   type Position,
   type PositionsResponse,
   PositionsResponseSchema,
@@ -222,6 +224,18 @@ export class HoragonClient {
   /** Positions plus the wallet's mUSDC balance, in one request. */
   portfolio(wallet: string): Promise<PositionsResponse> {
     return this.get(`/positions/${encodeURIComponent(wallet)}`, {}, PositionsResponseSchema)
+  }
+
+  /**
+   * My Game-day (R7): tonight's games of `wallet`, the score against the model, and the next game
+   * of each team in `teams` (and of every team the wallet held). NOT_FOUND while FLAG_ME is off.
+   */
+  me(wallet: string, teams: readonly string[] = []): Promise<MeResponse> {
+    return this.get(
+      `/me/${encodeURIComponent(wallet)}`,
+      { teams: teams.length > 0 ? teams.join(',') : undefined },
+      MeResponseSchema,
+    )
   }
 
   faucet(wallet: string): Promise<FaucetResponse> {

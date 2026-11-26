@@ -40,6 +40,34 @@ describe('Dial (spec 3.2, 4.3)', () => {
     expect(html).not.toContain('wins')
   })
 
+  it('keeps the 0 and 100 numerals out of the needle sweep and below the words (merge verify)', () => {
+    const html = dial({ price: 1, state: 'resolved', caption: 'Resolved: DAL won' })
+    const at = (n: string) => {
+      const m = html.match(new RegExp(`<text x="([\\d.]+)" y="([\\d.]+)"[^>]*>${n}</text>`))
+      if (!m) throw new Error(`no ${n} numeral`)
+      const [x, y] = [Number(m[1]), Number(m[2])]
+      return { angle: (Math.atan2(x - 100, 100 - y) * 180) / Math.PI, y }
+    }
+    for (const n of ['0', '100']) {
+      // The needle sweeps -135..135 degrees: a numeral past either end is never under it.
+      expect(Math.abs(at(n).angle), n).toBeGreaterThan(135)
+      // Below the number, caption and detail: in the light layout 0 and 100 sit at r70 ±142°
+      // (y ≈ 155), under the one-line caption band that ends above y ≈ 150 (review §4.2).
+      expect(at(n).y, n).toBeGreaterThanOrEqual(150)
+    }
+    expect(Math.abs(at('50').angle)).toBeLessThan(1)
+  })
+
+  it('draws the caption and the detail on a paper box, so a needle passes under the words', () => {
+    const html = dial({ caption: 'CLE to win', detail: 'Open until the final buzzer' })
+    expect(html).toMatch(/<span class="[^"]*bg-surface-raised[^"]*" data-caption="true">/)
+    expect(html).toMatch(
+      /<span class="[^"]*bg-surface-raised[^"]*">Open until the final buzzer<\/span>/,
+    )
+    // Light only (review §10 D9): no dark backdrop behind the words.
+    expect(html).not.toContain('bg-enamel-900')
+  })
+
   it('shows only the caption once resolved: no number beside "Resolved: MEM won"', () => {
     const html = dial({ state: 'resolved', price: 0, caption: 'Resolved: MEM won' })
     expect(html).not.toContain('data-value')

@@ -114,6 +114,20 @@ export async function getGame(db: Db, id: string): Promise<GameWithMarkets | nul
   return (await withMarkets(db, rows))[0] ?? null
 }
 
+/**
+ * The games with these ids (duplicates and unknown ids ignored), each with its markets as
+ * `getGame` returns it, earliest tip-off first. An empty list runs no query.
+ */
+export async function gamesByIds(db: Db, ids: readonly string[]): Promise<GameWithMarkets[]> {
+  if (ids.length === 0) return []
+  const rows = await db
+    .select()
+    .from(games)
+    .where(inArray(games.id, [...new Set(ids)]))
+    .orderBy(asc(games.scheduledTipoff), asc(games.id))
+  return withMarkets(db, rows)
+}
+
 export async function insertSnapshot(db: Db, s: typeof gameSnapshots.$inferInsert): Promise<void> {
   await db.insert(gameSnapshots).values(s).onConflictDoNothing()
 }

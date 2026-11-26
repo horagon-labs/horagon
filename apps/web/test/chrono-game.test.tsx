@@ -8,7 +8,7 @@ import { Gallery } from '../components/chrono/gallery'
 import { GameLoading, GameScreen, NoGame } from '../components/chrono/game-screen'
 import { MarketBlock } from '../components/chrono/market-block'
 import { WalletProvider } from '../components/wallet'
-import { detail, game, history, market, NOW } from '../lib/chrono/fixtures'
+import { activity, detail, game, history, market, NOW } from '../lib/chrono/fixtures'
 import { canTrade, gameDial } from '../lib/chrono/game'
 import { findRuns, latestRun } from '../lib/chrono/runs'
 import { DIAL_STATES } from '../lib/chrono/state'
@@ -99,6 +99,83 @@ describe('GameScreen (spec 4.2)', () => {
     ].map((s) => html.indexOf(s))
     expect(order.every((i) => i >= 0)).toBe(true)
     expect([...order].sort((a, b) => a - b)).toEqual(order)
+  })
+
+  it('says who traded right under the dial, before the Tape, and links /agent (R2b)', () => {
+    const traded = activity({
+      agent: { swaps: 12, wallets: 1, volumeUsdc: '840', wallet: activity().agent.wallet },
+      fans: { swaps: 3, wallets: 2, volumeUsdc: '45' },
+    })
+    const html = renderToStaticMarkup(
+      <GameScreen
+        game={detail({ activity: traded })}
+        history={history()}
+        dial={gameDial(game(), market(), NOW - 3_730, null, NOW)}
+        now={NOW}
+        stale={false}
+        right={null}
+      />,
+    )
+    const order = [
+      'role="img"',
+      'data-agent-line',
+      'Reference agent: 12 swaps, 840.00 mUSDC · Fans: 3 swaps, 45.00 mUSDC',
+      'href="/agent"',
+      'Times in ET',
+    ].map((s) => html.indexOf(s))
+    expect(order.every((i) => i >= 0)).toBe(true)
+    expect([...order].sort((a, b) => a - b)).toEqual(order)
+  })
+
+  it('invites no fan on a final game, where trading is closed (R2b)', () => {
+    const traded = activity({
+      agent: { swaps: 6, wallets: 1, volumeUsdc: '600', wallet: activity().agent.wallet },
+    })
+    const final = game({ status: 'final' })
+    const html = renderToStaticMarkup(
+      <GameScreen
+        game={detail({ status: 'final', activity: traded })}
+        history={history()}
+        dial={gameDial(final, market(), NOW - 3_730, null, NOW)}
+        now={NOW}
+        stale={false}
+        right={null}
+      />,
+    )
+    expect(html).toContain('Reference agent: 6 swaps, 600.00 mUSDC · No fan trades')
+    expect(html).not.toContain('be the first')
+  })
+
+  it('invites a fan while the market trades and no fan has traded (R2b)', () => {
+    const traded = activity({
+      agent: { swaps: 6, wallets: 1, volumeUsdc: '600', wallet: activity().agent.wallet },
+    })
+    const html = renderToStaticMarkup(
+      <GameScreen
+        game={detail({ activity: traded })}
+        history={history()}
+        dial={gameDial(game(), market(), NOW - 3_730, null, NOW)}
+        now={NOW}
+        stale={false}
+        right={null}
+      />,
+    )
+    expect(html).toContain('No fan trades yet: be the first to move it')
+  })
+
+  it('has no agent line without a winner market', () => {
+    const html = renderToStaticMarkup(
+      <GameScreen
+        game={detail({ markets: [] })}
+        history={undefined}
+        dial={gameDial(game(), undefined, null, null, NOW)}
+        now={NOW}
+        stale={false}
+        right={null}
+      />,
+    )
+    expect(html).not.toContain('data-agent-line')
+    expect(html).not.toContain('Reference agent')
   })
 
   it('puts the two halves side by side from 1024 px', () => {
@@ -224,6 +301,41 @@ describe('the run flash on page open (spec 2.4)', () => {
     expect(beatArmed(true, first)).toBe(false)
     expect(beatArmed(false, null)).toBe(true)
     expect(isBeat({ key: first, armed: beatArmed(false, first) }, 'MEM:99')).toBe(true)
+  })
+})
+
+describe('the Scorebug run line (spec 3.2)', () => {
+  const render = (status: 'live' | 'final', h = history(), ended: 'no' | 'yes' | null = null) => {
+    const g = game({ status })
+    const m = status === 'final' ? market({ status: 'proposed' }) : market()
+    return renderToStaticMarkup(
+      <GameScreen
+        game={detail({ status })}
+        history={h}
+        dial={gameDial(g, m, NOW - 3_730, ended, NOW)}
+        now={NOW}
+        stale={false}
+        right={null}
+      />,
+    )
+  }
+
+  it('shows a fresh run while the game is live', () => {
+    expect(render('live')).toContain('data-run')
+  })
+
+  it('drops the run once the game is final, though history still holds it', () => {
+    expect(render('final', history(), 'no')).not.toContain('data-run')
+    expect(render('final', history(), 'no')).not.toContain('8–0 run')
+  })
+
+  it('drops an old run from a live game once newer snapshots have moved on', () => {
+    const h = history()
+    const last = h.snapshots.at(-1)
+    if (!last) throw new Error('fixture')
+    const later = { ...last, ts: last.ts + 1_800, period: 4, homeScore: 90, awayScore: 92 }
+    const old = { ...h, snapshots: [...h.snapshots, later] }
+    expect(render('live', old)).not.toContain('data-run')
   })
 })
 

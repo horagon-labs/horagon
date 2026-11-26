@@ -1,14 +1,16 @@
 'use client'
-// The game screen (spec 4.2). One column on mobile: Scorebug, the big Dial, Tape, then the
-// Pusher, PositionCard and ResolutionCard. From 1024 px the same two halves sit side by side:
-// Scorebug, Dial and Tape on the left, the crown, PositionCard and ResolutionCard on the right.
+// The game screen (spec 4.2). One column on mobile: Scorebug, the big Dial, who traded (R2b),
+// Tape, then the Pusher, PositionCard and ResolutionCard. From 1024 px the same two halves sit
+// side by side: Scorebug, Dial, who traded and Tape on the left, the crown, PositionCard and
+// ResolutionCard on the right.
 import type { GameDetail, GameHistory } from '@horagon/sdk'
 import Link from 'next/link'
 import type { ReactNode } from 'react'
 import { winnerOf } from '../../lib/chrono/board'
-import { dialCaption } from '../../lib/chrono/copy'
-import type { GameDial } from '../../lib/chrono/game'
-import { findRuns, latestRun } from '../../lib/chrono/runs'
+import { faceCaption, liveNumber } from '../../lib/chrono/copy'
+import { canTrade, type GameDial } from '../../lib/chrono/game'
+import { findRuns, freshRun, latestRun } from '../../lib/chrono/runs'
+import { AgentLine } from './agent-line'
 import { Dial } from './dial'
 import { runKeyOf, stateLine } from './dial-look'
 import { ResolutionCard } from './resolution-card'
@@ -51,7 +53,11 @@ export function StateLine({ children }: { children: string }) {
 export function GameScreen(p: GameScreenProps) {
   const { game, dial } = p
   const winner = winnerOf(game)
-  const run = p.history && winner ? latestRun(findRuns(p.history, winner.pubkey)) : null
+  const latest = p.history && winner ? latestRun(findRuns(p.history, winner.pubkey)) : null
+  // The Scorebug says "on an 8–0 run" in the present tense, so only while the game is live, the
+  // number still moves and the run is recent. The flash key keeps the unfiltered run.
+  const live = game.status === 'live' && liveNumber(dial.state)
+  const run = live && p.history ? freshRun(latest, p.history) : null
   return (
     <div className="space-y-6">
       <Reconnecting stale={p.stale} />
@@ -64,15 +70,16 @@ export function GameScreen(p: GameScreenProps) {
               modelProb={game.modelProb}
               timeLeft={dial.timeLeft}
               state={dial.state}
-              caption={dialCaption(dial.state, game, winner?.outcome ?? null)}
+              caption={faceCaption(dial.state, game, winner?.outcome ?? null)}
               label={dial.label}
               liveDot={game.status === 'live'}
               stale={p.stale}
-              runKey={runKeyOf(p.history, run)}
+              runKey={runKeyOf(p.history, latest)}
               className="mx-auto max-w-md"
             />
             <StateLine>{stateLine(dial.state, game, dial.secsLeft, p.now)}</StateLine>
           </div>
+          {winner && <AgentLine activity={game.activity} trading={canTrade(dial.state)} />}
           {winner && (
             <Tape history={p.history} market={winner.pubkey} home={game.home} away={game.away} />
           )}

@@ -1,7 +1,9 @@
 // Tonight (Chronometer spec 4.1, R5): the hero and the live board. Rendered per request, so the
 // first HTML holds tonight's games (lib/server/api.ts); the board then polls in the browser.
+// Under the board, one static line discloses the reference agent (R2b).
 import type { Metadata } from 'next'
 import { connection } from 'next/server'
+import { AgentNote } from '../components/chrono/agent-line'
 import { Hero } from '../components/chrono/hero'
 import { TonightBoard } from '../components/tonight-board'
 import { HOME_TITLE, SITE_DESCRIPTION } from '../lib/meta'
@@ -27,6 +29,7 @@ export default async function TonightPage() {
     <>
       <Hero />
       <TonightBoard initial={initial} />
+      <AgentNote />
     </>
   )
 }
