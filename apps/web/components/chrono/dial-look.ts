@@ -58,7 +58,11 @@ export const beatArmed = (loading: boolean | undefined, key: string | null | und
 
 type LineGame = Pick<Game, 'status' | 'period' | 'clockSecs' | 'scheduledTipoff'>
 
-/** The one line under the number (spec 4.3 "Cách hien"); void reuses gameClock's own words. */
+/**
+ * The one line under the number (spec 4.3 "Cách hien"); void reuses gameClock's own words. An
+ * open market closes at the final buzzer (the keeper halts it on the first Final), so a live
+ * one names no time; in its last 5 min before end_ts it closes at end_ts, and counts down.
+ */
 export function stateLine(
   state: DialState,
   game: LineGame,
@@ -79,8 +83,9 @@ export function stateLine(
     case 'closed':
       return 'Trading closed, waiting for the result'
     case 'closing':
-    case 'live':
       return `closes in ${countdown(secsLeft ?? 0, 0)}`
+    case 'live':
+      return 'Open until the final buzzer'
     case 'pre': {
       if (secsLeft === null) return 'market opens 60 min before tip-off'
       const tip = Math.floor(Date.parse(game.scheduledTipoff) / 1000)

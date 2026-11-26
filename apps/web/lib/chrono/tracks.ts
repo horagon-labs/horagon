@@ -5,7 +5,11 @@ import { nightAngle, polar } from './geometry'
 
 /** The market opens 60 min before tip-off (as the game cards said). */
 export const PRE_OPEN_SECS = 3_600
-/** Tier 1's end_ts rule, tip-off + 2 h 10 min: the estimate before a market exists. */
+/**
+ * The arc's close before a market exists: tip-off + 2 h 10 min, the end_ts rule until
+ * 2026-11-26. The keeper now sets end_ts = tip-off + 3 h and closes at the final buzzer before
+ * that; this estimate is part of the dial geometry and stays as drawn.
+ */
 export const EST_LENGTH_SECS = 7_800
 /** The face shows [now - 2 h, now + 10 h]: exactly 12 hours, one turn. */
 export const WINDOW_BEFORE_SECS = 7_200

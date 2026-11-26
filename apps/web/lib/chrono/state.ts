@@ -104,13 +104,15 @@ function stateWords(i: DialLabelInput): string {
     case 'closed':
       return 'trading closed, waiting for the result'
     default:
-      return i.secsLeft === null
-        ? 'market opens 60 min before tip-off'
-        : `closes in ${spokenDuration(i.secsLeft)}`
+      if (i.secsLeft === null) return 'market opens 60 min before tip-off'
+      // An open market closes at the final buzzer; in its last 5 min before end_ts, at end_ts.
+      return i.state === 'closing'
+        ? `closes in ${spokenDuration(i.secsLeft)}`
+        : 'open until the final buzzer'
   }
 }
 
-/** "CLE wins, 77 cents, model 74, closes in 1 hour 2 minutes" (spec 2.6). */
+/** "CLE wins, 77 cents, model 74, open until the final buzzer" (spec 2.6). */
 export function dialLabel(i: DialLabelInput): string {
   const parts = [
     `${i.team} wins`,
