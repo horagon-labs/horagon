@@ -1,7 +1,8 @@
 // Always on screen (spec section 2, legal): fixed to the bottom of every page. Chronometer
 // changes its look only, never its words (spec 2.7): a solid white band under a brass hairline,
-// ink 13/600, so nothing scrolls through it (light branding review §4.1). The words are PLAY_MONEY_NOTICE from the
-// SDK, the one copy of the line (the crown sheet, OG images and bot messages use it too).
+// ink 13/600, so nothing scrolls through it (light branding review §4.1). The words are
+// PLAY_MONEY_NOTICE from the SDK, the one copy of the line (the crown sheet, OG images and bot
+// messages use it too).
 import { PLAY_MONEY_NOTICE } from '@horagon/sdk/notice'
 
 export function PlayMoneyBanner() {

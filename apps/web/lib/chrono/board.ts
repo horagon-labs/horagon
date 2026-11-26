@@ -116,9 +116,10 @@ export function yourHour(
 /**
  * A row's three right-hand lines (R5, audit section 13): whose chance the number is, the number
  * in percent, and the close. "MEM to win · 62% · latest 10:40 PM ET" while it trades (it closes
- * at the final buzzer, end_ts at the latest, R1), "closes in 2:10" in its last five minutes; once the final buzzer went, "CHA lost · 74% ·
- * result pending"; after the result, "Resolved: MEM won" with no number. A market that stopped
- * names no time. A game that started with no market says so (R5c), never a past opening time.
+ * at the final buzzer, end_ts at the latest, R1), "closes in 2:10" in its last five minutes;
+ * once the final buzzer went, "CHA lost · 74% · result pending"; after the result, "Resolved:
+ * MEM won" with no number. A market that stopped names no time. A game that started with no
+ * market says so (R5c), never a past opening time.
  */
 export function rowWords(i: BoardItem): { subject: string; value: string; note: string } {
   const subject = rowSubject(i.state, i.game, i.market?.outcome ?? null)
