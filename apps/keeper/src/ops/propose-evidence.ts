@@ -17,9 +17,9 @@ import {
   putEvidence,
   upsertDraft,
 } from '@horagon/db'
-import { errorSummary } from '@horagon/sdk'
+import { errorSummary, parseResolutionEvidence, type ResolutionEvidence } from '@horagon/sdk'
 import { z } from 'zod'
-import type { SealedEvidence } from '../evidence'
+import { type SealedEvidence, sealEvidence } from '../evidence'
 
 /** `keeper_heartbeats.process` of a game's propose record. */
 export const proposeRecordKey = (gameId: string) => `propose:${gameId}`
@@ -266,8 +266,9 @@ export interface EvidenceChoice {
 
 /**
  * The evidence to propose with. No stored row: sealed now, to write. A stored row rebuilt from
- * the same inputs (its own `confirmedAt`) to the same hash: reused, nothing written. Otherwise
- * refused, unless `replace` is set and `pending()` finds nothing that can still land.
+ * the same inputs (its own `confirmedAt`, or none for evidence without a confirming source) to
+ * the same hash: reused, nothing written. Otherwise refused, unless `replace` is set and
+ * `pending()` finds nothing that can still land.
  */
 export async function chooseEvidence(
   db: Db,
@@ -287,6 +288,9 @@ export async function chooseEvidence(
     if (again.hashHex === stored.hash) return { sealed: again, write: false }
   }
   const fresh = await p.seal(p.now)
+  // Evidence with no `sources[1]` (an auto-proposal no second source checked) has no time to
+  // read back: the same inputs seal to the same hash whenever they are sealed.
+  if (fresh.hashHex === stored.hash) return { sealed: fresh, write: false }
   if (!p.replace) {
     throw new EvidenceRefusal(
       `${p.gameId}: the stored evidence (sha256 ${stored.hash}) was sealed from other inputs ` +
@@ -299,6 +303,62 @@ export async function chooseEvidence(
   const why = await p.pending()
   if (why) throw new EvidenceRefusal(`${p.gameId}: --replace-evidence refused: ${why}`)
   return { sealed: fresh, write: true }
+}
+
+/** What stored evidence must hold for the keeper to send it: the game, and the draft it proposes. */
+export interface DraftFacts {
+  externalId: string
+  status: string
+  homeScore: number
+  awayScore: number
+}
+
+/** The stored row read back: parsed, re-canonicalized to the same bytes, hashed; else null. */
+async function readBack(json: string): Promise<SealedEvidence | null> {
+  let evidence: ResolutionEvidence
+  try {
+    evidence = parseResolutionEvidence(JSON.parse(json))
+  } catch {
+    return null
+  }
+  const sealed = await sealEvidence(evidence)
+  return sealed.json === json ? sealed : null
+}
+
+/**
+ * The keeper's rule (R6): seal once, then send the stored row as it is. No stored row: sealed
+ * now, to write. A stored row is read back (its canonical bytes and its sha256) and checked
+ * against the game and the draft's status and score, then sent with nothing written, whatever
+ * the second source says by now. A row that fails is refused: the keeper never replaces stored
+ * evidence (it has no `--replace-evidence`), since a propose that carried it may still land.
+ */
+export async function keptEvidence(
+  db: Db,
+  p: {
+    gameId: string
+    seal: (confirmedAt: Date) => Promise<SealedEvidence>
+    now: Date
+    expect: DraftFacts
+  },
+): Promise<EvidenceChoice> {
+  const stored = await getEvidence(db, p.gameId, 0)
+  if (!stored) return { sealed: await p.seal(p.now), write: true }
+  const sealed = await readBack(stored.json)
+  const e = sealed?.evidence
+  const holds =
+    sealed?.hashHex === stored.hash &&
+    e?.gameId === p.expect.externalId &&
+    e.status === p.expect.status &&
+    e.homeScore === p.expect.homeScore &&
+    e.awayScore === p.expect.awayScore
+  if (!sealed || !holds) {
+    throw new EvidenceRefusal(
+      `${p.gameId}: the stored evidence (sha256 ${stored.hash}) does not hold the ${p.expect.status} ` +
+        `draft ${p.expect.homeScore}-${p.expect.awayScore}, and the keeper never replaces it: ` +
+        'propose by hand (runbook B)',
+    )
+  }
+  return { sealed, write: false }
 }
 
 /** A draft row to write, as `upsertDraft` takes it. */
@@ -384,21 +444,25 @@ export function nextDraft(
 }
 
 /**
- * `chooseEvidence`, then the writes it allows in ONE transaction: the evidence (when `write`),
- * `newDraft` (a draft this run built in memory; null when the stored one is used as it is), and
- * the propose record `record(sealed)` returns (null: none). A refused run writes nothing, and a
- * failed write leaves none of the three. The transaction commits before the caller sends, so the
- * record is on disk before the propose goes out. The pending check runs before it, outside the
- * transaction, so no DB connection waits on the RPC.
+ * `chooseEvidence` (or, with `keepStored`, the keeper's `keptEvidence`), then the writes it
+ * allows in ONE transaction: the evidence (when `write`), `newDraft` (a draft this run built in
+ * memory; null when the stored one is used as it is), and the propose record `record(sealed)`
+ * returns (null: none). A refused run writes nothing, and a failed write leaves none of the
+ * three. The transaction commits before the caller sends, so the record is on disk before the
+ * propose goes out. The pending check runs before it, outside the transaction, so no DB
+ * connection waits on the RPC.
  */
 export async function chooseAndStoreEvidence(
   db: Db,
   p: Parameters<typeof chooseEvidence>[1] & {
     newDraft: DraftInsert | null
     record?: (sealed: SealedEvidence) => ProposeRecord | null
+    keepStored?: DraftFacts
   },
 ): Promise<EvidenceChoice> {
-  const choice = await chooseEvidence(db, p)
+  const choice = p.keepStored
+    ? await keptEvidence(db, { ...p, expect: p.keepStored })
+    : await chooseEvidence(db, p)
   const record = p.record?.(choice.sealed) ?? null
   await db.transaction(async (tx) => {
     if (choice.write) {

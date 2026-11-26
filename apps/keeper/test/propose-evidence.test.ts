@@ -179,6 +179,32 @@ describe('chooseEvidence', () => {
     expect(choice.sealed.evidence.homeScore).toBe(112)
   })
 
+  it('reuses stored evidence with no confirming source when a fresh seal has its hash', async () => {
+    // The keeper's unchecked proposal: ESPN alone, so confirmedAtOf has nothing to read back.
+    const espnOnly = () => sealEvidence(buildEvidence({ game, draft, kind: 0 }))
+    const stored = await espnOnly()
+    expect(confirmedAtOf(stored.json)).toBeNull()
+    await putEvidence(h.db, { gameId: ID, kind: 0, json: stored.json, hash: stored.hashHex })
+    const choice = await chooseEvidence(h.db, {
+      gameId: ID,
+      seal: espnOnly,
+      now: RERUN,
+      replace: false,
+      pending: async () => 'never asked',
+    })
+    expect(choice).toMatchObject({ write: false, sealed: { hashHex: stored.hashHex } })
+    // A guardian's run with a box score is other inputs: refused, as before.
+    await expect(
+      chooseEvidence(h.db, {
+        gameId: ID,
+        seal: sealer(),
+        now: RERUN,
+        replace: false,
+        pending: nothingPending,
+      }),
+    ).rejects.toThrow(EvidenceRefusal)
+  })
+
   it('treats stored evidence it cannot read back as sealed from other inputs', async () => {
     await putEvidence(h.db, { gameId: ID, kind: 0, json: '{"v":1', hash: 'ab'.repeat(32) })
     await expect(
