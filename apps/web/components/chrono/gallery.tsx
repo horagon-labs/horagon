@@ -238,7 +238,7 @@ export function Gallery() {
   return (
     <div className="space-y-10 pb-10">
       <Section title="Dial states (spec 4.3)">
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {DIAL_STATES.map((state) => {
             const s = SAMPLES[state]
             return (
@@ -269,7 +269,7 @@ export function Gallery() {
         </div>
       </Section>
       <Section title="Loading, stale, ghost (spec 4.4, 5.5)">
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <Dial loading price={null} modelProb={null} timeLeft={1} state="pre" label="Loading" />
           <Dial
             stale
@@ -325,7 +325,7 @@ export function Gallery() {
         <GameSample stale />
       </Section>
       <Section title="Game loading and no game">
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid gap-4 sm:grid-cols-2">
           <GameLoading stale={false} />
           <NoGame />
         </div>

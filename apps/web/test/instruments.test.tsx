@@ -176,6 +176,16 @@ describe('the state line sits under the face (review §4.2)', () => {
     expect(face).not.toContain('Open until the final buzzer</span>')
   })
 
+  it('shows the gallery faces at a real size: one column on a phone (§8 risk 3)', () => {
+    // Two columns put 160 px faces on a 375 px screen, smaller than any Dial the app draws
+    // (343 px on that phone), so the gallery shots showed collisions no reader meets.
+    const gallery = renderToStaticMarkup(<Gallery />)
+    const grids = [...gallery.matchAll(/<div class="(grid [^"]*)">(?:<figure|<div role="img")/g)]
+    expect(grids.length).toBeGreaterThanOrEqual(2)
+    for (const [, cls] of grids) expect(cls).not.toMatch(/(?<!:)grid-cols-2/)
+    expect(gallery).toContain('<div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3"><figure')
+  })
+
   it('does the same on the still face and in the gallery', () => {
     expect(renderToStaticMarkup(<NoGame />)).toContain(
       '<p class="mt-2 text-center text-13 text-ash-400" data-state-line="true">No game here</p>',
