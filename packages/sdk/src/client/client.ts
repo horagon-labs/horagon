@@ -122,7 +122,7 @@ export class HoragonClient {
   }
 
   readonly games = {
-    /** Games of one ET game date (`date`), or of today and tomorrow ET. */
+    /** Games of one ET game date (`date`), or of the ET night (`etNight`) and the day after it. */
     list: (q: { date?: string; status?: GameStatus } = {}): Promise<Game[]> =>
       this.get('/games', q, GamesSchema, 'games'),
     get: (id: string): Promise<GameDetail> =>

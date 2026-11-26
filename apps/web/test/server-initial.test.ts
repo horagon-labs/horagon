@@ -94,6 +94,18 @@ describe('loadBoard (R5)', () => {
     ])
   })
 
+  it('after midnight ET, starts from the night, so the day after today is asked (I1)', async () => {
+    // 2026-11-26 06:00Z is 01:00 ET: the night is still 11-25, so the default list holds 11-25
+    // and 11-26, and the look-ahead starts at 11-27.
+    const now = Date.parse('2026-11-26T06:00:00Z') / 1000
+    const fri = later('2026-11-28T23:30:00.000Z', { id: 'nba-f' })
+    const thu = later('2026-11-27T23:30:00.000Z', { id: 'nba-th' })
+    const { c, list } = client({ default: [], '2026-11-27': [thu], '2026-11-28': [fri] })
+    const b = await loadBoard(c, now)
+    expect(b.upcoming).toEqual({ tip: secs(thu), count: 1 })
+    expect(list.mock.calls.map((a) => a[0]?.date)[1]).toBe('2026-11-27')
+  })
+
   it('stops after LOOKAHEAD_DAYS, and leaves the games out when the API is late', async () => {
     const { c, list } = client({ default: [] })
     expect((await loadBoard(c, NOW)).upcoming).toBeNull()
