@@ -26,10 +26,12 @@ function base58Bytes(value: string): number | null {
  * What `new PublicKey(value).toBase58() === value` accepts, without web3.js, so a page that checks
  * API answers with these schemas does not load it (R5c): base58 that decodes to exactly 32 bytes.
  * A base58 text has one spelling per byte string (each leading "1" is one zero byte), so the
- * round trip adds nothing to the length check. Off-curve keys (PDAs) pass, as before.
+ * round trip adds nothing to the length check. Off-curve keys (PDAs) pass, as before. zod runs
+ * this refine even on a string its regex refused, so a long one is refused here before the
+ * BigInt work, which grows with the square of the length.
  */
 function isPubkey(value: string): boolean {
-  return base58Bytes(value) === 32
+  return value.length <= 44 && base58Bytes(value) === 32
 }
 
 export const PubkeySchema = z

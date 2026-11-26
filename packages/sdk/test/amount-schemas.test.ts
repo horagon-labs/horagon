@@ -97,6 +97,14 @@ describe('schemas', () => {
     }
   })
 
+  it('refuses a long base58 text without decoding it (R5c refix)', () => {
+    // zod runs the refine even after the regex refused: the decode would grow with length².
+    const long = '2'.repeat(200_000)
+    const start = performance.now()
+    expect(PubkeySchema.safeParse(long).success).toBe(false)
+    expect(performance.now() - start).toBeLessThan(250)
+  })
+
   it('splits a comma-separated status filter', () => {
     expect(GamesQuerySchema.parse({ status: 'live,final' }).status).toEqual(['live', 'final'])
     expect(GamesQuerySchema.safeParse({ status: 'live,soon' }).success).toBe(false)
