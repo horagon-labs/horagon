@@ -81,7 +81,7 @@ export function WalletButton() {
         ref={dialog}
         aria-label="Play wallet"
         onClose={() => setSheet(null)}
-        className="m-auto w-[min(32rem,calc(100%-2rem))] rounded-face border border-brass-500/20 bg-enamel-900 p-5 text-ivory-100 backdrop:bg-black/70"
+        className="m-auto w-[min(32rem,calc(100%-2rem))] rounded-face border border-brass-500/20 bg-enamel-900 p-5 text-ivory-100 backdrop:bg-ivory-100/30"
       >
         {sheet && (
           <WalletSheet atPositions={sheet.atPositions} onClose={() => dialog.current?.close()} />

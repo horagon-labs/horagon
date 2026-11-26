@@ -69,7 +69,7 @@ export function CrownSheet(p: {
         if (pressedBackdrop.current && onBackdrop(e)) e.currentTarget.close()
         pressedBackdrop.current = false
       }}
-      className="mx-auto mt-auto mb-0 max-h-[92dvh] w-full max-w-lg overflow-hidden rounded-t-face border border-b-0 border-brass-500/20 bg-enamel-900 p-0 text-ivory-100 backdrop:bg-black/70"
+      className="mx-auto mt-auto mb-0 max-h-[92dvh] w-full max-w-lg overflow-hidden rounded-t-face border border-b-0 border-brass-500/20 bg-enamel-900 p-0 text-ivory-100 backdrop:bg-ivory-100/30"
     >
       <div className="flex max-h-[92dvh] flex-col">
         <div ref={body} className="overflow-y-auto">

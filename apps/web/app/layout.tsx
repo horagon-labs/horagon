@@ -7,6 +7,7 @@ import { Wordmark } from '../components/chrono/wordmark'
 import { PlayMoneyBanner } from '../components/play-money-banner'
 import { WalletProvider } from '../components/wallet'
 import { WalletButton } from '../components/wallet-button'
+import { COLORS } from '../lib/chrono/tokens'
 import { SITE_DESCRIPTION, SITE_NAME, SITE_TITLE, siteUrl } from '../lib/meta'
 import './globals.css'
 
@@ -33,8 +34,9 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   width: 'device-width',
   initialScale: 1,
-  colorScheme: 'dark',
-  themeColor: '#07090b',
+  // Light only (light branding review §4.9); the browser bar runs into the white header.
+  colorScheme: 'only light',
+  themeColor: COLORS['enamel-900'],
 }
 
 export default function RootLayout({ children }: { children: ReactNode }) {

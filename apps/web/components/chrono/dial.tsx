@@ -2,7 +2,7 @@
 // The dial (spec 3.2, 4.3): price needle, model mark, time ring and state on one face. It only
 // draws; every decision about what to show arrives in props.
 import * as m from 'motion/react-m'
-import { useEffect, useId, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { liveNumber } from '../../lib/chrono/copy'
 import { useMotionReduced } from '../../lib/chrono/feel'
 import { arcPath, polar, priceToAngle } from '../../lib/chrono/geometry'
@@ -77,7 +77,6 @@ function pts(...points: { x: number; y: number }[]): string {
 }
 
 export function Dial(p: DialProps) {
-  const id = useId()
   const reduced = useMotionReduced()
   const flash = useBeat(p.runKey, beatArmed(p.loading, p.runKey))
   const settle = useBeat(p.state === 'resolved' ? 'resolved' : null, !p.loading)
@@ -95,17 +94,13 @@ export function Dial(p: DialProps) {
       className={`dial dial-${p.state} relative aspect-square w-full ${p.className ?? ''}`}
     >
       <svg viewBox="0 0 200 200" aria-hidden="true" className="absolute inset-0 size-full">
-        <defs>
-          <radialGradient id={`${id}-face`} cx="50%" cy="42%" r="60%">
-            <stop offset="0%" stopColor="#151a20" />
-            <stop offset="100%" stopColor="#07090b" />
-          </radialGradient>
-        </defs>
+        {/* A flat white sheet: no gradient, no shadow (spec 2.3, light branding review §4.2). */}
+        <circle cx={C} cy={C} r={97} className="fill-enamel-900" />
         <circle
           cx={C}
           cy={C}
           r={97}
-          fill={`url(#${id}-face)`}
+          fill="none"
           strokeWidth={p.state === 'challenged' ? 2 : 1}
           className={rimClass(p.state)}
           data-rim

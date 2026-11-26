@@ -48,7 +48,7 @@ export function AgeDialog(props: {
       aria-labelledby="age-gate-title"
       // Escape or "Not now" while the gate is still wanted: the pending action is dropped.
       onClose={() => props.open && props.onCancel()}
-      className="m-auto w-[min(28rem,calc(100%-2rem))] rounded-face border border-brass-500/20 bg-enamel-900 p-5 text-ivory-100 backdrop:bg-black/70"
+      className="m-auto w-[min(28rem,calc(100%-2rem))] rounded-face border border-brass-500/20 bg-enamel-900 p-5 text-ivory-100 backdrop:bg-ivory-100/30"
     >
       <div className="space-y-4">
         <h2 id="age-gate-title" className="text-15 font-semibold tracking-wide text-brass-400">

@@ -1,18 +1,21 @@
-// The Chronometer palette (spec 2.1), mirrored from the @theme block of app/globals.css so a
-// Node test can check the contrast of every text pair (spec 6.2). Change both together.
+// The Chronometer palette (spec 2.1), light only (light branding review §3.3), mirrored from the
+// @theme block of app/globals.css so a Node test can check the contrast of every pair (spec 6.2).
+// Change both together. The old names keep their utilities and take the value of their role.
 export const COLORS = {
-  'enamel-950': '#07090b',
-  'enamel-900': '#0d1014',
-  'enamel-800': '#11151a',
-  line: '#2a2f35',
-  'brass-700': '#7a6438',
-  'brass-500': '#c8a46a',
-  'brass-400': '#e9cf98',
-  'lume-300': '#d9f99d',
-  'ivory-100': '#efe6d2',
-  'ash-400': '#8b8577',
-  'amber-400': '#fbbf24',
-  'red-400': '#f87171',
+  'enamel-950': '#f7f6f2', // surface
+  'enamel-900': '#ffffff', // surface-raised
+  'enamel-800': '#eeece6', // surface-sunk
+  line: '#84817a', // rule
+  'brass-700': '#8c7650', // brass
+  'brass-500': '#17191d', // ink
+  'brass-400': '#17191d', // ink
+  'lume-300': '#17191d', // ink
+  'ivory-100': '#17191d', // ink
+  'ash-400': '#58585a', // ink-muted
+  'amber-400': '#17191d', // ink
+  'red-400': '#b3261e', // error
+  live: '#0b5fa5', // the market is open, and your ◆
+  'rule-faint': '#dad7cf', // structure that carries no data
 } as const
 
 export type ColorToken = keyof typeof COLORS

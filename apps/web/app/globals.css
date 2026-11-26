@@ -1,19 +1,23 @@
 @import "tailwindcss";
 
-/* The Chronometer tokens (spec 2.1-2.4). lib/chrono/tokens.ts mirrors the colors. */
+/* The Chronometer tokens (spec 2.1-2.4), light only (light branding review §3). The old names stay
+   and take the value of the role most of their uses play (path A+): five of them are ink.
+   lib/chrono/tokens.ts mirrors the colors. */
 @theme {
-  --color-enamel-950: #07090b;
-  --color-enamel-900: #0d1014;
-  --color-enamel-800: #11151a;
-  --color-line: #2a2f35;
-  --color-brass-700: #7a6438;
-  --color-brass-500: #c8a46a;
-  --color-brass-400: #e9cf98;
-  --color-lume-300: #d9f99d;
-  --color-ivory-100: #efe6d2;
-  --color-ash-400: #8b8577;
-  --color-amber-400: #fbbf24;
-  --color-red-400: #f87171;
+  --color-enamel-950: #f7f6f2;
+  --color-enamel-900: #ffffff;
+  --color-enamel-800: #eeece6;
+  --color-line: #84817a;
+  --color-brass-700: #8c7650;
+  --color-brass-500: #17191d;
+  --color-brass-400: #17191d;
+  --color-lume-300: #17191d;
+  --color-ivory-100: #17191d;
+  --color-ash-400: #58585a;
+  --color-amber-400: #17191d;
+  --color-red-400: #b3261e;
+  --color-live: #0b5fa5;
+  --color-rule-faint: #dad7cf;
 
   --text-12: 0.75rem;
   --text-12--line-height: 1rem;
@@ -49,6 +53,21 @@
   }
 }
 
+/* One role, one name (review §3.1): aliases of the old names until the codemod moves every line
+   onto them. surface = the page, surface-raised = a sheet to read on, surface-sunk = an empty slot
+   or a pressed control, ink = the record, ink-muted = quiet or stopped, rule = a line that carries
+   meaning, brass = the watch's metal, error = a correction. */
+@theme inline {
+  --color-surface: var(--color-enamel-950);
+  --color-surface-raised: var(--color-enamel-900);
+  --color-surface-sunk: var(--color-enamel-800);
+  --color-ink: var(--color-ivory-100);
+  --color-ink-muted: var(--color-ash-400);
+  --color-rule: var(--color-line);
+  --color-brass: var(--color-brass-700);
+  --color-error: var(--color-red-400);
+}
+
 /* next/font sets --font-grotesk and --font-jetbrains on <html> (app/layout.tsx). */
 @theme inline {
   --font-sans: var(--font-grotesk), ui-sans-serif, system-ui, sans-serif;
@@ -56,19 +75,20 @@
 }
 
 :root {
-  color-scheme: dark;
+  /* `only` also keeps a browser's forced darkening off the page. */
+  color-scheme: only light;
 }
 
+/* No font smoothing override: grayscale antialiasing thins ink on paper. */
 body {
-  background-color: var(--color-enamel-950);
-  color: var(--color-ivory-100);
+  background-color: var(--color-surface);
+  color: var(--color-ink);
   font-family: var(--font-sans);
-  -webkit-font-smoothing: antialiased;
 }
 
-/* Focus ring (spec 2.6): lume, 2 px wide, 2 px away from the element. */
+/* Focus ring (spec 2.6): ink, 2 px wide, 2 px away from the element. */
 :focus-visible {
-  outline: 2px solid var(--color-lume-300);
+  outline: 2px solid var(--color-ink);
   outline-offset: 2px;
 }
 
