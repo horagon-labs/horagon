@@ -259,20 +259,24 @@ export function recordingConnection(): { conn: Connection; sent: VersionedTransa
   return { conn: conn as unknown as Connection, sent }
 }
 
-/** The keeper's tick writing the game's model, from a feed read at `at` (Unix seconds). */
+/**
+ * The keeper's tick writing the game's model, from a feed read at `at` (Unix seconds), with the
+ * game's period and clock (Q3 with 5 min left unless given).
+ */
 export async function writeModel(
   db: Db,
   gameId: string,
   modelProb: number,
   at: number,
   status = 'live',
+  clock: { period: number; clockSecs: number | null } = { period: 3, clockSecs: 300 },
 ): Promise<void> {
   await updateGameLive(db, gameId, {
     status,
     homeScore: 50,
     awayScore: 45,
-    period: 3,
-    clockSecs: 300,
+    period: clock.period,
+    clockSecs: clock.clockSecs,
     periods: [],
     modelProb,
     feedUpdatedAt: new Date(at * 1000),

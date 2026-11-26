@@ -174,6 +174,10 @@ const NOT_ALERT_WORDS = new Set([
   'cut',
   'stale',
   'stop',
+  // the reference agent's skip reasons at the horn of Q4 or an overtime, and while its anomaly
+  // check holds a market
+  'horn',
+  'held',
   // market and draft states, halt rules
   'featured',
   'proposed',

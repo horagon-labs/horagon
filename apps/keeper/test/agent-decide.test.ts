@@ -20,6 +20,8 @@ function view(patch: Partial<MarketView> & { remaining?: number; seed?: number }
     kind: 0,
     marketStatus: 'open',
     gameStatus: 'live',
+    period: 3,
+    clockSecs: 300,
     tipoff: NOW - 3_600,
     endTs: NOW + remaining,
     modelProb: 0.7,
@@ -30,6 +32,7 @@ function view(patch: Partial<MarketView> & { remaining?: number; seed?: number }
     price,
     pool: price === null ? null : poolAt(price, { now: NOW, remaining, seed }),
     disabled: false,
+    held: false,
     ...rest,
   }
 }
@@ -62,6 +65,8 @@ describe('decide', () => {
   > = [
     ['a live market with a gap', {}, 'swap'],
     ['disabled after an anomaly', { disabled: true }, 'disabled'],
+    ['held while its anomaly check waits for the indexer', { held: true }, 'held'],
+    ['disabled and held', { disabled: true, held: true }, 'disabled'],
     ['a second-half market', { kind: 1 }, 'kind'],
     ['another league', { league: 'NHL' }, 'league'],
     ['PRACTICE while AGENT_PRACTICE is off', { league: 'PRACTICE' }, 'league'],
@@ -73,6 +78,12 @@ describe('decide', () => {
     ['a game still scheduled', { gameStatus: 'scheduled' }, 'not-live'],
     ['a final game', { gameStatus: 'final' }, 'not-live'],
     ['live before its scheduled tip-off', { tipoff: NOW + 60 }, 'not-live'],
+    ['the horn of Q4: period 4 at 0 s, still live', { period: 4, clockSecs: 0 }, 'horn'],
+    ['Q4 with 5 s left', { period: 4, clockSecs: 5 }, 'swap'],
+    ['the end of Q3: period 3 at 0 s', { period: 3, clockSecs: 0 }, 'swap'],
+    ['the horn of an overtime', { period: 5, clockSecs: 0 }, 'horn'],
+    ['an overtime with 5 s left', { period: 5, clockSecs: 5 }, 'swap'],
+    ['Q4 with no clock in the feed', { period: 4, clockSecs: null }, 'swap'],
     ['at tip-off', { tipoff: NOW }, 'swap'],
     ['120 s before end_ts', { remaining: 120 }, 'closing'],
     ['60 s before end_ts', { remaining: 60 }, 'closing'],

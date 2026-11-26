@@ -110,6 +110,8 @@ describe('listAgentMarkets', () => {
       status: 'open',
       league: 'NBA',
       gameStatus: 'live',
+      period: 1,
+      clockSecs: 300,
       modelProb: 0.7,
       feedUpdatedAt: new Date('2026-11-27T00:10:00Z'),
       scheduledTipoff: TIP,

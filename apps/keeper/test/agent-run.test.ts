@@ -19,7 +19,8 @@ import {
 import pino from 'pino'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { type AgentConfig, loadAgentConfig } from '../src/agent/config'
-import { type Connected, connectAgent, runAgent, UNLISTED_MSG } from '../src/agent/run'
+import { AGENT_DOWN_REPAGE_SECS } from '../src/agent/down'
+import { agentMain, type Connected, connectAgent, runAgent, UNLISTED_MSG } from '../src/agent/run'
 import { agentSwapInstructions } from '../src/agent/tx'
 import { DEVNET_GENESIS_HASH } from '../src/config'
 import { StallGuard } from '../src/stall'
@@ -513,5 +514,166 @@ describe('connectAgent', () => {
     ).rejects.toThrow('genesis hash')
     expect(opened).toBe(0)
     expect(TESTNET_GENESIS_HASH).not.toBe(DEVNET_GENESIS_HASH)
+  })
+})
+
+describe('agentMain: one page when the agent cannot run', () => {
+  /** A fake Telegram that records every message. */
+  function telegram() {
+    const posts: Array<{ url: string; text: string; chatId: string }> = []
+    const fetchImpl = (async (url: string | URL | Request, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as { chat_id: string; text: string }
+      posts.push({ url: String(url), text: body.text, chatId: body.chat_id })
+      return new Response('{"ok":true}', { status: 200 })
+    }) as typeof fetch
+    return { posts, fetchImpl }
+  }
+  const withTelegram = (extra: Record<string, string> = {}) =>
+    enabled({ TELEGRAM_BOT_TOKEN: 'BOTTOKEN', TELEGRAM_CHAT_ID: '42', ...extra })
+
+  it('pages agent-down for a failed start, once across the restarts systemd makes', async () => {
+    const file = join(dir, 'down-start', 'data', 'agent-down.json')
+    const { posts, fetchImpl } = telegram()
+    const errors: string[] = []
+    let now = T0
+    // A bad AGENT_* line: the configuration is refused before anything connects.
+    const start = () =>
+      agentMain(withTelegram({ AGENT_INTERVAL_SECS: '90' }), {
+        log: capture().log,
+        repoDir: listedRepo,
+        error: (line) => errors.push(line),
+        down: { file, nowSecs: () => now, fetchImpl },
+      })
+    expect(await start()).toBe(1)
+    expect(errors).toEqual([expect.stringMatching(/^agent failed to start: .*AGENT_INTERVAL_SECS/)])
+    expect(posts).toHaveLength(1)
+    expect(posts[0]?.url).toContain('/botBOTTOKEN/sendMessage')
+    expect(posts[0]?.chatId).toBe('42')
+    expect(posts[0]?.text).toMatch(
+      /^\[devnet\] \[agent\] Reference agent failed to start: .*AGENT_INTERVAL_SECS.*It trades nothing until it runs again/,
+    )
+    // systemd starts it again 10 s later, and again: new processes, no new page.
+    for (const later of [10, 20, AGENT_DOWN_REPAGE_SECS - 1]) {
+      now = T0 + later
+      expect(await start()).toBe(1)
+    }
+    expect(posts).toHaveLength(1)
+    expect(errors).toHaveLength(4)
+    // 10 min after the page: the next failure pages again.
+    now = T0 + AGENT_DOWN_REPAGE_SECS
+    expect(await start()).toBe(1)
+    expect(posts).toHaveLength(2)
+  })
+
+  it('pages a loop that ends on an error after the start, redacted', async () => {
+    const file = join(dir, 'down-run', 'agent-down.json')
+    const { posts, fetchImpl } = telegram()
+    const errors: string[] = []
+    const chain = new FakeChain()
+    const sender = new FakeSender(chain.asConnection())
+    const inner = fakeConnect(sender, { n: 0 })
+    const code = await agentMain(withTelegram(), {
+      log: capture().log,
+      repoDir: listedRepo,
+      maxRounds: 1,
+      error: (line) => errors.push(line),
+      down: { file, nowSecs: () => T0, fetchImpl },
+      connect: async (cfg, log) => {
+        const c = await inner(cfg, log)
+        return {
+          deps: c.deps,
+          close: async () => {
+            await c.close()
+            throw new Error('connection reset: https://rpc.example/?api-key=SECRET')
+          },
+        }
+      },
+    })
+    expect(code).toBe(1)
+    expect(errors).toEqual([expect.stringMatching(/^agent stopped on an error: connection reset/)])
+    expect(posts.map((p) => p.text)).toEqual([
+      expect.stringMatching(/^\[devnet\] \[agent\] Reference agent stopped on an error: /),
+    ])
+    expect(JSON.stringify({ errors, posts })).not.toContain('SECRET')
+  })
+
+  it('keeps no page time when Telegram did not take the page: the next start pages again', async () => {
+    const file = join(dir, 'down-failed', 'agent-down.json')
+    const { posts, fetchImpl: ok } = telegram()
+    let reachable = false
+    const fetchImpl = (async (url: string | URL | Request, init?: RequestInit) => {
+      if (!reachable) throw new TypeError('fetch failed')
+      return ok(url, init)
+    }) as typeof fetch
+    let now = T0
+    const start = () =>
+      agentMain(withTelegram({ AGENT_INTERVAL_SECS: '90' }), {
+        log: capture().log,
+        repoDir: listedRepo,
+        error: () => {},
+        down: { file, nowSecs: () => now, fetchImpl },
+      })
+    // The network is down: nothing delivered, nothing kept.
+    expect(await start()).toBe(1)
+    expect(posts).toEqual([])
+    // systemd's next start, 10 s later, with the network back: it pages.
+    reachable = true
+    now = T0 + 10
+    expect(await start()).toBe(1)
+    expect(posts).toHaveLength(1)
+    // And that page holds the next ones back as before.
+    now = T0 + 20
+    expect(await start()).toBe(1)
+    expect(posts).toHaveLength(1)
+  })
+
+  it('does not page a stop by hand whose close fails after the stop signal', async () => {
+    const file = join(dir, 'down-stop', 'agent-down.json')
+    const { posts, fetchImpl } = telegram()
+    const errors: string[] = []
+    const chain = new FakeChain()
+    const sender = new FakeSender(chain.asConnection())
+    const inner = fakeConnect(sender, { n: 0 })
+    const stop = new AbortController()
+    const code = await agentMain(withTelegram(), {
+      log: capture().log,
+      repoDir: listedRepo,
+      signal: stop.signal,
+      onStarted: () => stop.abort(),
+      error: (line) => errors.push(line),
+      down: { file, nowSecs: () => T0, fetchImpl },
+      connect: async (cfg, log) => {
+        const c = await inner(cfg, log)
+        return {
+          deps: c.deps,
+          close: async () => {
+            await c.close()
+            throw new Error('connection reset')
+          },
+        }
+      },
+    })
+    expect(code).toBe(1)
+    expect(errors).toEqual([expect.stringMatching(/^agent stopped on an error: connection reset/)])
+    expect(posts).toEqual([])
+  })
+
+  it('writes the journal line only when Telegram is not set, and exits 0 when it runs', async () => {
+    const file = join(dir, 'down-none', 'agent-down.json')
+    const { posts, fetchImpl } = telegram()
+    const errors: string[] = []
+    const opts = {
+      log: capture().log,
+      repoDir: listedRepo,
+      error: (line: string) => errors.push(line),
+      down: { file, nowSecs: () => T0, fetchImpl },
+    }
+    expect(await agentMain(enabled({ AGENT_BAND: '2' }), opts)).toBe(1)
+    expect(errors).toEqual([expect.stringMatching(/^agent failed to start: .*AGENT_BAND/)])
+    expect(posts).toEqual([])
+    // A disabled agent is no failure: exit 0, no line, no page.
+    expect(await agentMain({}, opts)).toBe(0)
+    expect(errors).toHaveLength(1)
+    expect(posts).toEqual([])
   })
 })

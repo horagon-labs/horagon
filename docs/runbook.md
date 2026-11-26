@@ -373,6 +373,15 @@ ssh "$HORAGON_VPS" systemctl --user stop horagon-agent
   faucet claim). A line `agent swap` carries the market, the price, the model, the gap, the side,
   the size in mUSDC and the expected price after it; a line `agent skip` carries the reason. Set
   `AGENT_DRY_RUN=0` and restart to trade.
+  - There is no rehearsal before night 1: night 1 is the dry run. Read the `agent swap` and
+    `agent skip` lines of its first live markets before you set `AGENT_DRY_RUN=0`.
+  - An empty or low wallet does not hide them. When the wallet holds less than the agent's spend
+    cap (`AGENT_MAX_PER_GAME` for each market the round read: 2,000 mUSDC each by default), a dry
+    run plans against that cap instead, and each decision line carries `notional: true`.
+  - A dry run never pages `agent-musdc`. Instead it logs this line, at most once an hour:
+    `agent: dry run, the wallet holds under AGENT_MIN_MUSDC; no page in a dry run, which plans against its spend cap`.
+  - A live run reads its real balance and claims the faucet itself, every hour from its first
+    round, before it trades.
 - **Kill switch.** `systemctl --user stop horagon-agent` ends the round in progress: a send in
   flight completes (up to 120 s), no new swap or claim starts, and it stops, writing `stopped` in
   its heartbeat. Set `AGENT_ENABLED=0` (or remove the line) in `.env.keeper` as well: any
@@ -387,6 +396,18 @@ ssh "$HORAGON_VPS" systemctl --user stop horagon-agent
   markets off: restart it once more. That happens when systemd killed it after 120 s, when a
   second signal made it exit at once (code 130), or when its last heartbeat was not written (log
   line `agent heartbeat not written`).
+  - The check holds first. The agent reads other wallets' trades from the indexer, which stores
+    a trade a keeper round after it lands at best (5 s), and 90 s or more later while the keeper
+    waits on a send. So when the read after a swap finds the gap grown and no trade by another
+    wallet since the swap is stored, the market is held for 2 min: skip reason `held`, no swap,
+    no page, and the log line
+    `agent: the price moved away from the model after its swap, and no other trade is stored yet; market held`.
+  - A trade by another wallet at or after the swap, stored before the hold ends, clears the check
+    (log line `agent: another wallet traded after its swap; check cleared`): the market stays
+    enabled and nothing pages, so one counter-trade cannot switch the agent off a market.
+  - A gap still grown at the end of the hold, with no such trade stored, disables the market and
+    pages `agent-anomaly:`. An indexer more than 2 min behind the chain can still let a
+    counter-trade do that; `index-stuck:` pages only after about 5 min.
 - **A pause** (5 failed reads or sends in a row, `agent-paused`) lasts `AGENT_PAUSE_SECS`
   (600 s), counted from the failure that started it: after a send that took 90 s, from its end.
   It reads and sends nothing meanwhile, but goes on writing its heartbeat every round
@@ -402,6 +423,17 @@ ssh "$HORAGON_VPS" systemctl --user stop horagon-agent
   the `agent` row) and the markets left wait for the next round's read. Each round starts at the
   market after the last one decided, wrapping around, so the markets late in the list (by
   `end_ts`, then address) get their turn on a busy night.
+- **The horn.** At the end of Q4 or an overtime, ESPN shows the game still live with 0 s on the
+  clock for up to about two minutes before Final, and the model already reads 0 or 1. The agent
+  skips a game that reads period 4 or later at 0 s (skip reason `horn`), so it never buys a
+  decided game before the keeper halts its market on the Final read.
+- **When it cannot run.** A start that fails (a bad `AGENT_*` line, the key file, the cluster
+  check, a database that does not answer), or a loop that ends on an error, logs
+  `agent failed to start: ...` (or `agent stopped on an error: ...`), pages `agent-down` and
+  exits 1. systemd starts it again 10 s later, up to 5 starts in 10 min, then leaves it down.
+  The page goes out once in those 10 min: each start is a new process, so the time of the last
+  page is kept in `apps/keeper/data/agent-down.json`. Fix the cause, run
+  `systemctl --user reset-failed horagon-agent`, then start it.
 - **Slow reads.** When the read itself takes over 10 s (a degraded RPC or database), every round
   is cut before its first decision and the agent trades nothing. From the third such round in a
   row it logs `agent: rounds cut before their first decision, the reads are slow` (a warning, at
@@ -445,11 +477,12 @@ transaction: `create <gameId>`, `halt <gameId> (<rule>)`, `finalize <gameId>`, `
 | `fail:<action>:<gameId>`       | `<action> <gameId> rejected: ... error <name>`                                                                                                                                               | 10 min            | The program refused a keeper action (`create`, `halt`, `finalize`, `recycle`). Read the error name and check `status`; the keeper plans it again every round                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `tx:<label>`                   | `Transaction "<label>" failed 4 times (...); 1 attempt left`                                                                                                                                 | 10 min            | Check the RPC (`HORAGON_RPC_URL`). The keeper plans the action again on the next round                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | `tx-unresolved:<label>`        | `<label>: unresolved after 90 s, <signature> may still land`                                                                                                                                 | 10 min            | The transaction may still land: look the signature up before doing anything by hand. The keeper re-plans from chain state; for a `horagon-ops` command, B (propose) or G (`fund-authority`)                                                                                                                                                                                                                                                                                                                                                                    |
-| `agent-anomaly:<gameId>`       | `Reference agent: after its YES swap on AWAY@HOME the price moved away from the model` (or `NO swap`)                                                                                        | 10 min            | The agent no longer trades that market until it is restarted by hand (a restart after a crash or a stall keeps it off, J); nothing else is affected. Look at the market's last trades: a fan trading the other way explains it. A wrong side or a swap that did something else is a bug: stop the agent (J). Restart it (J) to trade the market again                                                                                                                                                                                                          |
+| `agent-anomaly:<gameId>`       | `Reference agent: after its YES swap on AWAY@HOME the price moved away from the model` (or `NO swap`)                                                                                        | 10 min            | The agent no longer trades that market until it is restarted by hand (a restart after a crash or a stall keeps it off, J); nothing else is affected. It held the market 2 min first, and no trade by another wallet since the swap was stored in that time: a wrong side or a swap that did something else is a bug, stop the agent (J). An indexer more than 2 min behind the chain can also cause it: look for `index-stuck:` and the trades of that market first. Restart it (J) to trade the market again                                                  |
 | `agent-unlisted`               | `Reference agent not started: its wallet <pubkey> is not listed as team-burner in docs/metrics-wallets.json (<reason>)`                                                                      | once a start      | The agent exited 0 without trading. Add the wallet to `docs/metrics-wallets.json` as a team-burner in a public commit, deploy, then start it (J). A wrong `AGENT_KEYPAIR` shows here too: it must be the agent's own key                                                                                                                                                                                                                                                                                                                                       |
+| `agent-down`                   | `Reference agent failed to start: <error>`, or `Reference agent stopped on an error: <error>`                                                                                                | 10 min (restarts) | It trades nothing until it runs again; the keeper is not affected. Read its log (J): a bad `AGENT_*` line, the key file or a cluster refusal (fix `.env.keeper`), or a database that does not answer (the keeper shows it too). systemd starts it again up to 5 times in 10 min, then leaves it down; this page goes out once in those 10 min. Fix the cause, `systemctl --user reset-failed horagon-agent`, then start it (J)                                                                                                                                 |
 | `agent-paused`                 | `Reference agent paused 10 min after 5 failed reads or sends in a row`                                                                                                                       | 10 min            | It resumes by itself after the pause. Read the error in its log (J): an RPC or database outage also shows in the keeper (`tick-failing`); a refused swap names the program error                                                                                                                                                                                                                                                                                                                                                                               |
 | `agent-sol`                    | `Reference agent wallet holds <n> SOL; fees need 0.1`                                                                                                                                        | 10 min            | Send devnet SOL to the agent wallet. It pays its own fees and the rent of its YES and NO accounts (claims return that rent)                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| `agent-musdc`                  | `Reference agent wallet holds <n> mUSDC, under 200`                                                                                                                                          | 10 min            | The agent claims the faucet (1,000 mUSDC) every hour and claims its winnings; under 1 mUSDC it stops swapping. Nothing to do unless it lasts                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `agent-musdc`                  | `Reference agent wallet holds <n> mUSDC, under 200`                                                                                                                                          | 10 min            | Live runs only: a dry run logs it at most hourly and plans against its spend cap (J). The agent claims the faucet (1,000 mUSDC) every hour and claims its winnings; under 1 mUSDC it stops swapping. Nothing to do unless it lasts                                                                                                                                                                                                                                                                                                                             |
 | `decode:<gameId>`              | `<gameId>: its GameMarket account does not decode`                                                                                                                                           | 3 h               | The keeper skips that market: no halt, draft or settlement for it. Watch the game by hand; the deployed program and `packages/sdk/idl/horagon.json` likely differ                                                                                                                                                                                                                                                                                                                                                                                              |
 | `feed-skipped:<ET date>`       | `<n> ESPN events on <ET date> could not be read; check the feed`                                                                                                                             | 10 min            | Those games are not observed: no halts or drafts from the feed. Watch them on a live source and halt by hand if needed (F); check the log for the parse error                                                                                                                                                                                                                                                                                                                                                                                                  |
 | `index-stuck:<market>`         | `Indexing of <gameId> (market <market>) is stuck`                                                                                                                                            | 3 h               | One transaction stays unreadable, so trades and prices of that market lag on the site. Check the RPC; indexing resumes once it can read it                                                                                                                                                                                                                                                                                                                                                                                                                     |
@@ -467,11 +500,20 @@ transaction: `create <gameId>`, `halt <gameId> (<rule>)`, `finalize <gameId>`, `
   waiting for its window and the keeper's next round.
 - Halted games that are postponed wait for D. Nothing else stays open.
 
-## Rehearsal (replay)
+## Replay (local runs only)
+
+There is no rehearsal before night 1: night 1 itself is the reference agent's dry run (J), and
+the production keeper runs `KEEPER_FEED=espn` only.
+
+A replay never runs on the production keeper. Replay games are league NBA, like real ones: on
+devnet each replay market is a counted NBA market under `docs/metrics.md`, the public board shows
+it as one of that night's games, and the reference agent trades it (`AGENT_PRACTICE` does not
+change that: it is about league PRACTICE, which nothing creates yet). A replay is for a local
+Surfpool run, with a local database.
 
 `KEEPER_FEED=replay REPLAY_TAG=<tag> REPLAY_TIPOFF=<ISO time>` plays the fixtures of
 `tests/fixtures/replay/` as games whose earliest tip-off is at `REPLAY_TIPOFF` (for example
 `2026-11-22T23:00:00Z`). The tag is 1 to 6 letters or digits, starting with a letter; game ids
 are `nba-<espnId><tag>` and the feed's source URL is `https://horagon.invalid/replay/...`. Use a
-new tag for every run, so its markets never collide with an earlier one. Keep `REPLAY_SPEED=1`
-on devnet; a faster replay (up to 60) is for a local Surfpool run.
+new tag for every run, so its markets never collide with an earlier one. `REPLAY_SPEED` (1 to
+60) plays game time that many times faster.

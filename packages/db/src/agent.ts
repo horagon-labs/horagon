@@ -18,6 +18,9 @@ export interface AgentMarketRow {
   away: string
   gameStatus: string
   scheduledTipoff: Date
+  /** The game's period and the seconds left on its clock, from the keeper's last feed read. */
+  period: number
+  clockSecs: number | null
   /** Home win probability: the YES outcome of a winner market (kind 0). */
   modelProb: number | null
   /** The feed read that last wrote `modelProb` (`updateGameLive` writes both together). */
@@ -43,6 +46,8 @@ export async function listAgentMarkets(db: Db, leagues: string[]): Promise<Agent
       away: games.away,
       gameStatus: games.status,
       scheduledTipoff: games.scheduledTipoff,
+      period: games.period,
+      clockSecs: games.clockSecs,
       modelProb: games.modelProb,
       feedUpdatedAt: games.feedUpdatedAt,
     })

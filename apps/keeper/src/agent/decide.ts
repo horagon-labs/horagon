@@ -21,6 +21,12 @@ export interface MarketView {
   marketStatus: string
   /** The keeper's DB status of the game: scheduled | live | final | ... */
   gameStatus: string
+  /**
+   * The game's period (1 to 4, then 5 and up for overtime) and the seconds left on its clock
+   * from the keeper's last feed read; null clock when the feed gave none.
+   */
+  period: number
+  clockSecs: number | null
   /** Unix seconds. */
   tipoff: number
   endTs: number
@@ -28,7 +34,10 @@ export interface MarketView {
   modelProb: number | null
   /** When the feed read that wrote `modelProb` happened, Unix seconds. */
   modelAt: number | null
-  /** Newest trade by any other wallet within the fan-lag window, Unix seconds. */
+  /**
+   * Newest trade by any other wallet, Unix seconds: read over the fan-lag window, or further back
+   * while a swap of the agent's is still checked (agent.ts); decide applies the window itself.
+   */
   lastFanTradeAt: number | null
   /** Raw mUSDC the agent already spent on this market, and its swaps there. */
   spent: bigint
@@ -38,14 +47,21 @@ export interface MarketView {
   pool: PoolState | null
   /** Disabled after an anomaly, until the agent is restarted by hand. */
   disabled: boolean
+  /**
+   * Held: a read after its swap found the gap grown, and the check waits for the indexer to
+   * store another wallet's trade (guards.ts ANOMALY_HOLD_SECS). Nothing is sent meanwhile.
+   */
+  held: boolean
 }
 
 export type SkipReason =
   | 'disabled'
+  | 'held'
   | 'kind'
   | 'league'
   | 'market-status'
   | 'not-live'
+  | 'horn'
   | 'closing'
   | 'no-model'
   | 'stale-model'
@@ -119,11 +135,16 @@ export function decide(v: MarketView, ctx: DecideContext): Decision {
   const skip = (reason: SkipReason): Decision => ({ ...common, action: 'skip', reason })
 
   if (v.disabled) return skip('disabled')
+  if (v.held) return skip('held')
   // 1. Candidates.
   if (v.kind !== 0) return skip('kind')
   if (!leagueAllowed(v.league, p.practice)) return skip('league')
   if (v.marketStatus !== 'open') return skip('market-status')
   if (v.gameStatus !== 'live' || now < v.tipoff) return skip('not-live')
+  // The horn: Q4 or an overtime with 0 s left. ESPN holds this frame, still live, for up to
+  // about two minutes before it shows Final, and the model then reads exactly 0 or 1: the
+  // result is known, so the agent does not buy from the pool before the keeper halts it.
+  if (v.period >= 4 && v.clockSecs === 0) return skip('horn')
   if (now >= v.endTs - p.endBufferSecs) return skip('closing')
   if (model === null || !Number.isFinite(model) || model < 0 || model > 1) return skip('no-model')
   if (v.modelAt === null || now - v.modelAt > p.modelMaxAgeSecs) return skip('stale-model')

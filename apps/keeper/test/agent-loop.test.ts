@@ -14,12 +14,19 @@ import {
   PROTOCOL_DAO,
   SWAP_COMPUTE_UNITS,
 } from '@horagon/sdk'
-import { Keypair } from '@solana/web3.js'
+import { Keypair, type PublicKey } from '@solana/web3.js'
 import pino from 'pino'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
-import { type AgentDeps, ReferenceAgent, SLOW_READS_MSG } from '../src/agent/agent'
+import {
+  type AgentDeps,
+  ANOMALY_HELD_MSG,
+  DRY_LOW_MUSDC_MSG,
+  ReferenceAgent,
+  SLOW_READS_MSG,
+} from '../src/agent/agent'
 import { type AgentParams, defaultAgentParams } from '../src/agent/config'
 import type { Decision } from '../src/agent/decide'
+import { ANOMALY_HOLD_SECS } from '../src/agent/guards'
 import { ProgramFailure, UnresolvedAttempt } from '../src/executor'
 import {
   FakeChain,
@@ -151,6 +158,8 @@ describe('a dry run', () => {
       dryRun: true,
       level: 30,
     })
+    // 5,000 mUSDC is more than the spend cap of 2 markets (2 x 2,000): the real balance.
+    expect(swap).not.toHaveProperty('notional')
     expect(swap?.price as number).toBeCloseTo(0.6, 9)
     expect(swap?.gap as number).toBeCloseTo(0.1, 9)
     expect(Number(swap?.size)).toBeGreaterThan(1)
@@ -160,6 +169,46 @@ describe('a dry run', () => {
     // A second round sends nothing either.
     await a.round()
     expect(sender.specs).toEqual([])
+  })
+
+  it('plans against its spend cap from an empty wallet: sized swaps, nothing sent, no page', async () => {
+    // The agent wallet before its first faucet claim: no mUSDC account at all.
+    chain.musdc = null
+    await liveMarket(1, { seed: 1_000, price: 0.4, model: 0.95 })
+    await liveMarket(2, { seed: 1_000, price: 0.4, model: 0.95 })
+    await liveMarket(3, { price: 0.6, model: 0.62 })
+    const a = agentWith({ dryRun: true })
+    const report = await a.round()
+    const byGame = Object.fromEntries(report.decisions.map((d) => [d.gameId, reasons([d])[0]]))
+    expect(byGame).toEqual({ 'nba-1': 'swap', 'nba-2': 'swap', 'nba-3': 'in-band' })
+    // Sized as a funded live run would size them: the per-swap cap, as the pools are far off.
+    expect(sizesOf(report.decisions).sort()).toEqual([0n, 100n * M, 100n * M])
+    expect(sender.specs).toEqual([])
+    expect(faucetCalls).toEqual([])
+    expect(alerts).toEqual([])
+    const swaps = logs.filter((l) => l.msg === 'agent swap')
+    expect(swaps).toHaveLength(2)
+    for (const swap of swaps) {
+      expect(swap).toMatchObject({ dryRun: true, notional: true, size: '100.00', level: 30 })
+    }
+    expect(logs.find((l) => l.msg === 'agent skip')).toMatchObject({
+      gameId: 'nba-3',
+      reason: 'in-band',
+      notional: true,
+    })
+    // The low wallet goes to the log instead, at most hourly, and says it is a dry run.
+    const low = () => logs.filter((l) => l.msg === DRY_LOW_MUSDC_MSG)
+    expect(DRY_LOW_MUSDC_MSG).toContain('dry run')
+    expect(low()).toHaveLength(1)
+    expect(low()[0]).toMatchObject({ musdc: '0.00', minMusdc: '200.00', dryRun: true })
+    clock += 3_599
+    await a.round()
+    expect(low()).toHaveLength(1)
+    clock += 1
+    await a.round()
+    expect(low()).toHaveLength(2)
+    expect(alerts).toEqual([])
+    expect(faucetCalls).toEqual([])
   })
 })
 
@@ -221,13 +270,13 @@ describe('a live round', () => {
     expect(sender.specs.map((s) => s.label).sort()).toEqual(['swap nba-1', 'swap nba-2'])
   })
 
-  it('never plans more than the balance in one round: dry runs and unknown sends count too', async () => {
+  it('never plans more than the balance in one round: unknown and refused sends count too', async () => {
     for (const n of [1, 2, 3]) await liveMarket(n, { seed: 1_000, price: 0.4, model: 0.95 })
     chain.musdc = 150n * M
-    // A dry run sends nothing, yet plans as if each swap had gone out.
+    // A dry run holding less than its spend cap (3 x 2,000 mUSDC) plans against the cap, and
+    // sends nothing.
     const dry = await agentWith({ dryRun: true }).round()
-    expect(sizesOf(dry.decisions)).toEqual([100n * M, 50n * M, 0n])
-    expect(reasons(dry.decisions)).toEqual(['swap', 'swap', 'balance'])
+    expect(sizesOf(dry.decisions)).toEqual([100n * M, 100n * M, 100n * M])
     expect(sender.specs).toEqual([])
     // A send whose result is unknown may still land: its amount is gone for the round.
     sender.fail = new UnresolvedAttempt('swap nba-1: unresolved after 90 s')
@@ -394,6 +443,20 @@ describe('a live round', () => {
     expect(reasons((await a.round()).decisions)).toEqual(['swap-count'])
   })
 
+  it('skips a game at the horn: Q4 or overtime at 0 s, while the feed still says live', async () => {
+    const { gameId } = await liveMarket(1)
+    // The buzzer frame: the model reads 1, the result is known, and the market is still open.
+    await writeModel(h.db, gameId, 1, clock - 5, 'live', { period: 4, clockSecs: 0 })
+    expect(reasons((await agentWith({ dryRun: true }).round()).decisions)).toEqual(['horn'])
+    await writeModel(h.db, gameId, 1, clock - 5, 'live', { period: 5, clockSecs: 0 })
+    expect(reasons((await agentWith({ dryRun: true }).round()).decisions)).toEqual(['horn'])
+    // 5 s left in Q4, or the end of Q3: it trades.
+    await writeModel(h.db, gameId, 0.7, clock - 5, 'live', { period: 4, clockSecs: 5 })
+    expect(reasons((await agentWith({ dryRun: true }).round()).decisions)).toEqual(['swap'])
+    await writeModel(h.db, gameId, 0.7, clock - 5, 'live', { period: 3, clockSecs: 0 })
+    expect(reasons((await agentWith({ dryRun: true }).round()).decisions)).toEqual(['swap'])
+  })
+
   it('trades PRACTICE markets only with AGENT_PRACTICE=1', async () => {
     await liveMarket(1, { league: 'PRACTICE' })
     expect((await agentWith({ dryRun: true }).round()).decisions).toEqual([])
@@ -466,15 +529,130 @@ describe('a live round', () => {
 })
 
 describe('the anomaly check', () => {
-  it('disables a market whose price moved away from the model after the swap', async () => {
-    const { key, fields } = await liveMarket(1)
+  /** A swap by another wallet on `market`, with its block time `at` (Unix seconds). */
+  const otherTrade = (market: PublicKey, at: number, sig: string) => ({
+    sig,
+    ixIndex: 3,
+    market: market.toBase58(),
+    wallet: 'OTHER',
+    direction: 'usdcToNo',
+    usdcAmount: 150n * M,
+    usdcDelta: -150n * M,
+    yesDelta: 0n,
+    noDelta: 200n * M,
+    fee: 0n,
+    slot: 1n,
+    blockTime: new Date(at * 1000),
+    botMemo: false,
+  })
+
+  it('clears the check when another wallet traded after the swap: no disable, no page', async () => {
+    const { key, fields, gameId } = await liveMarket(1)
+    // The agent buys YES; before its next read another wallet buys NO and pushes the price
+    // below where it was. That is someone else's move: one counter-trade must not switch the
+    // agent off the market.
+    sender.onSend = () => movePrice(fields, 0.55)
+    const a = agentWith()
+    expect(reasons((await a.round()).decisions)).toEqual(['swap'])
+    await insertTrades(h.db, [otherTrade(key, NOW + 5, 'counter')])
+    clock = NOW + 20
+    await setModel(gameId, 0.7)
+    // It steps aside for that trade (the fan lag), and nothing is disabled or paged.
+    expect(reasons((await a.round()).decisions)).toEqual(['fan-trade'])
+    expect(keys()).toEqual([])
+    expect(logs.find((l) => l.msg.includes('check cleared'))).toMatchObject({
+      market: key.toBase58(),
+      tradeAt: NOW + 5,
+    })
+    expect(await agentRow()).toMatchObject({ disabled: [] })
+    // Once that trade is over 90 s old, it trades the market again.
+    sender.onSend = null
+    clock = NOW + 5 + 91
+    await setModel(gameId, 0.7)
+    expect(reasons((await a.round()).decisions)).toEqual(['swap'])
+    expect(keys()).toEqual([])
+  })
+
+  it('clears it for a trade after the swap even when the next read comes late', async () => {
+    const { key, fields, gameId } = await liveMarket(1)
     sender.onSend = () => movePrice(fields, 0.55)
     const a = agentWith()
     await a.round()
-    const second = await a.round()
-    expect(reasons(second.decisions)).toEqual(['disabled'])
+    // The other wallet traded 10 s after the swap, and the next read comes 200 s after it (a
+    // slow round, a pause): outside the 90 s fan-lag window by then, still after the swap.
+    await insertTrades(h.db, [otherTrade(key, NOW + 10, 'counter')])
+    sender.onSend = null
+    clock = NOW + 200
+    await setModel(gameId, 0.7)
+    expect(reasons((await a.round()).decisions)).toEqual(['swap'])
+    expect(keys()).toEqual([])
+  })
+
+  it('holds a market whose counter-trade the indexer stores late, then clears it: no disable, no page', async () => {
+    const { key, fields, gameId } = await liveMarket(1)
+    const a = agentWith()
+    expect(reasons((await a.round()).decisions)).toEqual(['swap'])
+    // Another wallet buys NO 15 s after the swap and pushes the price below where it was. The
+    // indexer, behind a keeper send, has not stored that trade by the next read.
+    movePrice(fields, 0.55)
+    clock = NOW + 20
+    await setModel(gameId, 0.7)
+    expect(reasons((await a.round()).decisions)).toEqual(['held'])
+    expect(keys()).toEqual([])
+    expect(sender.specs).toHaveLength(1)
+    expect(logs.find((l) => l.msg === ANOMALY_HELD_MSG)).toMatchObject({
+      market: key.toBase58(),
+      level: 40,
+      until: NOW + 20 + ANOMALY_HOLD_SECS,
+    })
+    // Stored after that read: the next one clears the check and steps aside for the trade.
+    await insertTrades(h.db, [otherTrade(key, NOW + 15, 'late')])
+    clock = NOW + 40
+    await setModel(gameId, 0.7)
+    expect(reasons((await a.round()).decisions)).toEqual(['fan-trade'])
+    expect(logs.find((l) => l.msg.includes('check cleared'))).toMatchObject({ tradeAt: NOW + 15 })
+    expect(await agentRow()).toMatchObject({ disabled: [] })
+    // Past the end the hold would have had: still enabled, and trading once the fan lag passed.
+    clock = NOW + 20 + ANOMALY_HOLD_SECS
+    await setModel(gameId, 0.7)
+    expect(reasons((await a.round()).decisions)).toEqual(['swap'])
+    expect(keys()).toEqual([])
+  })
+
+  it('still disables on a wrong-way move when the only other trade came before the swap', async () => {
+    const { key, fields, gameId } = await liveMarket(1)
+    // Another wallet traded 95 s before the round: outside the fan lag, so the agent swaps.
+    await insertTrades(h.db, [otherTrade(key, NOW - 95, 'before')])
+    sender.onSend = () => movePrice(fields, 0.55)
+    const a = agentWith()
+    expect(reasons((await a.round()).decisions)).toEqual(['swap'])
+    // Held while the indexer may still store a trade after the swap; none comes.
+    for (const at of [20, 40, 19 + ANOMALY_HOLD_SECS]) {
+      clock = NOW + at
+      await setModel(gameId, 0.7)
+      expect(reasons((await a.round()).decisions), String(at)).toEqual(['held'])
+      expect(keys()).toEqual([])
+    }
+    clock = NOW + 20 + ANOMALY_HOLD_SECS
+    await setModel(gameId, 0.7)
+    expect(reasons((await a.round()).decisions)).toEqual(['disabled'])
     expect(keys()).toEqual(['agent-anomaly:nba-1'])
-    expect(alerts[0]?.[1]).toContain('market disabled until the agent is restarted by hand')
+    expect(sender.specs).toHaveLength(1)
+  })
+
+  it('disables a market whose price moved away from the model after the swap', async () => {
+    const { key, fields, gameId } = await liveMarket(1)
+    sender.onSend = () => movePrice(fields, 0.55)
+    const a = agentWith()
+    await a.round()
+    expect(reasons((await a.round()).decisions)).toEqual(['held'])
+    clock = NOW + ANOMALY_HOLD_SECS
+    const third = await a.round()
+    expect(reasons(third.decisions)).toEqual(['disabled'])
+    expect(keys()).toEqual(['agent-anomaly:nba-1'])
+    expect(alerts[0]?.[1]).toContain(
+      'no trade by another wallet showed within 2 min; market disabled until the agent is restarted by hand',
+    )
     expect(logs.find((l) => l.msg === 'agent anomaly')).toMatchObject({
       market: key.toBase58(),
       priceBefore: expect.any(Number),
@@ -485,14 +663,17 @@ describe('the anomaly check', () => {
     expect(sender.specs).toHaveLength(1)
     // A new process that does not resume the last run (as one started by hand after a clean
     // stop) trades it again.
+    await setModel(gameId, 0.7)
     expect(reasons((await agentWith().round()).decisions)).toEqual(['swap'])
   })
 
   it('keeps a market disabled across an unplanned restart, not across a stop by hand', async () => {
-    const { key, fields } = await liveMarket(1)
+    const { key, fields, gameId } = await liveMarket(1)
     sender.onSend = () => movePrice(fields, 0.55)
     const a = agentWith()
     await a.round()
+    expect(reasons((await a.round()).decisions)).toEqual(['held'])
+    clock = NOW + ANOMALY_HOLD_SECS
     expect(reasons((await a.round()).decisions)).toEqual(['disabled'])
     // A crash or a stall exit: no clean stop, and systemd starts a new process.
     const b = agentWith()
@@ -510,6 +691,7 @@ describe('the anomaly check', () => {
     })
     const c = agentWith()
     expect(await c.resume()).toEqual([])
+    await setModel(gameId, 0.7)
     expect(reasons((await c.round()).decisions)).toEqual(['swap'])
     // Its rounds write no `stopped`: an exit from here on is unplanned again.
     expect((await getHeartbeat(h.db, 'agent'))?.info).not.toHaveProperty('stopped')
@@ -523,6 +705,8 @@ describe('the anomaly check', () => {
     // It landed after all, and the price moved away from the model.
     movePrice(fields, 0.55)
     sender.fail = null
+    expect(reasons((await a.round()).decisions)).toEqual(['held'])
+    clock = NOW + ANOMALY_HOLD_SECS
     expect(reasons((await a.round()).decisions)).toEqual(['disabled'])
     expect(keys()).toEqual(['agent-anomaly:nba-1'])
   })
@@ -633,14 +817,17 @@ describe('failures', () => {
 })
 
 describe('balances, faucet and claims', () => {
-  it('pages when the wallet runs low on SOL or mUSDC', async () => {
+  it('pages when the wallet runs low on SOL or mUSDC; a dry run pages SOL only', async () => {
     await liveMarket(1)
     chain.lamports = 50_000_000
     chain.musdc = 150n * M
-    await agentWith({ dryRun: true }).round()
+    await agentWith().round()
     expect(keys()).toEqual(['agent-sol', 'agent-musdc'])
     expect(alerts[0]?.[1]).toContain('0.05 SOL')
     expect(alerts[1]?.[1]).toContain('150.00 mUSDC, under 200.00')
+    alerts = []
+    await agentWith({ dryRun: true }).round()
+    expect(keys()).toEqual(['agent-sol'])
   })
 
   it('reads a missing mUSDC account as empty', async () => {

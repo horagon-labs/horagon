@@ -7,7 +7,8 @@
 // round every AGENT_INTERVAL_SECS until the stop signal, which also ends the round in progress
 // before its next send. A round fails on its own and is retried on the next; a process silent for
 // KEEPER_STALL_SECS exits so systemd restarts it. A clean stop writes a last heartbeat that says
-// so.
+// so. agentMain wraps it for agent-main.ts: a start that fails, or a loop that ends on an error,
+// writes one journal line and pages `agent-down` (down.ts), then exits 1.
 import type { DbHandle } from '@horagon/db'
 import { errorSummary } from '@horagon/sdk'
 import type { Connection } from '@solana/web3.js'
@@ -21,6 +22,7 @@ import { runStep } from '../loop'
 import { StallGuard, watchStall } from '../stall'
 import { type AgentDeps, ReferenceAgent } from './agent'
 import { type AgentConfig, agentEnabled, agentLogLevel, loadAgentConfig } from './config'
+import { type AgentDownOptions, agentDownLine, pageAgentDown } from './down'
 import { AGENT_ROLE, teamBurnerListing, WALLETS_FILE } from './listing'
 
 /** The log line of a refused start: the wallet is not disclosed. */
@@ -55,6 +57,8 @@ export interface RunOptions {
   nowMs?: () => number
   /** Replaces the wait between rounds (tests). */
   sleep?: (ms: number, signal?: AbortSignal) => Promise<void>
+  /** Called once the agent has started (its `agent started` line), before the first round. */
+  onStarted?: () => void
 }
 
 /** Telegram when it is configured, else the log; every message starts `[<cluster>] [agent]`. */
@@ -174,6 +178,7 @@ export async function runAgent(
       { wallet: cfg.agent.publicKey.toBase58(), dryRun: cfg.dryRun, cluster: cfg.cluster },
       'agent started',
     )
+    opts.onStarted?.()
     let rounds = 0
     while (!opts.signal?.aborted) {
       const started = nowMs()
@@ -190,5 +195,44 @@ export async function runAgent(
     return 0
   } finally {
     clearInterval(timer)
+  }
+}
+
+export interface MainOptions extends RunOptions {
+  /** The `agent-down` page: its file, clock and fetch (tests). */
+  down?: Pick<AgentDownOptions, 'file' | 'nowSecs' | 'fetchImpl'>
+  /** Where the one journal line of a failure goes (default console.error). */
+  error?: (line: string) => void
+}
+
+/**
+ * runAgent for agent-main.ts: its exit code, or 1 when it threw. A throw before `agent started`
+ * is a failed start (configuration, keypair, cluster refusal, a database that does not answer
+ * the read of the last heartbeat); one after it is a loop that ended on an error. Either way:
+ * one journal line, redacted (a URL in it may carry an RPC key; the keypair and the database URL
+ * are never printed), and the `agent-down` page, at most once every 10 min across restarts. A
+ * throw after the stop signal (a stop by hand whose last heartbeat or close failed) writes the
+ * line only.
+ */
+export async function agentMain(env: NodeJS.ProcessEnv, opts: MainOptions = {}): Promise<number> {
+  let started = false
+  try {
+    return await runAgent(env, {
+      ...opts,
+      onStarted: () => {
+        started = true
+        opts.onStarted?.()
+      },
+    })
+  } catch (err) {
+    const phase = started ? 'run' : 'start'
+    const message = errorSummary(err).message
+    ;(opts.error ?? console.error)(agentDownLine(phase, message))
+    // A stop by hand (the signal came) that ended on an error, such as its last heartbeat or the
+    // close: the journal line is enough, the agent was meant to stop.
+    if (started && opts.signal?.aborted) return 1
+    const log = opts.log ?? createLogger(agentLogLevel(env), 'agent')
+    await pageAgentDown(phase, message, { env, log, ...opts.down })
+    return 1
   }
 }
