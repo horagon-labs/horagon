@@ -30,7 +30,7 @@ export interface GameScreenProps {
 /** The failing-poll line (spec 4.4), on the screen, the loading face and the crown. */
 export function Reconnecting({ stale }: { stale: boolean }) {
   return stale ? (
-    <p role="status" className="text-center font-mono text-11 text-red-400">
+    <p role="status" className="text-center font-mono text-12 text-red-400">
       Reconnecting…
     </p>
   ) : null

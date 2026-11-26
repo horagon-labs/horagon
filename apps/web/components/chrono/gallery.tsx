@@ -64,7 +64,7 @@ const DOWN: Health = { stale: true, error: new Error('down') }
 function Section(p: { title: string; children: ReactNode }) {
   return (
     <section className="space-y-3">
-      <h2 className="text-11 uppercase tracking-[0.3em] text-brass-500">{p.title}</h2>
+      <h2 className="text-12 uppercase tracking-[0.3em] text-brass-500">{p.title}</h2>
       {p.children}
     </section>
   )
@@ -258,7 +258,7 @@ export function Gallery() {
                     secsLeft: s.secsLeft,
                   })}
                 />
-                <figcaption className="text-center font-mono text-11 text-ash-400">
+                <figcaption className="text-center font-mono text-12 text-ash-400">
                   {state}
                 </figcaption>
               </figure>
@@ -342,7 +342,7 @@ export function Gallery() {
                 funding={false}
                 onFaucet={() => {}}
               />
-              <figcaption className="text-center font-mono text-11 text-ash-400">{name}</figcaption>
+              <figcaption className="text-center font-mono text-12 text-ash-400">{name}</figcaption>
             </figure>
           ))}
         </div>

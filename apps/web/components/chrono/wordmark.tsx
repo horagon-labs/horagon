@@ -1,16 +1,17 @@
-// The wordmark (spec 2.7): "HORAGON" in brass, spaced wide, after an hourglass.
+// The wordmark (spec 2.7, R5): "HORAGON" in brass, spaced wide, after the dial mark of the icon.
+import { COLORS } from '../../lib/chrono/tokens'
+import { DialMark } from './dial-mark'
+
 export function Wordmark() {
   return (
     <span className="flex items-center gap-2 text-brass-500">
-      <svg viewBox="0 0 16 16" aria-hidden="true" className="size-4">
-        <path
-          d="M4 2h8L8 8Z M4 14h8L8 8Z"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth={1.25}
-          strokeLinejoin="round"
-        />
-      </svg>
+      <DialMark
+        size={20}
+        face={COLORS['enamel-800']}
+        ring="currentColor"
+        needle={COLORS['lume-300']}
+        className="size-5"
+      />
       <span className="text-15 font-semibold tracking-[0.35em]">HORAGON</span>
     </span>
   )

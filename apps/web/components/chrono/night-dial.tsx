@@ -162,7 +162,7 @@ export function NightDial(p: {
             y={s.y}
             textAnchor={s.anchor}
             dominantBaseline="middle"
-            className="fill-ivory-100 font-mono text-[7px]"
+            className="fill-ivory-100 font-mono text-[8px]"
           >
             {tracks.find((t) => t.item.id === s.id)?.item.game.home}
           </text>
@@ -191,7 +191,7 @@ export function NightDial(p: {
             x={C}
             y={C + 28}
             textAnchor="middle"
-            className="fill-ash-400 font-mono text-[8px]"
+            className="fill-ash-400 font-mono text-[9px]"
             data-overflow={overflow.length}
           >
             +{overflow.length}

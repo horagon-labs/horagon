@@ -27,7 +27,7 @@ export function PositionCard(p: PositionCardProps) {
   const claimable = rows.some((x) => x.claimable)
   return (
     <section className="space-y-3 rounded-card border border-brass-500/15 p-4">
-      <h2 className="text-11 uppercase tracking-[0.3em] text-brass-500">Your position</h2>
+      <h2 className="text-12 uppercase tracking-[0.3em] text-brass-500">Your position</h2>
       {rows.length === 0 ? (
         <p className="text-13 text-ash-400">No positions yet.</p>
       ) : (
@@ -87,7 +87,7 @@ export function PositionCard(p: PositionCardProps) {
           href={explorerTx(sig)}
           target="_blank"
           rel="noreferrer"
-          className="flex min-h-11 items-center text-11 text-brass-400 underline"
+          className="flex min-h-11 items-center text-12 text-brass-400 underline"
         >
           Claimed: view transaction
         </a>

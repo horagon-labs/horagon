@@ -3,7 +3,9 @@ import { join } from 'node:path'
 import { PLAY_MONEY_NOTICE } from '@horagon/sdk'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
+import manifest from '../app/manifest'
 import { AgeDialog } from '../components/age-dialog'
+import { MARK_NEEDLE } from '../components/chrono/dial-mark'
 import { FeelForm } from '../components/chrono/feel-toggles'
 import { Wordmark } from '../components/chrono/wordmark'
 import { YourHour } from '../components/chrono/your-hour'
@@ -14,20 +16,42 @@ import { portfolio, position } from '../lib/chrono/fixtures'
 const noop = () => {}
 
 describe('app shell (spec 2.7, 3.2)', () => {
-  it('spells the wordmark in brass after a hidden hourglass', () => {
+  it('spells the wordmark in brass after the hidden dial mark of the icon (R5)', () => {
     const html = renderToStaticMarkup(<Wordmark />)
     expect(html).toContain('text-brass-500')
     expect(html).toContain('aria-hidden="true"')
+    expect(html).toContain(`d="${MARK_NEEDLE}"`)
     expect(html).toContain('>HORAGON</span>')
+    const icon = readFileSync(join(import.meta.dirname, '..', 'app', 'icon.svg'), 'utf8')
+    expect(icon).toContain(`d="${MARK_NEEDLE}"`)
+  })
+
+  it('names the app for a home screen (R5)', () => {
+    const m = manifest()
+    expect(m.short_name).toBe('Horagon')
+    expect(m.start_url).toBe('/')
+    expect(m.display).toBe('standalone')
+    expect(m.icons?.map((i) => i.src)).toEqual(['/icon.svg', '/apple-icon'])
+  })
+
+  const root = join(import.meta.dirname, '..')
+  const sources = ['app', 'components', 'lib'].flatMap((dir) =>
+    readdirSync(join(root, dir), { recursive: true, encoding: 'utf8' })
+      .filter((file) => /\.(tsx?|css)$/.test(file))
+      .map((file) => join(dir, file)),
+  )
+
+  it('sets no text under 12 px (R5)', () => {
+    // SVG <text> scales with its dial's viewBox; it is checked on the dials themselves.
+    const small = sources.filter((file) =>
+      /text-11(?![0-9])|text-\[(?:[0-9]|1[01])px\]/.test(
+        readFileSync(join(root, file), 'utf8').replace(/<text[\s\S]*?<\/text>/g, ''),
+      ),
+    )
+    expect(small).toEqual([])
   })
 
   it('takes the banner words from PLAY_MONEY_NOTICE, the one copy, in the SDK', () => {
-    const root = join(import.meta.dirname, '..')
-    const sources = ['app', 'components', 'lib'].flatMap((dir) =>
-      readdirSync(join(root, dir), { recursive: true, encoding: 'utf8' })
-        .filter((file) => /\.tsx?$/.test(file))
-        .map((file) => join(dir, file)),
-    )
     expect(sources.length).toBeGreaterThan(10)
     const copies = sources.filter((file) =>
       readFileSync(join(root, file), 'utf8').includes(PLAY_MONEY_NOTICE),

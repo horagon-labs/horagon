@@ -88,7 +88,7 @@ export function CrownSheet(p: {
         </div>
         <p
           role="note"
-          className="shrink-0 border-t border-amber-400/40 px-4 py-2 text-center text-11 text-amber-400"
+          className="shrink-0 border-t border-amber-400/40 px-4 py-2 text-center text-12 text-amber-400"
         >
           {PLAY_MONEY_NOTICE}
         </p>

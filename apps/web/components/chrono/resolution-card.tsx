@@ -56,7 +56,7 @@ export function ResolutionCard({ game, state }: { game: GameDetail; state: DialS
             Result evidence (JSON)
           </a>
           {r.evidenceHash && (
-            <span className="ml-2 break-all font-mono text-11 text-ash-400">
+            <span className="ml-2 break-all font-mono text-12 text-ash-400">
               sha256 {r.evidenceHash}
             </span>
           )}

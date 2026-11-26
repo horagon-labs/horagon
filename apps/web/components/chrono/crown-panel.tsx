@@ -189,7 +189,7 @@ export function CrownPanel(p: CrownPanelProps) {
         />
         <span className="text-13 text-ash-400">{buying ? 'mUSDC' : 'shares'}</span>
       </label>
-      {buying && <p className="text-11 text-ash-400">Each share pays 1 mUSDC if {t.team} wins.</p>}
+      {buying && <p className="text-12 text-ash-400">Each share pays 1 mUSDC if {t.team} wins.</p>}
       {!t.check.ok && t.check.reason && (
         <p className="text-13 text-amber-400">
           {t.check.reason}

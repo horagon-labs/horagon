@@ -111,7 +111,7 @@ export function WalletButton() {
               ✕
             </button>
           </div>
-          <p className="break-all font-mono text-11 text-ash-400">{address}</p>
+          <p className="break-all font-mono text-12 text-ash-400">{address}</p>
           {ephemeral && (
             <p className="text-13 text-amber-400">
               This browser blocks storage: the wallet disappears when you close the tab. Export it
@@ -144,7 +144,7 @@ export function WalletButton() {
                 The secret key controls this wallet. Anyone with it can trade as you.
               </p>
               {shown ? (
-                <p className="break-all rounded bg-enamel-800 p-2 font-mono text-11">{shown}</p>
+                <p className="break-all rounded bg-enamel-800 p-2 font-mono text-12">{shown}</p>
               ) : (
                 <button
                   type="button"
@@ -159,7 +159,7 @@ export function WalletButton() {
                 onChange={(e) => setImportText(e.target.value)}
                 placeholder="Paste a base58 secret key or a JSON byte array"
                 aria-label="Secret key to import"
-                className="h-20 w-full rounded border border-line bg-transparent p-2 font-mono text-11"
+                className="h-20 w-full rounded border border-line bg-transparent p-2 font-mono text-12"
               />
               {ageNeeded && <AgeCheckbox checked={importAge} onChange={setImportAge} />}
               <button
