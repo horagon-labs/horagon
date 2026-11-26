@@ -1,7 +1,14 @@
 // My Game-day's words (R7), pure so they are tested. The night chip sits in the header, so this
 // file is on the first load of every page: it imports no SDK entry with a value, only types.
 import type { Game, MeGame, MePosition, MeResponse } from '@horagon/sdk'
-import { finalWords, homeWonOnScore, resolutionStatus, toWin } from './chrono/copy'
+import {
+  finalWords,
+  homeWonOnScore,
+  liveNumber,
+  resolutionStatus,
+  rowSubject,
+  toWin,
+} from './chrono/copy'
 import { type DialState, deriveDialState } from './chrono/state'
 import { etClock, etDayLabel } from './chrono/time'
 import { countdown, percent, usdc } from './format'
@@ -178,8 +185,21 @@ export function statusOf(p: MePosition, g: Game, now: number): StatusWords {
   }
 }
 
-/** "MEM to win · 62%" from the market price, while it trades. */
-export const priceLine = (g: Game, price: number | null): string => toWin(g.home, price)
+/**
+ * The card's chance line, from the winner market's dial state, as the board row says it: "MEM to
+ * win · 62%" while the number is a live chance; once trading stopped, the scoreboard's words with
+ * no number ("MEM lost", "Resolved: LAC won"); nothing for a void game. `live` says whether the
+ * live Model line belongs under it.
+ */
+export function priceLine(
+  g: Game,
+  market: Game['markets'][number] | undefined,
+  now: number,
+): { text: string; live: boolean } {
+  const state = deriveDialState(g, market, now)
+  if (liveNumber(state)) return { text: toWin(g.home, market?.price ?? null), live: true }
+  return { text: rowSubject(state, g, market?.outcome ?? null), live: false }
+}
 
 /** "Sat, Nov 28 · 7:30 PM ET · LAC @ MEM". */
 export function nextRow(g: Pick<Game, 'home' | 'away' | 'scheduledTipoff'>): string {

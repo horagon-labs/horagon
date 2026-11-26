@@ -90,6 +90,7 @@ function Score(p: { game: MeGame['game'] }) {
 function GameCard(p: { entry: MeGame; now: number }) {
   const { game: g, positions, practice } = p.entry
   const winner = g.markets.find((m) => m.kind === 'winner')
+  const chance = priceLine(g, winner, p.now)
   const ifWins = ifWinsParts(p.entry)
   return (
     <li className="space-y-2 rounded-card border border-brass-500/15 bg-enamel-900 p-4">
@@ -103,13 +104,17 @@ function GameCard(p: { entry: MeGame; now: number }) {
         </Link>
         <Score game={g} />
       </div>
-      <p className="font-mono text-15 text-ivory-100 tabular-nums">
-        {priceLine(g, winner?.price ?? null)}
-      </p>
-      <p className="text-13 text-brass-500">
-        Model: {g.home} {percent(g.modelProb)}
-      </p>
-      <p className="text-12 text-ash-400">{MODEL_HINT}</p>
+      {chance.text && (
+        <p className="font-mono text-15 text-ivory-100 tabular-nums">{chance.text}</p>
+      )}
+      {chance.live && (
+        <>
+          <p className="text-13 text-brass-500">
+            Model: {g.home} {percent(g.modelProb)}
+          </p>
+          <p className="text-12 text-ash-400">{MODEL_HINT}</p>
+        </>
+      )}
       <ul className="divide-y divide-line">
         {positions.map((pos) => {
           const status = statusOf(pos, g, p.now)

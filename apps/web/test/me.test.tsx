@@ -288,6 +288,40 @@ describe('My Game-day, rendered', () => {
     )
   })
 
+  it('reads closed on a final, resolved or void card: no "to win", no live Model line', () => {
+    const end = at('2026-11-25T03:40:00Z')
+    const card = (over: Parameters<typeof game>[0], m: Parameters<typeof market>[0]) =>
+      page({
+        me: meResponse({
+          games: [
+            meGame({
+              game: game({
+                home: 'MEM',
+                away: 'LAC',
+                markets: [market({ endTs: end, ...m })],
+                ...over,
+              }),
+              positions: [mePosition({ status: 'closed' })],
+              ifHomeWins: null,
+              ifAwayWins: null,
+            }),
+          ],
+        }),
+      })
+    const final = { status: 'final' as const, homeScore: 90, awayScore: 100 }
+    // An open market under a final game: the scoreboard's words, never "MEM to win · 62%".
+    const closed = card(final, {})
+    expect(closed).toContain('MEM lost')
+    const resolved = card(final, { status: 'finalized', outcome: 'no' })
+    expect(resolved).toContain('Resolved: LAC won')
+    const voided = card({ status: 'postponed' }, {})
+    for (const html of [closed, resolved, voided]) {
+      expect(html).not.toContain('to win')
+      expect(html).not.toContain('Model: live win chance from score and clock')
+      expect(html).not.toMatch(/Model: MEM \d/)
+    }
+  })
+
   it('folds the key block in the wallet sheet, unchanged', () => {
     const html = renderToStaticMarkup(
       <WalletProvider>
