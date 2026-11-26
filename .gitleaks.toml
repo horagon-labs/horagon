@@ -1,19 +1,11 @@
-# gitleaks config for CI (.github/workflows/ci.yml): the default rules, plus an allowlist for
-# fake credentials. Each regex matches only a reserved example host or a template placeholder,
-# so a real host with a password is still a finding.
+# gitleaks config for CI (.github/workflows/ci.yml): the default rules, plus one allowlist.
+# The generic-api-key rule reads `FOO_KEY = 'horagon.foo.v1'` as a secret. Those values are
+# browser localStorage key names (apps/web/lib/*.ts), not credentials. Only a secret that is
+# nothing but a dotted horagon.* name is allowed, so a real token is still a finding.
 [extend]
 useDefault = true
 
 [[allowlists]]
-description = "Fake credentials in tests and the env template, on example hosts only"
-regexTarget = "line"
-regexes = [
-  # apps/keeper/test/agent-config.test.ts, apps/keeper/test/agent-run.test.ts
-  '''postgres://[^:@/\s]+:[^@/\s]+@db\.example:5432/''',
-  # packages/db/test/reset-e2e.test.ts
-  '''postgres://fake-[a-z0-9-]+:[^@/\s]+@[a-z0-9-]+\.example\.test:6543/''',
-  # packages/sdk/test/errors.test.ts
-  '''https://user:[^@/\s]+@rpc\.example\.com/''',
-  # .env.example
-  '''postgres://postgres\.PROJECT_REF:[^@/\s]+@aws-0-REGION\.pooler\.supabase\.com:6543/''',
-]
+description = "localStorage key names such as horagon.burner.v1.previous"
+regexTarget = "secret"
+regexes = ['''^horagon(\.[a-z0-9]+)+$''']

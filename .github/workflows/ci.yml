@@ -68,9 +68,10 @@ jobs:
             --lockfile=Cargo.lock
             --config=osv-scanner.toml
       - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+      # No pnpm cache here: this job installs nothing, so the cache path would not exist and the
+      # post-job cache step would fail the job.
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
-          cache: pnpm
       # Accepted advisories are listed in package.json (pnpm.auditConfig) and docs/security.md.
       - run: pnpm audit --prod --audit-level high

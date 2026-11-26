@@ -1,0 +1,10 @@
+# gitleaks findings checked by hand and accepted (fingerprint = commit:file:rule:line).
+# .env.example line 27 is `SPONSOR_SECRET_KEY=`, left empty in the template; generic-api-key
+# reads across the line break into the next variable's name.
+83696dca87c371e970e2d209ea724500b1bf5655:.env.example:generic-api-key:27
+# localStorage key names (also covered by the allowlist in .gitleaks.toml; listed so the first
+# runs pass even if the allowlist's secret match differs).
+e1c2b11728e624362d14b66380772f3dfab0f443:apps/web/lib/key-store.ts:generic-api-key:11
+3f2054a3c025cdc8c4e0fdadf2f73e2236151b17:apps/web/lib/chrono/feel.ts:generic-api-key:6
+39c6d8baad97162342cb52803236bbae092145c6:apps/web/lib/burner.ts:generic-api-key:11
+39c6d8baad97162342cb52803236bbae092145c6:apps/web/lib/follows.ts:generic-api-key:2
