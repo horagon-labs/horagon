@@ -45,6 +45,7 @@ import {
   resolveKeyPath,
   rpcEndpoints,
   telegramSettings,
+  timingsFrom,
 } from '../config'
 import { buildEvidence, type SealedEvidence, sealEvidence } from '../evidence'
 import { ProgramFailure, type SendResult, TxSender } from '../executor'
@@ -64,6 +65,7 @@ import {
   solToLamports,
 } from './args'
 import { backfillBotMemo } from './backfill-bot-memo'
+import { DEPLOY_CHECK_BACK_SECS, deployBlockers, deployCheckLines } from './deploy-check'
 import {
   type AttemptLookups,
   chooseAndStoreEvidence,
@@ -93,6 +95,7 @@ const USAGE = `usage: horagon-ops <command>
   flag on|off <FLAG_NAME>
   backfill-bot-memo
   watchdog
+  deploy-check
   help | --help | -h
 options:
   --keypair <path>    sign with another key file (a relative path starts at the repo root)
@@ -729,6 +732,21 @@ async function run(argv: string[]): Promise<void> {
       const alerts = alerter()
       return withDb(async (db) => {
         process.exitCode = await watchdogRun(db, alerts, Math.floor(Date.now() / 1000), log)
+      })
+    }
+    case 'deploy-check': {
+      // ops/deploy-keeper.sh runs it on the VPS before a deploy restarts the keeper (exit 2:
+      // refused unless --force). The keeper's own window: KEEPER_TIMINGS over the defaults.
+      const timings = timingsFrom(env.KEEPER_TIMINGS)
+      return withDb(async (db) => {
+        const now = Math.floor(Date.now() / 1000)
+        const games = await listGames(db, {
+          from: new Date((now - DEPLOY_CHECK_BACK_SECS) * 1000),
+          to: new Date((now + timings.createLeadSecs + 1) * 1000),
+        })
+        const blockers = deployBlockers(games, now, timings)
+        for (const line of deployCheckLines(blockers, now)) console.log(line)
+        process.exitCode = blockers.length > 0 ? 2 : 0
       })
     }
     case 'help':
