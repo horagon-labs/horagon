@@ -311,7 +311,8 @@ function publicKey(name: string, value: string): PublicKey {
   }
 }
 
-function timingsFrom(raw: string | undefined): Timings {
+/** DEFAULT_TIMINGS with KEEPER_TIMINGS (a JSON object) over it; also read by `deploy-check`. */
+export function timingsFrom(raw: string | undefined): Timings {
   if (!raw) return { ...DEFAULT_TIMINGS }
   let json: unknown
   try {

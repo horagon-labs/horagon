@@ -3,8 +3,13 @@
 // move with the game and fans find a counterparty. Every swap carries the `horagon:bot` memo, so
 // it never counts as a fan. One round (every AGENT_INTERVAL_SECS): read the keeper's DB and the
 // chain, decide per market (decide.ts), send at most one swap per market, check the swaps of the
-// round before, page on low balances. A round ends early when the stop signal comes or when its
-// snapshot is older than half an interval. Hourly: the faucet and the claims of settled markets.
+// round before (guards.ts: a gap that grew holds the market, then disables it unless a trade by
+// another wallet shows), page on low balances. A round ends early when the stop signal comes, when a
+// pause starts or when its snapshot is older than half an interval, and the next round starts
+// at the market after the last one decided. Hourly: the faucet and the claims of settled markets.
+// A dry run sends nothing and claims nothing; when the wallet holds less than the agent's spend
+// cap it plans against that cap (a notional balance, `notional: true` on its decision lines), so
+// it shows the swaps a funded live run would size.
 import {
   type Db,
   getHeartbeat,
@@ -33,11 +38,19 @@ import { dueEvery } from '../loop'
 import { isMissingAccount } from '../treasury'
 import type { AgentParams } from './config'
 import { type Decision, decide, leagueAllowed, type MarketView } from './decide'
-import { AnomalyWatch, FailureGuard, SpendBook } from './guards'
+import { ANOMALY_HOLD_SECS, AnomalyWatch, FailureGuard, Rotation, SpendBook } from './guards'
 import { agentClaimInstructions, agentSwapInstructions, CLAIM_COMPUTE_UNITS } from './tx'
 
 /** The faucet and the claims run at most this often. */
 export const AGENT_HOURLY_SECS = 3_600
+
+/**
+ * Rounds in a row cut before their first decision (a read slower than half an interval: the
+ * RPC or the database is degraded) before the agent logs SLOW_READS_MSG, and how often at most.
+ */
+export const SLOW_READS_ROUNDS = 3
+export const SLOW_READS_WARN_SECS = 600
+export const SLOW_READS_MSG = 'agent: rounds cut before their first decision, the reads are slow'
 
 type AgentConnection = Pick<
   Connection,
@@ -67,20 +80,25 @@ export interface AgentDeps {
 
 export interface RoundReport {
   paused: boolean
+  /** The markets the round read (0 when it read nothing: paused, or the read failed). */
+  markets: number
+  /** One per market decided, in the order decided. */
   decisions: Decision[]
   /** Swaps that landed this round. */
   sent: number
   failures: number
   /**
-   * Why the round ended before its last market, which then waits for the next round's read:
-   * `stale` when its snapshot grew older than half an interval (a slow send), `stop` when the
-   * stop signal came. Null when it went through every market.
+   * Why the round ended before its last market, whose turn then comes first in the next round:
+   * `stale` when its snapshot grew older than half an interval (a slow send, or a slow read when
+   * nothing was decided), `stop` when the stop signal came, `pause` when one of its failures
+   * started a pause. Null when it went through every market.
    */
-  cut: 'stale' | 'stop' | null
+  cut: 'stale' | 'stop' | 'pause' | null
 }
 
 const emptyReport = (): RoundReport => ({
   paused: false,
+  markets: 0,
   decisions: [],
   sent: 0,
   failures: 0,
@@ -93,6 +111,17 @@ interface Snapshot {
   lamports: bigint
   musdc: bigint
 }
+
+/**
+ * The read after a swap found the gap grown, and no trade by another wallet since the swap is
+ * stored: the market is held (no swap, no page) for ANOMALY_HOLD_SECS, then disabled if none shows.
+ */
+export const ANOMALY_HELD_MSG =
+  'agent: the price moved away from the model after its swap, and no other trade is stored yet; market held'
+
+/** The dry run's low-mUSDC log line, written instead of the `agent-musdc` page. */
+export const DRY_LOW_MUSDC_MSG =
+  'agent: dry run, the wallet holds under AGENT_MIN_MUSDC; no page in a dry run, which plans against its spend cap'
 
 const toSecs = (d: Date | null) => (d ? Math.floor(d.getTime() / 1000) : null)
 const musdcText = (raw: bigint) => (Number(raw) / 1e6).toFixed(2)
@@ -107,9 +136,15 @@ export class ReferenceAgent {
   readonly book = new SpendBook()
   readonly watch = new AnomalyWatch()
   readonly failures: FailureGuard
+  private readonly rotation = new Rotation()
   private readonly hourlyDue = dueEvery(AGENT_HOURLY_SECS)
   private rounds = 0
   private last: RoundReport = emptyReport()
+  /** Rounds in a row that read and were cut before their first decision, and the last warning. */
+  private slowRounds = 0
+  private slowWarnedAt: number | null = null
+  /** When a dry run last logged DRY_LOW_MUSDC_MSG (at most hourly). */
+  private dryLowLoggedAt: number | null = null
 
   constructor(private readonly d: AgentDeps) {
     this.failures = new FailureGuard(d.params.maxFailures, d.params.pauseSecs)
@@ -175,7 +210,7 @@ export class ReferenceAgent {
     }
     if (this.hourlyDue(started)) {
       await this.fund()
-      report.failures += await this.claimAll(started, signal)
+      report.failures += await this.claimAll(signal)
     }
     // The clock again: the faucet and the claims may have taken minutes. The snapshot is read
     // as of `now`, and every decision of the round is made on both.
@@ -184,33 +219,42 @@ export class ReferenceAgent {
     try {
       snap = await this.read(now)
     } catch (err) {
-      await this.failed(now, 'read', err)
+      await this.failed('read', err)
       report.failures++
       await this.beat(report, now)
       return report
     }
-    await this.balanceAlerts(snap)
+    report.markets = snap.views.length
+    await this.balanceAlerts(snap, now)
     // What the round may still spend. Every swap it plans comes off, sent or not: a dry run,
     // a send whose result is unknown and one that failed alike, so one round never plans more
-    // than the wallet held when it was read.
-    let balance = snap.musdc
-    for (const [i, view] of snap.views.entries()) {
-      if (this.failures.paused(now)) break
-      // Before each decision: a stop signal, or a snapshot that a slow send made old, ends the
-      // round. The markets left are decided on the next round's fresh read.
+    // than the wallet held when it was read. A dry run whose wallet holds less than the spend
+    // cap plans against the cap instead (a notional balance: it spends nothing either way).
+    const cap = this.spendCap(snap.views.length)
+    const notional = this.d.dryRun && snap.musdc < cap
+    let balance = notional ? cap : snap.musdc
+    // In turn: from the market after the last one decided, wrapping around.
+    const order = snap.views.map((v) => v.market)
+    const start = this.rotation.start(order)
+    const views = [...snap.views.slice(start), ...snap.views.slice(0, start)]
+    for (const [i, view] of views.entries()) {
+      // Before each decision: a pause that a failure of this round started, a stop signal, or
+      // a snapshot that a slow read or send made old, ends the round. The markets left are
+      // decided first on the next round's fresh read.
       const ageSecs = this.d.now() - now
-      const cut = signal?.aborted ? 'stop' : ageSecs > this.freshSecs ? 'stale' : null
+      let cut: RoundReport['cut'] = null
+      if (this.failures.paused(now)) cut = 'pause'
+      else if (signal?.aborted) cut = 'stop'
+      else if (ageSecs > this.freshSecs) cut = 'stale'
       if (cut) {
         report.cut = cut
-        this.d.log.info(
-          { reason: cut, ageSecs, left: snap.views.length - i },
-          'agent round cut short',
-        )
+        this.d.log.info({ reason: cut, ageSecs, left: views.length - i }, 'agent round cut short')
         break
       }
       const decision = decide(view, { now, balance, params: this.d.params })
       report.decisions.push(decision)
-      this.logDecision(decision)
+      this.rotation.decided(view.market, order)
+      this.logDecision(decision, notional)
       if (decision.action !== 'swap') continue
       balance -= decision.amountIn
       if (this.d.dryRun) continue
@@ -220,8 +264,39 @@ export class ReferenceAgent {
       else report.failures++
     }
     if (report.failures === 0) this.failures.clean()
+    this.slowReads(report)
     await this.beat(report, now)
     return report
+  }
+
+  /**
+   * The most the agent may spend on the markets of a round, from its own config: there is no
+   * per-night cap, so AGENT_MAX_PER_GAME for each market.
+   */
+  private spendCap(markets: number): bigint {
+    return this.d.params.maxPerGame * BigInt(markets)
+  }
+
+  /**
+   * A round cut `stale` before its first decision read slower than half an interval: a degraded
+   * RPC or database, and the agent trades nothing (safe, but silent). From SLOW_READS_ROUNDS such
+   * rounds in a row, a warning at most every SLOW_READS_WARN_SECS. Any other round that read
+   * ends the streak; a paused round and a failed read leave it as it was.
+   */
+  private slowReads(report: RoundReport): void {
+    if (report.cut !== 'stale' || report.decisions.length > 0) {
+      this.slowRounds = 0
+      return
+    }
+    this.slowRounds++
+    const at = this.d.now()
+    if (this.slowRounds < SLOW_READS_ROUNDS) return
+    if (this.slowWarnedAt !== null && at - this.slowWarnedAt < SLOW_READS_WARN_SECS) return
+    this.slowWarnedAt = at
+    this.d.log.warn(
+      { rounds: this.slowRounds, freshSecs: this.freshSecs, markets: report.markets },
+      SLOW_READS_MSG,
+    )
   }
 
   /** The keeper's DB rows, the fan trades and the agent's totals, then the chain. */
@@ -230,8 +305,16 @@ export class ReferenceAgent {
     const leagues = ['NBA', 'PRACTICE'].filter((l) => leagueAllowed(l, params.practice))
     const rows = await listAgentMarkets(this.d.db, leagues)
     const keys = rows.map((r) => r.pubkey)
-    const since = new Date((now - params.fanLagSecs) * 1000)
-    const fans = await lastOtherTrades(this.d.db, keys, wallet.toBase58(), since)
+    // The fan-lag window, or further back while a swap is still checked: a trade by another
+    // wallet after that swap clears its check, however long ago the last round was.
+    const oldest = this.watch.oldestPendingAt
+    const sinceSecs = Math.min(now - params.fanLagSecs, oldest ?? Number.POSITIVE_INFINITY)
+    const fans = await lastOtherTrades(
+      this.d.db,
+      keys,
+      wallet.toBase58(),
+      new Date(sinceSecs * 1000),
+    )
     const totals = await walletMarketTotals(this.d.db, wallet.toBase58(), keys)
     const [infos, lamports, musdc] = await Promise.all([
       this.accountInfos(keys.map((k) => new PublicKey(k))),
@@ -262,23 +345,37 @@ export class ReferenceAgent {
       }
       const live = account ? liveMarket(account, now) : null
       const price = live && !live.closed ? live.price : null
-      const anomaly = this.watch.check(row.pubkey, price)
-      if (anomaly) {
-        this.d.log.error(
-          {
-            market: row.pubkey,
-            gameId: row.gameId,
-            side: anomaly.side,
-            model: anomaly.model,
-            priceBefore: anomaly.price,
-            priceNow: price,
-          },
-          'agent anomaly',
+      const fanAt = toSecs(fans.get(row.pubkey) ?? null)
+      // Another wallet traded at or after the agent's last swap here: the price move is not the
+      // agent's alone, so the check is cleared and the market stays enabled.
+      if (fanAt !== null && this.watch.clearAfter(row.pubkey, fanAt)) {
+        this.d.log.info(
+          { market: row.pubkey, gameId: row.gameId, tradeAt: fanAt },
+          'agent: another wallet traded after its swap; check cleared',
         )
-        await this.d.alerts.send(
-          `agent-anomaly:${row.gameId}`,
-          `Reference agent: after its ${anomaly.side.toUpperCase()} swap on ${row.away}@${row.home} the price moved away from the model (${anomaly.price.toFixed(3)} -> ${price?.toFixed(3)}, model ${anomaly.model.toFixed(3)}); market disabled until the agent is restarted by hand`,
-        )
+      }
+      // The gap grew with no such trade stored: held while the indexer may still be behind the
+      // chain, then disabled when none shows by the end of the hold.
+      const checked = this.watch.check(row.pubkey, price, now)
+      if (checked.state !== 'none') {
+        const { sent } = checked
+        const fields = {
+          market: row.pubkey,
+          gameId: row.gameId,
+          side: sent.side,
+          model: sent.model,
+          priceBefore: sent.price,
+          priceNow: price,
+        }
+        if (checked.state === 'held' && checked.first) {
+          this.d.log.warn({ ...fields, until: checked.until }, ANOMALY_HELD_MSG)
+        } else if (checked.state === 'disabled') {
+          this.d.log.error(fields, 'agent anomaly')
+          await this.d.alerts.send(
+            `agent-anomaly:${row.gameId}`,
+            `Reference agent: after its ${sent.side.toUpperCase()} swap on ${row.away}@${row.home} the price moved away from the model (${sent.price.toFixed(3)} -> ${price?.toFixed(3)}, model ${sent.model.toFixed(3)}) and no trade by another wallet showed within ${ANOMALY_HOLD_SECS / 60} min; market disabled until the agent is restarted by hand`,
+          )
+        }
       }
       views.push({
         market: row.pubkey,
@@ -287,15 +384,18 @@ export class ReferenceAgent {
         kind: row.kind,
         marketStatus: row.status,
         gameStatus: row.gameStatus,
+        period: row.period,
+        clockSecs: row.clockSecs,
         tipoff: toSecs(row.scheduledTipoff) as number,
         endTs: toSecs(row.endTs) as number,
         modelProb: row.modelProb,
         modelAt: toSecs(row.feedUpdatedAt),
-        lastFanTradeAt: toSecs(fans.get(row.pubkey) ?? null),
+        lastFanTradeAt: fanAt,
         ...this.book.totals(row.pubkey, totals.get(row.pubkey)),
         price,
         pool: account && price !== null ? toPoolState(account) : null,
         disabled: this.watch.disabled(row.pubkey),
+        held: this.watch.held(row.pubkey),
       })
     }
     this.watch.forgetExcept(new Set(keys))
@@ -310,7 +410,12 @@ export class ReferenceAgent {
     return out
   }
 
-  private async balanceAlerts(snap: Snapshot): Promise<void> {
+  /**
+   * `agent-sol` and `agent-musdc`. A dry run never pages `agent-musdc`: it claims no faucet and
+   * plans against its spend cap, so a low wallet changes nothing there; it logs it at most
+   * hourly instead.
+   */
+  private async balanceAlerts(snap: Snapshot, now: number): Promise<void> {
     const { params } = this.d
     if (snap.lamports < params.minSolLamports) {
       await this.d.alerts.send(
@@ -318,15 +423,24 @@ export class ReferenceAgent {
         `Reference agent wallet holds ${Number(snap.lamports) / 1e9} SOL; fees need ${Number(params.minSolLamports) / 1e9}`,
       )
     }
-    if (snap.musdc < params.minMusdc) {
-      await this.d.alerts.send(
-        'agent-musdc',
-        `Reference agent wallet holds ${musdcText(snap.musdc)} mUSDC, under ${musdcText(params.minMusdc)}; the faucet adds 1,000 an hour`,
+    if (snap.musdc >= params.minMusdc) return
+    if (this.d.dryRun) {
+      if (this.dryLowLoggedAt !== null && now - this.dryLowLoggedAt < AGENT_HOURLY_SECS) return
+      this.dryLowLoggedAt = now
+      this.d.log.info(
+        { musdc: musdcText(snap.musdc), minMusdc: musdcText(params.minMusdc), dryRun: true },
+        DRY_LOW_MUSDC_MSG,
       )
+      return
     }
+    await this.d.alerts.send(
+      'agent-musdc',
+      `Reference agent wallet holds ${musdcText(snap.musdc)} mUSDC, under ${musdcText(params.minMusdc)}; the faucet adds 1,000 an hour`,
+    )
   }
 
-  private logDecision(d: Decision): void {
+  /** `notional`: the round planned against the spend cap, not the wallet (a dry run). */
+  private logDecision(d: Decision, notional: boolean): void {
     const fields = {
       market: d.market,
       gameId: d.gameId,
@@ -334,6 +448,7 @@ export class ReferenceAgent {
       model: d.model,
       gap: d.gap,
       dryRun: this.d.dryRun,
+      ...(notional ? { notional: true } : {}),
       ...(d.action === 'swap'
         ? {
             side: d.side,
@@ -349,11 +464,14 @@ export class ReferenceAgent {
     else this.d.log.debug(fields, `agent ${d.action}`)
   }
 
-  /** One swap; false when it failed (counted). A swap that may still land counts as sent. */
+  /**
+   * One swap; false when it failed (counted). A swap that may still land counts as sent. `at` is
+   * the round's read, which the price before the swap came from.
+   */
   private async swap(
     d: Extract<Decision, { action: 'swap' }>,
     account: MarketAccount,
-    now: number,
+    at: number,
   ): Promise<boolean> {
     const market = new PublicKey(d.market)
     try {
@@ -380,7 +498,7 @@ export class ReferenceAgent {
         computeUnits: SWAP_COMPUTE_UNITS,
         priorityMicroLamports: this.d.priorityMicroLamports,
       })
-      this.sentSwap(d)
+      this.sentSwap(d, at)
       this.d.log.info(
         {
           market: d.market,
@@ -395,16 +513,22 @@ export class ReferenceAgent {
     } catch (err) {
       // It may still land: counted as spent, and checked on the next read like a landed one (a
       // read that shows no move proves nothing and clears the check).
-      if (err instanceof UnresolvedAttempt) this.sentSwap(d)
-      await this.failed(now, 'send', err)
+      if (err instanceof UnresolvedAttempt) this.sentSwap(d, at)
+      await this.failed('send', err)
       return false
     }
   }
 
   /** A swap that landed or may land: its spend, and the anomaly check of the next read. */
-  private sentSwap(d: Extract<Decision, { action: 'swap' }>): void {
+  private sentSwap(d: Extract<Decision, { action: 'swap' }>, at: number): void {
     this.book.record(d.market, d.amountIn)
-    this.watch.expect(d.market, { gameId: d.gameId, side: d.side, model: d.model, price: d.price })
+    this.watch.expect(d.market, {
+      gameId: d.gameId,
+      side: d.side,
+      model: d.model,
+      price: d.price,
+      at,
+    })
   }
 
   /** The faucet into the agent wallet; a refusal (rate limit) is expected and only logged. */
@@ -425,7 +549,7 @@ export class ReferenceAgent {
    * claim_winnings on every settled market where the agent holds winning shares (the chain
    * decides: resolved, and a winning balance above 0). Returns the failures.
    */
-  private async claimAll(now: number, signal?: AbortSignal): Promise<number> {
+  private async claimAll(signal?: AbortSignal): Promise<number> {
     let failures = 0
     let rows: Array<{ pubkey: string; gameId: string }>
     let infos: Array<AccountInfo<Buffer> | null>
@@ -434,7 +558,7 @@ export class ReferenceAgent {
       if (rows.length === 0) return 0
       infos = await this.accountInfos(rows.map((r) => new PublicKey(r.pubkey)))
     } catch (err) {
-      await this.failed(now, 'read', err)
+      await this.failed('read', err)
       return 1
     }
     for (const [i, row] of rows.entries()) {
@@ -486,16 +610,20 @@ export class ReferenceAgent {
         )
       } catch (err) {
         failures++
-        await this.failed(now, 'send', err)
+        await this.failed('send', err)
       }
     }
     return failures
   }
 
-  private async failed(now: number, kind: 'read' | 'send', err: unknown): Promise<void> {
+  /**
+   * One failed read or send, seen now: after the call returned, which for a send can be 90 s or
+   * more after the round's read. A pause it starts lasts the full AGENT_PAUSE_SECS from here.
+   */
+  private async failed(kind: 'read' | 'send', err: unknown): Promise<void> {
     const error = errorSummary(err).message
     this.d.log.warn({ kind, error, streak: this.failures.count + 1 }, `agent ${kind} failed`)
-    if (this.failures.fail(now)) {
+    if (this.failures.fail(this.d.now())) {
       const { maxFailures, pauseSecs } = this.d.params
       this.d.log.error({ pauseSecs }, 'agent paused')
       await this.d.alerts.send(
@@ -507,7 +635,8 @@ export class ReferenceAgent {
 
   /**
    * The `agent` row of keeper_heartbeats, written after every round, a paused or failed one
-   * included, and once more with `stopped` at a clean stop; a failed write is only logged.
+   * included, and once more with `stopped` at a clean stop; a failed write is only logged. It
+   * carries the markets the round read and the ones it decided, and why it was cut, if it was.
    */
   private async beat(report: RoundReport, now: number, stopped = false): Promise<void> {
     this.last = report
@@ -518,7 +647,9 @@ export class ReferenceAgent {
         dryRun: this.d.dryRun,
         paused,
         ...(paused ? { pausedUntil: this.failures.pausedUntil } : {}),
-        markets: report.decisions.length,
+        markets: report.markets,
+        decided: report.decisions.length,
+        cut: report.cut,
         sent: report.sent,
         disabled: this.watch.disabledMarkets,
         ...(stopped ? { stopped: true } : {}),

@@ -1,7 +1,9 @@
 // Replays games recorded by spike S4 (`tests/fixtures/replay/*.json`) as a live feed, shifted
-// so the recorded tip-off lands at a chosen time. Used for the devnet rehearsal (spec 3, Tier 1
-// "done") and the Surfpool run. Each rehearsal gets its own `tag`, so its markets never collide
-// with real games or an earlier rehearsal. The fixture format and its quirks: `@horagon/sdk/replay`.
+// so the recorded tip-off lands at a chosen time. For a local Surfpool run only: replay games are
+// league NBA, so on devnet their markets would be counted NBA markets (docs/metrics.md) on the
+// public board, traded by the reference agent; a replay never runs on the production keeper
+// (docs/runbook.md, "Replay"). Each run gets its own `tag`, so its markets never collide with
+// real games or an earlier run. The fixture format and its quirks: `@horagon/sdk/replay`.
 import { readdir, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import {
@@ -53,8 +55,7 @@ export interface ReplayOptions {
   tipoff: Date
   now: () => Date
   /**
-   * Game time runs this many times faster than wall time (default 1). Only for the local run
-   * on Surfpool; a rehearsal on devnet plays at 1 so it looks like a real night.
+   * Game time runs this many times faster than wall time (default 1), on a local Surfpool run.
    */
   speed?: number
 }

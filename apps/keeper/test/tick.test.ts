@@ -28,7 +28,14 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { ProgramFailure, type SendSpec, type TxSender, UnresolvedAttempt } from '../src/executor'
 import type { Feed, FeedGame } from '../src/feeds/types'
 import { DEFAULT_SEEDS, DEFAULT_TIMINGS, type GameState } from '../src/planner'
-import { Keeper, type KeeperDeps, minutesRemaining, stuckAlerts } from '../src/tick'
+import {
+  draftText,
+  Keeper,
+  type KeeperDeps,
+  minutesRemaining,
+  stuckAlerts,
+  utcAndEt,
+} from '../src/tick'
 
 const S = 1_795_000_000
 const END = S + DEFAULT_TIMINGS.endOffsetSecs
@@ -324,7 +331,8 @@ describe('Keeper.tick', () => {
     expect(sends.at(-1)).toBe('halt nba-401910007 (final-before-end)')
     expect(alerts.map(([k]) => k)).toContain('halt:nba-401910007')
 
-    // 60 s of the same Final: draft, and the guardian gets the exact command.
+    // 60 s of the same Final: draft, and the guardian gets the exact command, with the time
+    // proposing opens (end_ts) rather than a call to propose now.
     now += 60
     expect((await keeper.tick()).map((a) => a.type)).toEqual(['draft'])
     expect(await getDraft(h.db, 'nba-401910007')).toMatchObject({
@@ -335,6 +343,7 @@ describe('Keeper.tick', () => {
     // The key carries the challenge count (0 before any challenge): each round alerts apart.
     const [, text] = alerts.find(([k]) => k === 'draft:nba-401910007:0') ?? []
     expect(text).toContain('horagon-ops propose nba-401910007 --box-score <url> --score 111-106')
+    expect(text).toContain(`Check the box score; proposing opens at ${utcAndEt(END)}, then run:`)
 
     // Every action went through: nothing was logged as failed.
     expect(logs).toEqual([])
@@ -1085,5 +1094,39 @@ describe('minutesRemaining', () => {
     expect(minutesRemaining({ status: 'live', period: 4, clockSecs: 30 })).toBe(0.5)
     expect(minutesRemaining({ status: 'live', period: 5, clockSecs: 120 })).toBe(2)
     expect(minutesRemaining({ status: 'final', period: 4, clockSecs: 0 })).toBe(0)
+  })
+})
+
+describe('draftText', () => {
+  const g = { id: 'nba-1', away: 'MEM', home: 'CLE' }
+  const final = { status: 'final' as const, homeScore: 111, awayScore: 106 }
+  // 2026-11-28 02:00 UTC is 9:00 PM ET on 11-27 (EST, UTC-5).
+  const endTs = Date.UTC(2026, 10, 28, 2, 0) / 1000
+
+  it('writes a time in UTC and in ET', () => {
+    expect(utcAndEt(endTs)).toBe('2026-11-28 02:00 UTC (9:00 PM ET)')
+    expect(utcAndEt(Date.UTC(2026, 11, 1, 5, 5) / 1000)).toBe('2026-12-01 05:05 UTC (12:05 AM ET)')
+  })
+
+  it('says when proposing opens for a Final drafted before end_ts', () => {
+    const text = draftText(g, final, endTs, endTs - 1_800)
+    expect(text).toBe(
+      'MEM@CLE Final 106-111 (ESPN). Check the box score; proposing opens at 2026-11-28 02:00 UTC (9:00 PM ET), then run:\n' +
+        'horagon-ops propose nba-1 --box-score <url> --score 111-106',
+    )
+    expect(text).not.toMatch(/propose now/i)
+  })
+
+  it('asks for the propose at once from end_ts on, and for a postponed game', () => {
+    for (const now of [endTs, endTs + 600]) {
+      expect(draftText(g, final, endTs, now)).toBe(
+        'MEM@CLE Final 106-111 (ESPN). Check the box score, then run:\n' +
+          'horagon-ops propose nba-1 --box-score <url> --score 111-106',
+      )
+    }
+    expect(draftText(g, { status: 'postponed', homeScore: 0, awayScore: 0 }, endTs, endTs)).toBe(
+      'MEM@CLE was not played within 7 days. Resolve NO:\n' +
+        'horagon-ops propose nba-1 --postponed --notice <url>',
+    )
   })
 })

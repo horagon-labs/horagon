@@ -159,6 +159,8 @@ export class FakeChain {
   musdc: bigint | null = 5_000_000_000n
   fail: { balance?: Error; accounts?: Error } = {}
   reads = 0
+  /** Runs on every account read (a slow RPC moves a fake clock here). */
+  onRead: (() => void) | null = null
 
   set(key: PublicKey, info: AccountInfo<Buffer> | null): void {
     if (info) this.accounts.set(key.toBase58(), info)
@@ -177,6 +179,7 @@ export class FakeChain {
     return {
       async getMultipleAccountsInfo(keys: PublicKey[]) {
         self.reads++
+        self.onRead?.()
         if (self.fail.accounts) throw self.fail.accounts
         return keys.map((k) => self.accounts.get(k.toBase58()) ?? null)
       },
@@ -202,6 +205,8 @@ export class FakeSender {
   fail: Error | null = null
   /** Runs after a send that "landed" (move the fake market's price here). */
   onSend: ((spec: SendSpec) => void) | null = null
+  /** Runs on every send before its result, a failed one too (a slow send moves a fake clock). */
+  onAttempt: ((spec: SendSpec) => void) | null = null
 
   constructor(readonly connection: Connection) {}
 
@@ -209,6 +214,7 @@ export class FakeSender {
     spec: SendSpec,
   ): Promise<{ signature: string | null; attempts: number; alreadyDone: boolean }> {
     this.specs.push(spec)
+    this.onAttempt?.(spec)
     if (this.fail) throw this.fail
     this.onSend?.(spec)
     return { signature: `sig${this.specs.length}`, attempts: 1, alreadyDone: false }
@@ -253,20 +259,24 @@ export function recordingConnection(): { conn: Connection; sent: VersionedTransa
   return { conn: conn as unknown as Connection, sent }
 }
 
-/** The keeper's tick writing the game's model, from a feed read at `at` (Unix seconds). */
+/**
+ * The keeper's tick writing the game's model, from a feed read at `at` (Unix seconds), with the
+ * game's period and clock (Q3 with 5 min left unless given).
+ */
 export async function writeModel(
   db: Db,
   gameId: string,
   modelProb: number,
   at: number,
   status = 'live',
+  clock: { period: number; clockSecs: number | null } = { period: 3, clockSecs: 300 },
 ): Promise<void> {
   await updateGameLive(db, gameId, {
     status,
     homeScore: 50,
     awayScore: 45,
-    period: 3,
-    clockSecs: 300,
+    period: clock.period,
+    clockSecs: clock.clockSecs,
     periods: [],
     modelProb,
     feedUpdatedAt: new Date(at * 1000),
