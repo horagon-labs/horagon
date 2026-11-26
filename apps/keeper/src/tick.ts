@@ -409,6 +409,8 @@ export class Keeper {
   private readonly holdsRead = new Set<string>()
   /** `<gameId>:<round>:<evidence hash>` of the keeper's proposals whose page was delivered. */
   private readonly paged = new Set<string>()
+  /** The Final score of the stored evidence behind each proposal on chain, by its hash. */
+  private readonly proposals = new Map<string, { hash: string; score: Score }>()
 
   constructor(private readonly d: KeeperDeps) {}
 
@@ -555,9 +557,10 @@ export class Keeper {
       }),
     )
     await this.readHolds(states)
+    await this.readProposed(states, now, disputeWindowSecs)
     await this.checkSecondSource(now, states, disputeWindowSecs)
     for (const s of states) {
-      s.secondSource = this.secondSourceOf(s, now)
+      s.secondSource = this.secondSourceOf(s, now, disputeWindowSecs)
       s.proposeError = this.proposeErrors.get(s.game.id) ?? null
       s.pageOwed = this.pageOwed(s)
     }
@@ -638,24 +641,60 @@ export class Keeper {
   }
 
   /**
-   * Games whose draft the second source should check: a pending Final draft the keeper may
-   * propose (round 0), or a proposal still inside its window. A match against the same draft
+   * `proposed` of each proposal still inside its window: the Final score of the stored evidence
+   * whose hash is on chain, read once per hash. Other evidence than the chain's leaves it null
+   * (sync pages `evidence-mismatch:`), so nothing is checked against a score not on chain.
+   */
+  private async readProposed(
+    states: readonly GameState[],
+    now: number,
+    windowSecs: number,
+  ): Promise<void> {
+    if (!this.d.autoPropose?.secondSource) return
+    for (const s of states) {
+      const gm = s.onchain
+      if (gm?.status !== 'proposed' || now >= gm.proposedAt + windowSecs) continue
+      const hash = toHex(gm.evidenceHash)
+      const known = this.proposals.get(s.game.id)
+      if (known?.hash === hash) {
+        s.proposed = known.score
+        continue
+      }
+      const stored = await getEvidence(this.d.db, s.game.id, 0)
+      if (stored?.hash !== hash) continue
+      const ev = parseResolutionEvidence(JSON.parse(stored.json))
+      if (ev.status !== 'final') continue
+      const score = { home: ev.homeScore, away: ev.awayScore }
+      this.proposals.set(s.game.id, { hash, score })
+      s.proposed = score
+    }
+  }
+
+  /**
+   * The score the second source should check for this game, or null: a pending Final draft the
+   * keeper may propose (round 0), or, inside the window, the Final on chain (`proposed`).
+   */
+  private checkScore(s: GameState, now: number, windowSecs: number): Score | null {
+    const { draft, onchain: chain, game: g } = s
+    if (g.league !== 'NBA' || !chain) return null
+    if (chain.status === 'proposed')
+      return now < chain.proposedAt + windowSecs ? (s.proposed ?? null) : null
+    const proposable =
+      draft?.state === 'pending' &&
+      draft.status === 'final' &&
+      (chain.status === 'open' || chain.status === 'halted') &&
+      chain.challengeCount === 0
+    return proposable ? { home: draft.homeScore, away: draft.awayScore } : null
+  }
+
+  /**
+   * Games whose score the second source should check (checkScore). A match against the same
    * score ends the checks; a mismatch keeps them going, so the sources can come to agree.
    */
   private wantsCheck(s: GameState, now: number, windowSecs: number): boolean {
-    const { draft, onchain: chain, game: g } = s
-    if (g.league !== 'NBA' || !draft || draft.status !== 'final' || !chain) return false
-    const proposable =
-      draft.state === 'pending' &&
-      (chain.status === 'open' || chain.status === 'halted') &&
-      chain.challengeCount === 0
-    const inWindow =
-      draft.state === 'proposed' &&
-      chain.status === 'proposed' &&
-      now < chain.proposedAt + windowSecs
-    if (!proposable && !inWindow) return false
-    const c = this.checks.get(g.id)
-    const score = { home: draft.homeScore, away: draft.awayScore }
+    const score = this.checkScore(s, now, windowSecs)
+    if (!score) return false
+    const c = this.checks.get(s.game.id)
     return !(c?.verdict === 'match' && sameScore(c.draft, score))
   }
 
@@ -697,7 +736,10 @@ export class Keeper {
         continue
       }
       if (!got) continue
-      for (const s of group) await this.recordCheck(s, got)
+      for (const s of group) {
+        const score = this.checkScore(s, now, windowSecs)
+        if (score) await this.recordCheck(s, got, score)
+      }
     }
   }
 
@@ -729,13 +771,11 @@ export class Keeper {
     }
   }
 
-  private async recordCheck(s: GameState, got: DateGames): Promise<void> {
-    const { game: g, draft } = s
-    if (!draft) return
+  private async recordCheck(s: GameState, got: DateGames, score: Score): Promise<void> {
+    const g = s.game
     const found = findGame(got.games, g.home, g.away)
     const game = found ? secondGame(found) : null
-    const verdict = verdictOf(draft, game)
-    const score = { home: draft.homeScore, away: draft.awayScore }
+    const verdict = verdictOf({ homeScore: score.home, awayScore: score.away }, game)
     const second =
       game && game.homeScore !== null && game.awayScore !== null
         ? { home: game.homeScore, away: game.awayScore }
@@ -785,14 +825,24 @@ export class Keeper {
     })
   }
 
-  /** The planner's view of the second source for this game's current draft. */
-  private secondSourceOf(s: GameState, now: number): SecondSourceState | null {
+  /**
+   * The planner's view of the second source for this game's current draft, or inside the window
+   * for the proposal on chain.
+   */
+  private secondSourceOf(s: GameState, now: number, windowSecs: number): SecondSourceState | null {
     const auto = this.d.autoPropose
     if (!auto) return null
     if (!auto.secondSource) return { verdict: 'off', since: now }
     const c = this.checks.get(s.game.id)
+    const gm = s.onchain
     const d = s.draft
-    if (!c || !d || !sameScore(c.draft, { home: d.homeScore, away: d.awayScore })) return null
+    const score =
+      gm?.status === 'proposed' && now < gm.proposedAt + windowSecs
+        ? (s.proposed ?? null)
+        : d
+          ? { home: d.homeScore, away: d.awayScore }
+          : null
+    if (!c || !score || !sameScore(c.draft, score)) return null
     if (c.verdict === 'mismatch')
       return c.second ? { verdict: 'mismatch', since: c.since, score: c.second } : null
     return { verdict: c.verdict, since: c.since }

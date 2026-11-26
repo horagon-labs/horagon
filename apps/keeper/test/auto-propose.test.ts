@@ -6,6 +6,7 @@ import {
   listOps,
   setDraftState,
   updateMarket,
+  upsertDraft,
 } from '@horagon/db'
 import { createTestDb } from '@horagon/db/testing'
 import { parseResolutionEvidence } from '@horagon/sdk'
@@ -16,7 +17,7 @@ import { ProgramFailure } from '../src/executor'
 import type { Feed, FeedGame } from '../src/feeds/types'
 import { readProposeRecord } from '../src/ops/propose-evidence'
 import { DEFAULT_SEEDS, DEFAULT_TIMINGS } from '../src/planner'
-import { evidenceUri } from '../src/propose'
+import { evidenceUri, proposeResult } from '../src/propose'
 import { Balldontlie } from '../src/second-source/balldontlie'
 import {
   autoProposedText,
@@ -31,6 +32,7 @@ import {
 } from '../src/tick'
 import {
   chainHash,
+  DRAFT,
   END,
   FakeChain,
   ID,
@@ -488,6 +490,75 @@ describe('the keeper proposes, checks and pages', () => {
     chain.fail = undefined
     expect(await at(k, END + 1_805)).toEqual(['propose'])
     expect(chain.sends.filter((s) => s === `propose ${ID}`)).toHaveLength(3)
+  })
+
+  it("checks a guardian's --periods proposal raced by a tick against what is on chain", async () => {
+    // ESPN's Final is wrong (111-106); balldontlie and the box score say 106-111.
+    bdl = { status: 'Final', home: 106, away: 111 }
+    const k = keeperWith()
+    await drafted(k)
+    expect(await at(k, END - 840)).toEqual([])
+    expect(await at(k, END)).toEqual(['hold'])
+    // Runbook K: the guardian proposes by hand with --score and --periods. Its draft is written
+    // before the send; a keeper tick lands in between, while the chain still reads halted.
+    const guardian = Keypair.generate()
+    const swapped = QUARTERS.map(([h, a]) => [a, h] as [number, number])
+    let raced: string[] = []
+    const sender = {
+      connection: chain.connection,
+      send: async (spec: Parameters<typeof chain.sender.send>[0]) => {
+        raced = await at(k, END + 10)
+        return chain.sender.send(spec)
+      },
+    } as unknown as typeof chain.sender
+    const out = await proposeResult(
+      {
+        db: h.db,
+        connection: chain.connection,
+        program,
+        sender,
+        signer: guardian,
+        actor: 'guardian',
+        now: () => new Date((END + 10) * 1000),
+      },
+      {
+        gameId: ID,
+        uri: URI,
+        wish: {
+          gameId: ID,
+          status: 'final',
+          home: 106,
+          away: 111,
+          periods: swapped,
+          sourceUrl: BOX,
+        },
+        confirm: { name: 'basketball-reference', url: BOX },
+        replace: false,
+      },
+    )
+    expect(out.kind).toBe('landed')
+    // The guardian's reading is not redrafted from ESPN.
+    expect(raced).not.toContain('draft')
+    expect(await getDraft(h.db, ID)).toMatchObject({ homeScore: 106, awayScore: 111 })
+    // In the window balldontlie agrees with what is on chain: no MISMATCH page.
+    // (The first tick syncs the row's times, which the CLI does not write.)
+    expect(await at(k, END + 70)).toEqual(['sync'])
+    expect(await at(k, END + 700)).toEqual([])
+    expect(keys()).not.toContain(`source-mismatch:${ID}`)
+
+    // A draft row that drifted from the chain's evidence still does not page a false MISMATCH:
+    // the check reads the stored evidence whose hash is on chain.
+    await setDraftState(h.db, ID, { state: 'pending' })
+    await upsertDraft(h.db, DRAFT)
+    await setDraftState(h.db, ID, { state: 'proposed' })
+    const fresh = keeperWith()
+    expect(await at(fresh, END + 760)).not.toContain('mismatch')
+    expect(await at(fresh, END + 830)).not.toContain('mismatch')
+    expect(keys()).not.toContain(`source-mismatch:${ID}`)
+    // A balldontlie that contradicts the chain's evidence pages it, with the proposed score.
+    bdl = { status: 'Final', home: 104, away: 111 }
+    expect(await at(keeperWith(), END + 890)).toEqual(['mismatch'])
+    expect(alerts.at(-1)?.[1]).toContain('balldontlie 111-104 vs proposed 111-106')
   })
 })
 

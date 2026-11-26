@@ -479,6 +479,15 @@ describe('draft, finalize, recycle', () => {
     expect(run(now, halted({ feed: finalFeed, finalSince: now - 600, draft: proposed }))).toEqual(
       [],
     )
+    // A guardian's reading (propose --periods, citing a box score) is never redrafted from ESPN:
+    // its propose may be in flight.
+    const box = 'https://www.basketball-reference.com/boxscores/202611180CLE.html'
+    const guardian = { ...old, sourceUrl: box } as DraftRow
+    expect(
+      run(now, halted({ feed: finalFeed, finalSince: now - 600, draft: guardian })).map(
+        (a) => a.type,
+      ),
+    ).not.toContain('draft')
   })
 
   it('alerts when ESPN corrects the Final score to periods that do not add up', () => {
@@ -688,7 +697,10 @@ describe('auto-propose (R6)', () => {
     const proposed = ready({
       market: market('proposed'),
       onchain: chain('proposed', { proposedAt }),
-      draft: { ...pending, state: 'proposed' } as DraftRow,
+      // The draft row can differ from the chain (a redraft raced a hand propose): the page names
+      // the score of the evidence on chain.
+      draft: { ...pending, homeScore: 120, state: 'proposed' } as DraftRow,
+      proposed: { home: 111, away: 106 },
       secondSource: mismatch,
     })
     const page = {
@@ -703,6 +715,8 @@ describe('auto-propose (R6)', () => {
     expect(types(auto(proposedAt + 900, 'on', proposed))).toEqual(['finalize'])
     expect(auto(proposedAt + 60, 'on', { ...proposed, secondSource: match })).toEqual([])
     expect(auto(proposedAt + 60, 'off', proposed)).toEqual([])
+    // No Final evidence matches the chain: nothing to compare, no page.
+    expect(auto(proposedAt + 60, 'on', { ...proposed, proposed: null })).toEqual([])
   })
 
   it('pages the keeper proposal until its page is delivered, inside the window', () => {

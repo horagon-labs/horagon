@@ -4,6 +4,7 @@
 // each of which re-checks chain state before sending, so a repeated action is harmless.
 import type { DraftRow, GameRow, MarketRow } from '@horagon/db'
 import type { GameMarketAccount } from '@horagon/sdk'
+import { checkBoxScoreUrl } from './evidence'
 import { type FeedGame, periodsConsistent } from './feeds/types'
 
 export interface Timings {
@@ -98,7 +99,16 @@ export interface GameState {
   /** Unix seconds since the feed has reported Final with the current score, unbroken. */
   finalSince: number | null
   draft: DraftRow | null
-  /** The second source's verdict on the draft (R6); absent or null means none yet. */
+  /**
+   * The score of the proposal on chain, from the stored evidence whose hash is on chain: what the
+   * window's second-source check compares, never the draft row, which can differ from it (a tick
+   * that redrafted while a hand propose was in flight). Null or absent: no Final evidence matches.
+   */
+  proposed?: Score | null
+  /**
+   * The second source's verdict (R6) on the pending draft, or on `proposed` while the challenge
+   * window is open; absent or null means none yet.
+   */
   secondSource?: SecondSourceState | null
   /** Why the keeper's last auto-propose of this game did not land, if it failed. */
   proposeError?: string | null
@@ -317,17 +327,17 @@ function planGame(s: GameState, input: PlanInput): Action[] {
   }
 
   const second = s.secondSource
+  const proposed = s.proposed ?? null
   if (
     (input.autoPropose ?? 'off') !== 'off' &&
-    chain.status === 'proposed' &&
-    now < chain.proposedAt + input.disputeWindowSecs &&
-    s.draft?.state === 'proposed' &&
+    inWindow &&
+    proposed !== null &&
     second?.verdict === 'mismatch'
   ) {
     out.push({
       type: 'mismatch',
       gameId: g.id,
-      proposed: { home: s.draft.homeScore, away: s.draft.awayScore },
+      proposed,
       second: second.score,
       challengeBy: chain.proposedAt + input.disputeWindowSecs,
     })
@@ -524,10 +534,16 @@ function draftBlocked(s: GameState, now: number, t: Timings, tip: number): Actio
   return []
 }
 
+/**
+ * ESPN's Final moved away from the keeper's own draft. A guardian's reading (a draft citing a box
+ * score, from `propose --periods`) replaces ESPN's and is never redrafted from the feed: its
+ * propose may still be in flight.
+ */
 function scoreCorrected(s: GameState): boolean {
   const { draft, feed } = s
   return (
     draft?.status === 'final' &&
+    !checkBoxScoreUrl(draft.sourceUrl).ok &&
     feed?.status === 'final' &&
     (feed.homeScore !== draft.homeScore || feed.awayScore !== draft.awayScore)
   )
