@@ -53,8 +53,6 @@ import {
 } from './fake-chain'
 
 const WINDOW_NIGHTS = [
-  '2026-11-25',
-  '2026-11-26',
   '2026-11-27',
   '2026-11-28',
   '2026-11-29',
@@ -103,7 +101,7 @@ describe('constants', () => {
   })
 
   it('pin the window, the bot rules and the default RPC', () => {
-    expect(WINDOW).toEqual({ first: '2026-11-25', last: '2026-12-10' })
+    expect(WINDOW).toEqual({ first: '2026-11-27', last: '2026-12-10' })
     expect(BOT_RATE).toEqual({ swaps: 20, seconds: 300 })
     expect(BOT_MEMO).toBe('horagon:bot')
     expect(DEFAULT_RPC).toBe('https://api.devnet.solana.com')
@@ -206,8 +204,8 @@ describe('decodeGameMarket', () => {
 
 describe('etNight', () => {
   it.each([
-    ['2026-11-25T04:59:59Z', '2026-11-24'], // 23:59:59 EST, the night before the window
-    ['2026-11-25T05:00:00Z', '2026-11-25'], // midnight EST, the first night of the window
+    ['2026-11-27T04:59:59Z', '2026-11-26'], // 23:59:59 EST, the night before the window
+    ['2026-11-27T05:00:00Z', '2026-11-27'], // midnight EST, the first night of the window
     ['2026-12-11T04:59:59Z', '2026-12-10'], // 23:59:59 EST, the last night of the window
     ['2026-12-11T05:00:00Z', '2026-12-11'], // midnight EST, the night after the window
     ['2026-11-01T03:59:59Z', '2026-10-31'], // 23:59:59 EDT
@@ -223,15 +221,15 @@ describe('etNight', () => {
 
 describe('inWindow', () => {
   it.each([
-    ['2026-11-23', false],
-    ['2026-11-24', false],
-    ['2026-11-25', true],
+    ['2026-11-25', false],
+    ['2026-11-26', false],
+    ['2026-11-27', true],
     ['2026-11-30', true],
     ['2026-12-04', true],
     ['2026-12-05', true],
     ['2026-12-10', true],
     ['2026-12-11', false],
-    ['2026-11-25T00', false],
+    ['2026-11-27T00', false],
     ['', false],
   ])('%j -> %s', (night, expected) => {
     expect(inWindow(night)).toBe(expected)
@@ -711,22 +709,22 @@ describe('countFans', () => {
     game,
     tipoff,
   })
-  const G1 = nba('g1', '401810001', '2026-11-25T19:30:00-05:00')
-  const G1_CLUTCH = nba('g1-clutch', '401810001', '2026-11-25T19:30:00-05:00', 2)
-  const G1_HALF = nba('g1-half', '401810001', '2026-11-25T19:30:00-05:00', 1)
-  const G2 = nba('g2', '401810002', '2026-11-25T22:30:00-05:00')
-  const G3 = nba('g3', '401810003', '2026-11-27T19:00:00-05:00')
-  const G4 = nba('g4', '401810004', '2026-11-30T20:00:00-05:00')
-  const PRE = nba('pre', '401810000', '2026-11-24T19:00:00-05:00')
+  const G1 = nba('g1', '401810001', '2026-11-27T19:30:00-05:00')
+  const G1_CLUTCH = nba('g1-clutch', '401810001', '2026-11-27T19:30:00-05:00', 2)
+  const G1_HALF = nba('g1-half', '401810001', '2026-11-27T19:30:00-05:00', 1)
+  const G2 = nba('g2', '401810002', '2026-11-27T22:30:00-05:00')
+  const G3 = nba('g3', '401810003', '2026-11-29T19:00:00-05:00')
+  const G4 = nba('g4', '401810004', '2026-12-02T20:00:00-05:00')
+  const PRE = nba('pre', '401810000', '2026-11-26T19:00:00-05:00')
   const PRACTICE: SeasonMarket = {
     label: 'practice',
     kind: 0,
     league: 'PRACTICE',
     game: 'p-0001',
-    tipoff: '2026-11-26T12:00:00-05:00',
+    tipoff: '2026-11-28T12:00:00-05:00',
   }
   const ALL = [G1, G1_CLUTCH, G1_HALF, G2, G3, G4, PRE, PRACTICE]
-  const T = unix('2026-11-26T00:40:00Z')
+  const T = unix('2026-11-28T00:40:00Z')
   const at = (minutes: number) => iso(T + minutes * 60)
   const zero = { wallets: 0, firstTrade: 0, returning: 0, threeNightFans: 0, engaged: 0 }
 
@@ -737,7 +735,7 @@ describe('countFans', () => {
       excluded: [{ market: 'never-created', reason: 'team test market' }],
     })
     expect(report).toEqual({
-      window: { first: '2026-11-25', last: '2026-12-10' },
+      window: { first: '2026-11-27', last: '2026-12-10' },
       markets: { counted: 0, excluded: 0, ignored: 0 },
       swaps: { counted: 0, nightTouches: 0 },
       classes: { human: zero, bot: zero, team: zero },
@@ -754,21 +752,21 @@ describe('countFans', () => {
       ],
       threeNightFans: 0,
     })
-    expect(report.nights).toHaveLength(16)
+    expect(report.nights).toHaveLength(14)
   })
 
   it('puts a swap made after midnight ET on the night of its tipoff', () => {
-    // G2 tips off at 22:30 ET on 2026-11-25; the swap is at 00:30 ET on 2026-11-26.
-    const report = count({ markets: [G2], swaps: [['fan', 'g2', '2026-11-26T05:30:00Z']] })
-    expect(nightRow(report, '2026-11-25')).toEqual({
-      night: '2026-11-25',
+    // G2 tips off at 22:30 ET on 2026-11-27; the swap is at 00:30 ET on 2026-11-28.
+    const report = count({ markets: [G2], swaps: [['fan', 'g2', '2026-11-28T05:30:00Z']] })
+    expect(nightRow(report, '2026-11-27')).toEqual({
+      night: '2026-11-27',
       human: 1,
       bot: 0,
       team: 0,
       touches: { human: 1, bot: 0, team: 0 },
     })
-    expect(nightRow(report, '2026-11-26')?.human).toBe(0)
-    expect(nightRow(report, '2026-11-26')?.touches.human).toBe(0)
+    expect(nightRow(report, '2026-11-28')?.human).toBe(0)
+    expect(nightRow(report, '2026-11-28')?.touches.human).toBe(0)
   })
 
   it('counts a swap made after midnight ET on the last night, on the night after the window', () => {
@@ -791,40 +789,38 @@ describe('countFans', () => {
     const report = count({
       markets: [PRE, G4],
       swaps: [
-        ['early', 'g4', '2026-11-22T15:00:00Z'], // before the window, on a market of 2026-11-30
-        ['late', 'pre', '2026-11-25T20:00:00Z'], // inside the window, on a market of 2026-11-24
+        ['early', 'g4', '2026-11-24T15:00:00Z'], // before the window, on a market of 2026-12-02
+        ['late', 'pre', '2026-11-27T20:00:00Z'], // inside the window, on a market of 2026-11-26
       ],
     })
     expect(report.swaps).toEqual({ counted: 2, nightTouches: 1 })
     expect(report.classes.human).toEqual({ ...zero, wallets: 2, firstTrade: 1 })
-    expect(nightRow(report, '2026-11-30')?.human).toBe(1)
-    expect(nightRow(report, '2026-11-25')?.human).toBe(0)
-    expect(nightRow(report, '2026-11-30')?.touches.human).toBe(1)
-    expect(nightRow(report, '2026-11-25')?.touches.human).toBe(0)
+    expect(nightRow(report, '2026-12-02')?.human).toBe(1)
+    expect(nightRow(report, '2026-11-27')?.human).toBe(0)
+    expect(nightRow(report, '2026-12-02')?.touches.human).toBe(1)
+    expect(nightRow(report, '2026-11-27')?.touches.human).toBe(0)
   })
 
   it('counts the first and last nights of the window and nothing outside it', () => {
     const edges = [
-      nba('e0', '401810090', '2026-11-24T23:59:00-05:00'),
-      nba('e1', '401810091', '2026-11-25T00:00:00-05:00'),
+      nba('e0', '401810090', '2026-11-26T23:59:00-05:00'),
+      nba('e1', '401810091', '2026-11-27T00:00:00-05:00'),
       nba('e2', '401810092', '2026-12-10T23:59:00-05:00'),
       nba('e3', '401810093', '2026-12-11T00:00:00-05:00'),
     ]
     const report = count({
       markets: edges,
-      swaps: edges.map((m, i): SeasonSwap => [`fan-${i}`, m.label, '2026-11-22T12:00:00Z']),
+      swaps: edges.map((m, i): SeasonSwap => [`fan-${i}`, m.label, '2026-11-24T12:00:00Z']),
     })
     expect(report.swaps).toEqual({ counted: 4, nightTouches: 2 })
     expect(report.classes.human).toEqual({ ...zero, wallets: 4, firstTrade: 2 })
     expect(report.nights.filter((n) => n.human > 0).map((n) => n.night)).toEqual([
-      '2026-11-25',
+      '2026-11-27',
       '2026-12-10',
     ])
-    expect(report.nights.map((n) => n.human)).toEqual([
-      1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
-    ])
+    expect(report.nights.map((n) => n.human)).toEqual([1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1])
     expect(report.nights.map((n) => n.touches.human)).toEqual([
-      1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
+      1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
     ])
   })
 
@@ -853,7 +849,7 @@ describe('countFans', () => {
     expect(report.markets.counted).toBe(2)
     expect(report.swaps.nightTouches).toBe(3)
     expect(report.classes.human).toEqual({ ...zero, wallets: 1, firstTrade: 1 })
-    expect(report.nights.filter((n) => n.human > 0).map((n) => n.night)).toEqual(['2026-11-25'])
+    expect(report.nights.filter((n) => n.human > 0).map((n) => n.night)).toEqual(['2026-11-27'])
   })
 
   it.each([
@@ -876,11 +872,11 @@ describe('countFans', () => {
         ['one-game', 'g1', at(0)],
         ['one-game', 'g1', at(1)],
         ['one-game', 'g1', at(2)],
-        ['one-game', 'pre', '2026-11-25T00:30:00Z'],
+        ['one-game', 'pre', '2026-11-27T00:30:00Z'],
         // 2 night touches on two games, and a third swap before the window.
         ['two-touches', 'g1', at(3)],
         ['two-touches', 'g2', at(4)],
-        ['two-touches', 'pre', '2026-11-25T00:31:00Z'],
+        ['two-touches', 'pre', '2026-11-27T00:31:00Z'],
       ],
     })
     expect(report.classes.human).toEqual({ ...zero, wallets: 2, firstTrade: 2 })
@@ -891,11 +887,11 @@ describe('countFans', () => {
       markets: ALL,
       swaps: [
         ['three', 'g1', at(0)],
-        ['three', 'g3', '2026-11-28T00:30:00Z'],
-        ['three', 'g4', '2026-12-01T01:30:00Z'],
+        ['three', 'g3', '2026-11-30T00:30:00Z'],
+        ['three', 'g4', '2026-12-03T01:30:00Z'],
         ['two', 'g1', at(1)],
         ['two', 'g2', at(2)], // same night as g1
-        ['two', 'g3', '2026-11-28T00:31:00Z'],
+        ['two', 'g3', '2026-11-30T00:31:00Z'],
         ['one', 'g1', at(3)],
         ['one', 'g2', at(4)],
       ],
@@ -908,9 +904,9 @@ describe('countFans', () => {
       engaged: 2,
     })
     expect(report.threeNightFans).toBe(1)
-    expect(nightRow(report, '2026-11-25')?.human).toBe(3)
-    expect(nightRow(report, '2026-11-27')?.human).toBe(2)
-    expect(nightRow(report, '2026-11-30')?.human).toBe(1)
+    expect(nightRow(report, '2026-11-27')?.human).toBe(3)
+    expect(nightRow(report, '2026-11-29')?.human).toBe(2)
+    expect(nightRow(report, '2026-12-02')?.human).toBe(1)
   })
 
   it('counts each swap as a night touch and each wallet once a night', () => {
@@ -920,20 +916,20 @@ describe('countFans', () => {
         // 2 swaps on one night: 1 wallet and 2 night touches there.
         ['twice', 'g1', at(0)],
         ['twice', 'g2', at(1)],
-        ['twice', 'g3', '2026-11-28T00:30:00Z'],
+        ['twice', 'g3', '2026-11-30T00:30:00Z'],
         ['once', 'g1', at(2)],
       ],
     })
     expect(report.swaps).toEqual({ counted: 4, nightTouches: 4 })
-    expect(nightRow(report, '2026-11-25')).toEqual({
-      night: '2026-11-25',
+    expect(nightRow(report, '2026-11-27')).toEqual({
+      night: '2026-11-27',
       human: 2,
       bot: 0,
       team: 0,
       touches: { human: 3, bot: 0, team: 0 },
     })
-    expect(nightRow(report, '2026-11-27')).toEqual({
-      night: '2026-11-27',
+    expect(nightRow(report, '2026-11-29')).toEqual({
+      night: '2026-11-29',
       human: 1,
       bot: 0,
       team: 0,
@@ -946,19 +942,17 @@ describe('countFans', () => {
     const report = count({
       markets: [PRE, G1, post],
       swaps: [
-        ['fan', 'pre', '2026-11-25T00:30:00Z', { repeat: 3, every: 60 }],
+        ['fan', 'pre', '2026-11-27T00:30:00Z', { repeat: 3, every: 60 }],
         ['fan', 'g1', at(0)],
-        ['early', 'pre', '2026-11-25T00:40:00Z'],
+        ['early', 'pre', '2026-11-27T00:40:00Z'],
         ['late', 'post', '2026-12-12T00:30:00Z'],
       ],
     })
     expect(report.swaps).toEqual({ counted: 6, nightTouches: 1 })
     expect(report.nights.map((n) => n.touches)).toEqual(
-      WINDOW_NIGHTS.map((night) => ({ human: night === '2026-11-25' ? 1 : 0, bot: 0, team: 0 })),
+      WINDOW_NIGHTS.map((night) => ({ human: night === '2026-11-27' ? 1 : 0, bot: 0, team: 0 })),
     )
-    expect(report.nights.map((n) => n.human)).toEqual([
-      1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    ])
+    expect(report.nights.map((n) => n.human)).toEqual([1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
   })
 
   it('puts night touches under the class of their wallet: team, then bot, then human', () => {
@@ -972,19 +966,19 @@ describe('countFans', () => {
         ['memo-bot', 'g1', at(2), { memo: 'exact' }],
         ['memo-bot', 'g1', at(3), { repeat: 2, every: 60 }],
         ['fan', 'g1', at(4)],
-        ['fast', 'g3', '2026-11-28T00:30:00Z', { repeat: 20, every: 10 }],
+        ['fast', 'g3', '2026-11-30T00:30:00Z', { repeat: 20, every: 10 }],
       ],
     })
     expect(report.bots).toEqual({ memo: 1, rate: 1 })
-    expect(nightRow(report, '2026-11-25')).toEqual({
-      night: '2026-11-25',
+    expect(nightRow(report, '2026-11-27')).toEqual({
+      night: '2026-11-27',
       human: 1,
       bot: 1,
       team: 1,
       touches: { human: 1, bot: 3, team: 2 },
     })
-    expect(nightRow(report, '2026-11-27')).toEqual({
-      night: '2026-11-27',
+    expect(nightRow(report, '2026-11-29')).toEqual({
+      night: '2026-11-29',
       human: 0,
       bot: 1,
       team: 0,
@@ -993,22 +987,22 @@ describe('countFans', () => {
   })
 
   it('never adds a night touch from an excluded market', () => {
-    const rehearsal = nba('rehearsal', '401810010rh1', '2026-11-25T14:00:00-05:00')
+    const rehearsal = nba('rehearsal', '401810010rh1', '2026-11-27T14:00:00-05:00')
     const report = count({
       team: [{ wallet: 'ops', role: 'attestor' }],
       excluded: [{ market: 'rehearsal', reason: 'rehearsal market' }],
       markets: [G1, rehearsal],
       swaps: [
-        ['fan', 'rehearsal', '2026-11-25T19:10:00Z', { repeat: 3, every: 60 }],
-        ['ops', 'rehearsal', '2026-11-25T19:20:00Z'],
+        ['fan', 'rehearsal', '2026-11-27T19:10:00Z', { repeat: 3, every: 60 }],
+        ['ops', 'rehearsal', '2026-11-27T19:20:00Z'],
         ['fan', 'g1', at(0)],
         ['ops', 'g1', at(1)],
       ],
     })
     expect(report.swaps).toEqual({ counted: 2, nightTouches: 2 })
     expect(report.excluded.map((e) => e.nonTeamSwaps)).toEqual([3])
-    expect(nightRow(report, '2026-11-25')).toEqual({
-      night: '2026-11-25',
+    expect(nightRow(report, '2026-11-27')).toEqual({
+      night: '2026-11-27',
       human: 1,
       bot: 0,
       team: 1,
@@ -1025,8 +1019,8 @@ describe('countFans', () => {
     expect(report.classes.team).toEqual({ ...zero, wallets: 1, firstTrade: 1 })
     expect(report.classes.bot).toEqual(zero)
     expect(report.bots).toEqual({ memo: 0, rate: 0 })
-    expect(nightRow(report, '2026-11-25')).toEqual({
-      night: '2026-11-25',
+    expect(nightRow(report, '2026-11-27')).toEqual({
+      night: '2026-11-27',
       human: 0,
       bot: 0,
       team: 1,
@@ -1066,7 +1060,7 @@ describe('countFans', () => {
     const report = count({
       markets: [PRE, G1],
       swaps: [
-        ['fan', 'pre', '2026-11-25T00:30:00Z', { memo: 'exact' }],
+        ['fan', 'pre', '2026-11-27T00:30:00Z', { memo: 'exact' }],
         ['fan', 'g1', at(0)],
       ],
     })
@@ -1095,7 +1089,7 @@ describe('countFans', () => {
     const report = count({
       markets: [PRE, G1],
       swaps: [
-        ['fast', 'pre', '2026-11-25T00:10:00Z', { repeat: 20, every: 10 }],
+        ['fast', 'pre', '2026-11-27T00:10:00Z', { repeat: 20, every: 10 }],
         ['fast', 'g1', at(0)],
       ],
     })
@@ -1114,14 +1108,14 @@ describe('countFans', () => {
   })
 
   it('reports non-team swaps on an excluded market and counts them nowhere else', () => {
-    const rehearsal = nba('rehearsal', '401810010rh1', '2026-11-26T14:00:00-05:00')
+    const rehearsal = nba('rehearsal', '401810010rh1', '2026-11-28T14:00:00-05:00')
     const report = count({
       team: [{ wallet: 'ops', role: 'attestor' }],
       excluded: [{ market: 'rehearsal', reason: 'rehearsal market' }],
       markets: [G1, rehearsal],
       swaps: [
-        ['outsider', 'rehearsal', '2026-11-26T19:10:00Z', { repeat: 20, every: 5, memo: 'exact' }],
-        ['ops', 'rehearsal', '2026-11-26T19:00:00Z'],
+        ['outsider', 'rehearsal', '2026-11-28T19:10:00Z', { repeat: 20, every: 5, memo: 'exact' }],
+        ['ops', 'rehearsal', '2026-11-28T19:00:00Z'],
         ['outsider', 'g1', at(0)],
       ],
     })
@@ -1134,8 +1128,8 @@ describe('countFans', () => {
     expect(report.bots).toEqual({ memo: 0, rate: 0 })
     expect(report.classes.human).toEqual({ ...zero, wallets: 1, firstTrade: 1 })
     expect(report.classes.team).toEqual(zero)
-    expect(nightRow(report, '2026-11-26')).toEqual({
-      night: '2026-11-26',
+    expect(nightRow(report, '2026-11-28')).toEqual({
+      night: '2026-11-28',
       human: 0,
       bot: 0,
       team: 0,
@@ -1224,7 +1218,7 @@ describe('formatReport', () => {
       elapsedMs: 83_240,
     })
     expect(text).toContain('rpc: http://127.0.0.1:8899')
-    expect(text).toContain('window: ET nights 2026-11-25 to 2026-12-10')
+    expect(text).toContain('window: ET nights 2026-11-27 to 2026-12-10')
     expect(text).toContain('markets: 8 counted, 1 excluded, 2 ignored')
     expect(text).toContain('swaps: 107 on counted markets, 81 night touches')
     expect(text).toContain('3-Night Fans (human wallets): 1')
@@ -1237,12 +1231,12 @@ describe('formatReport', () => {
       '\nper ET night: wallets with a night touch, then night touches\n' +
         'night (ET)  human  bot  team  human touches  bot touches  team touches\n',
     )
-    expect(text).toMatch(/^2026-11-25 +6 +1 +1 +12 +1 +1$/m)
-    expect(text).toMatch(/^2026-11-26 +0 +0 +0 +0 +0 +0$/m)
-    expect(text).toMatch(/^2026-11-27 +4 +2 +1 +40 +2 +20$/m)
-    expect(text).toMatch(/^2026-11-30 +3 +1 +0 +3 +1 +0$/m)
+    expect(text).toMatch(/^2026-11-27 +6 +1 +1 +12 +1 +1$/m)
+    expect(text).toMatch(/^2026-11-28 +0 +0 +0 +0 +0 +0$/m)
+    expect(text).toMatch(/^2026-11-29 +4 +2 +1 +40 +2 +20$/m)
+    expect(text).toMatch(/^2026-12-02 +3 +1 +0 +3 +1 +0$/m)
     expect(text).toMatch(/^2026-12-10 +1 +0 +0 +1 +0 +0$/m)
-    expect(text).not.toMatch(/^2026-11-24 /m)
+    expect(text).not.toMatch(/^2026-11-26 /m)
     expect(text).not.toMatch(/^2026-12-11 /m)
     expect(text).toContain('excluded markets: 1 listed in the wallets file, 1 on chain')
     expect(text).toContain(

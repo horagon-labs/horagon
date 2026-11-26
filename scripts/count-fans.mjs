@@ -19,7 +19,7 @@ export const MEMO_PROGRAM_ID = 'MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr'
 export const GAME_MARKET_DISCRIMINATOR = Uint8Array.from([35, 41, 40, 135, 35, 216, 218, 90])
 export const SWAP_DISCRIMINATOR = Uint8Array.from([248, 198, 158, 145, 225, 117, 135, 200])
 export const BOT_MEMO = 'horagon:bot'
-export const WINDOW = Object.freeze({ first: '2026-11-25', last: '2026-12-10' })
+export const WINDOW = Object.freeze({ first: '2026-11-27', last: '2026-12-10' })
 export const BOT_RATE = Object.freeze({ swaps: 20, seconds: 300 })
 export const DEFAULT_RPC = 'https://api.devnet.solana.com'
 
