@@ -63,7 +63,35 @@ describe('activityLine (R2b)', () => {
       'Reference agent: 0 swaps, 0.00 mUSDC · Fans: 0 swaps, 0.00 mUSDC · Other team or bot wallets: 2 swaps',
     ],
   ])('%s', (_name, over, line) => {
-    expect(activityLine(activity(over))).toBe(line)
+    expect(activityLine(activity(over), true)).toBe(line)
+  })
+
+  // A final, resolved or halted game reads closed everywhere (wave-2 addendum): no invitation.
+  it.each([
+    [
+      'the agent but no fan, trading over',
+      { agent: { ...tally(6, '600'), wallet: REFERENCE_AGENT_WALLET } },
+      'Reference agent: 6 swaps, 600.00 mUSDC · No fan trades',
+    ],
+    [
+      'the agent and other wallets but no fan, trading over',
+      { agent: { ...tally(2, '200'), wallet: REFERENCE_AGENT_WALLET }, others: tally(1, '1') },
+      'Reference agent: 2 swaps, 200.00 mUSDC · No fan trades · Other team or bot wallets: 1 swap',
+    ],
+    [
+      'the agent and fans, trading over',
+      { agent: { ...tally(12, '840'), wallet: REFERENCE_AGENT_WALLET }, fans: tally(3, '45', 2) },
+      'Reference agent: 12 swaps, 840.00 mUSDC · Fans: 3 swaps, 45.00 mUSDC',
+    ],
+    ['no swaps at all, trading over', {}, 'No swaps yet'],
+  ])('%s', (_name, over, line) => {
+    const text = activityLine(activity(over), false)
+    expect(text).toBe(line)
+    expect(text).not.toContain('be the first')
+  })
+
+  it("builds fixtures on the SDK's agent wallet", () => {
+    expect(activity().agent.wallet).toBe(REFERENCE_AGENT_WALLET)
   })
 
   it('says how the agent trades, word for word', () => {
@@ -126,7 +154,7 @@ describe('AgentLine: who traded, under the dial (R2b)', () => {
 
   it('reads the counts and the wallet from the activity, and links /agent', () => {
     const a = activity({ agent: { ...tally(12, '840'), wallet: other }, fans: tally(3, '45') })
-    const html = renderToStaticMarkup(<AgentLine activity={a} />)
+    const html = renderToStaticMarkup(<AgentLine activity={a} trading />)
     expect(html).toContain('Reference agent: 12 swaps, 840.00 mUSDC · Fans: 3 swaps, 45.00 mUSDC')
     expect(html).toContain(`<p>${AGENT_DISCLOSURE} <a `)
     expect(html).toMatch(/<a [^>]*href="\/agent"[^>]*>How the agent works<\/a>/)
@@ -139,8 +167,18 @@ describe('AgentLine: who traded, under the dial (R2b)', () => {
     expect(html).toMatch(/^<div[^>]*class="[^"]*text-12 font-mono text-ash-400/)
   })
 
+  it('invites a fan only while the market trades', () => {
+    const a = activity({ agent: { ...tally(6, '600'), wallet: other } })
+    expect(renderToStaticMarkup(<AgentLine activity={a} trading />)).toContain('be the first')
+    expect(renderToStaticMarkup(<AgentLine activity={a} trading={false} />)).not.toContain(
+      'be the first',
+    )
+  })
+
   it('says so before any swap', () => {
-    expect(renderToStaticMarkup(<AgentLine activity={activity()} />)).toContain('No swaps yet')
+    expect(renderToStaticMarkup(<AgentLine activity={activity()} trading />)).toContain(
+      'No swaps yet',
+    )
   })
 })
 

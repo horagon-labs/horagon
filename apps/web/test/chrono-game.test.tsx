@@ -127,6 +127,42 @@ describe('GameScreen (spec 4.2)', () => {
     expect([...order].sort((a, b) => a - b)).toEqual(order)
   })
 
+  it('invites no fan on a final game, where trading is closed (R2b)', () => {
+    const traded = activity({
+      agent: { swaps: 6, wallets: 1, volumeUsdc: '600', wallet: activity().agent.wallet },
+    })
+    const final = game({ status: 'final' })
+    const html = renderToStaticMarkup(
+      <GameScreen
+        game={detail({ status: 'final', activity: traded })}
+        history={history()}
+        dial={gameDial(final, market(), NOW - 3_730, null, NOW)}
+        now={NOW}
+        stale={false}
+        right={null}
+      />,
+    )
+    expect(html).toContain('Reference agent: 6 swaps, 600.00 mUSDC · No fan trades')
+    expect(html).not.toContain('be the first')
+  })
+
+  it('invites a fan while the market trades and no fan has traded (R2b)', () => {
+    const traded = activity({
+      agent: { swaps: 6, wallets: 1, volumeUsdc: '600', wallet: activity().agent.wallet },
+    })
+    const html = renderToStaticMarkup(
+      <GameScreen
+        game={detail({ activity: traded })}
+        history={history()}
+        dial={gameDial(game(), market(), NOW - 3_730, null, NOW)}
+        now={NOW}
+        stale={false}
+        right={null}
+      />,
+    )
+    expect(html).toContain('No fan trades yet: be the first to move it')
+  })
+
   it('has no agent line without a winner market', () => {
     const html = renderToStaticMarkup(
       <GameScreen

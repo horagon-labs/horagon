@@ -46,14 +46,17 @@ const swaps = (n: number) => `${n} ${n === 1 ? 'swap' : 'swaps'}`
 
 /**
  * "Reference agent: 12 swaps, 840.00 mUSDC · Fans: 3 swaps, 45.00 mUSDC", then the other team
- * or bot wallets when they traded; "No swaps yet" before any swap.
+ * or bot wallets when they traded; "No swaps yet" before any swap. With agent swaps and no fan
+ * swap, the line invites a fan only while the market trades (`trading`, canTrade of the dial):
+ * a final, halted or resolved game reads closed everywhere, so it says "No fan trades".
  */
-export function activityLine(a: GameActivity): string {
+export function activityLine(a: GameActivity, trading: boolean): string {
   if (a.agent.swaps + a.fans.swaps + a.others.swaps === 0) return 'No swaps yet'
   const parts = [`Reference agent: ${swaps(a.agent.swaps)}, ${usdc(a.agent.volumeUsdc)} mUSDC`]
+  const noFan = trading ? 'No fan trades yet: be the first to move it' : 'No fan trades'
   parts.push(
     a.fans.swaps === 0 && a.agent.swaps > 0
-      ? 'No fan trades yet: be the first to move it'
+      ? noFan
       : `Fans: ${swaps(a.fans.swaps)}, ${usdc(a.fans.volumeUsdc)} mUSDC`,
   )
   if (a.others.swaps > 0) parts.push(`Other team or bot wallets: ${swaps(a.others.swaps)}`)

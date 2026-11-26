@@ -17,14 +17,15 @@ function HowLink() {
   )
 }
 
-export function AgentLine({ activity }: { activity: GameActivity }) {
+/** `trading`: the market still trades (canTrade of the dial), so the line may invite a fan. */
+export function AgentLine({ activity, trading }: { activity: GameActivity; trading: boolean }) {
   const wallet = activity.agent.wallet
   return (
     <div
       className="mx-auto max-w-md space-y-1 text-center text-12 font-mono text-ash-400"
       data-agent-line
     >
-      <p>{activityLine(activity)}</p>
+      <p>{activityLine(activity, trading)}</p>
       <p>
         {AGENT_DISCLOSURE} <HowLink /> ·{' '}
         <a href={explorerAddress(wallet)} target="_blank" rel="noreferrer" className={LINK}>
