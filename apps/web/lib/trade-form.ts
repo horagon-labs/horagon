@@ -1,6 +1,10 @@
 // What the trade button may do right now, and why not. The API and the program enforce all
 // of this again; the form only saves a round trip and says it in words.
-import { type GameStatus, type MarketStatus, parseAmount, type TradeAction } from '@horagon/sdk'
+import type { GameStatus, MarketStatus, TradeAction } from '@horagon/sdk'
+import { parseAmount } from '@horagon/sdk/amount'
+import { BUZZER_CLOSED } from './chrono/copy'
+
+export { BUZZER_CLOSED }
 
 export interface TradeFormInput {
   action: TradeAction
@@ -26,9 +30,6 @@ export interface TradeCheck {
 }
 
 const AMOUNT = /^(0|[1-9]\d{0,11})(\.\d{1,6})?$/
-
-/** Why nothing trades once the game is final, open market or halted (R1, R5c). */
-export const BUZZER_CLOSED = 'Trading closed at the final buzzer.'
 
 export function checkTrade(i: TradeFormInput): TradeCheck {
   // The final buzzer closes trading, also before the keeper's halt reaches the index (R5c).

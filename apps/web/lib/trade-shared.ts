@@ -1,7 +1,7 @@
 // What the screens share with the send code of lib/trade.ts, without web3.js (R5c): the stages of
 // a send, the slippage it allows, and the transaction an error names. lib/trade.ts signs, so it
 // loads with the first send; the crown and ErrorText read these on every page load.
-import { errorSignature } from '@horagon/sdk'
+import { errorSignature } from '@horagon/sdk/client'
 
 export type TradeStage = 'building' | 'signing' | 'submitting' | 'confirming' | 'requoting'
 

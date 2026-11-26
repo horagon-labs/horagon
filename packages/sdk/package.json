@@ -102,6 +102,26 @@
         "types": "./dist/client.d.cts",
         "default": "./dist/client.cjs"
       }
+    },
+    "./amount": {
+      "import": {
+        "types": "./dist/amount.d.ts",
+        "default": "./dist/amount.js"
+      },
+      "require": {
+        "types": "./dist/amount.d.cts",
+        "default": "./dist/amount.cjs"
+      }
+    },
+    "./notice": {
+      "import": {
+        "types": "./dist/notice.d.ts",
+        "default": "./dist/notice.js"
+      },
+      "require": {
+        "types": "./dist/notice.d.cts",
+        "default": "./dist/notice.cjs"
+      }
     }
   },
   "files": [

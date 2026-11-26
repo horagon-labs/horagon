@@ -1,5 +1,5 @@
 // Wallet texts that depend on state, kept pure so they are tested.
-import { parseAmount } from '@horagon/sdk'
+import { parseAmount } from '@horagon/sdk/amount'
 
 const EXPORT_FIRST = 'Export it first (Show secret key) if it holds anything you want to keep.'
 

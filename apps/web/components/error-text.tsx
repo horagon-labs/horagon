@@ -1,6 +1,6 @@
-import { isHoragonError } from '@horagon/sdk'
+import { isHoragonError } from '@horagon/sdk/errors'
+import { BUZZER_CLOSED } from '../lib/chrono/copy'
 import { explorerTx, shortKey } from '../lib/format'
-import { BUZZER_CLOSED } from '../lib/trade-form'
 import { failedSignature } from '../lib/trade-shared'
 
 /**

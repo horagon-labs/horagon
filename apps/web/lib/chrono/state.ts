@@ -1,6 +1,7 @@
 // The one place that decides how a dial looks (spec 4.3): `deriveDialState` checks the rows of
 // the table in order and the first match wins. Every "now" is chain-adjusted (spec 5.4).
-import { effectiveTime, type Game, type MarketSummary, type Outcome } from '@horagon/sdk'
+import type { Game, MarketSummary, Outcome } from '@horagon/sdk'
+import { effectiveTime } from '@horagon/sdk/math'
 import { percent } from '../format'
 import {
   dialCaption,

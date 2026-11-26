@@ -10,6 +10,10 @@
 // A page load never asks (R5): the question comes with the first action, inline in the crown
 // (`affirmedHere`) or in the AgeDialog otherwise (lib/age-gate.ts). The rules themselves live in
 // lib/wallet-core.ts, without React; this provider holds their state and the DOM's side.
+//
+// A page load has no web3.js either (R5c): the address comes from the stored key's bytes
+// (lib/key-store.ts), the portfolio from the API, and the rules with their key code load with the
+// first action (lib/wallet-loader.ts).
 import type { PositionsResponse } from '@horagon/sdk'
 import type { Keypair } from '@solana/web3.js'
 import dynamic from 'next/dynamic'
@@ -25,11 +29,11 @@ import {
 } from 'react'
 import type { GateAction, Send } from '../lib/age-gate'
 import { api } from '../lib/api'
-import { AGE_KEY, BURNER_KEY, exportBurner } from '../lib/burner'
-import { requestFunds } from '../lib/faucet'
+import { AGE_KEY, BURNER_KEY, exportSecret, type StoredBurner } from '../lib/key-store'
 import { singleFlight } from '../lib/single-flight'
 import { usePoll } from '../lib/use-poll'
-import { type Opened, walletCore } from '../lib/wallet-core'
+import type { Opened } from '../lib/wallet-core'
+import { walletLoader } from '../lib/wallet-loader'
 
 // Off the first load (R5): the dialog is the fallback ask (the trade panel asks inline), and the
 // claim code runs only when a position is claimable.
@@ -56,16 +60,17 @@ interface WalletState {
   exportKey: () => string
   /**
    * Replaces the burner. `affirmed`: the import form's own 18+ box was ticked, so the flag is
-   * set first. False when the 18+ gate was shown instead; throws the key's problem (bad text)
-   * as an Error with a message for the user.
+   * set first. False when the 18+ gate was shown instead; rejects with the key's problem (bad
+   * text) as an Error with a message for the user.
    */
-  importKey: (text: string, affirmed: boolean) => boolean
+  importKey: (text: string, affirmed: boolean) => Promise<boolean>
   /**
    * Runs `send` with the burner once the 18+ box is ticked: at once when it already was. When
    * the gate has to create the burner first, only a `faucet` action goes ahead (`afterGate`).
-   * `affirmedHere`: the crown's own box was ticked for this action, so no dialog opens.
+   * `affirmedHere`: the crown's own box was ticked for this action, so no dialog opens. Rejects
+   * when the wallet's key code cannot load (the caller shows it).
    */
-  withAge: (send: Send, action?: GateAction, affirmedHere?: boolean) => void
+  withAge: (send: Send, action?: GateAction, affirmedHere?: boolean) => Promise<void>
   /** Shows the 18+ gate; ticking it creates the burner. */
   openGate: () => void
   /** Starts Claim all (through the gate); does nothing while a run is in flight. */
@@ -100,7 +105,7 @@ interface ClaimRun {
 
 export function WalletProvider({ children }: { children: ReactNode }) {
   const [opened, setOpened] = useState<Opened | null>(null)
-  const [keypair, setKeypair] = useState<Keypair | null>(null)
+  const [burner, setBurner] = useState<StoredBurner | null>(null)
   const [ageOk, setAgeOk] = useState(false)
   const [gateOpen, setGateOpen] = useState(false)
   const [gateError, setGateError] = useState<string>()
@@ -114,10 +119,11 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     busy: false,
   })
   const fundBusy = useRef(false)
-  // The burner and the 18+ gate (lib/wallet-core.ts): one per provider, for its whole life.
+  // The burner and the 18+ gate (lib/wallet-loader.ts, then lib/wallet-core.ts): one per
+  // provider, for its whole life.
   const [core] = useState(() =>
-    walletCore({
-      setKeypair,
+    walletLoader({
+      setBurner,
       setAgeOk,
       openGate: (error?: string) => {
         setGateError(error)
@@ -142,7 +148,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     return () => window.removeEventListener('storage', onStorage)
   }, [core])
 
-  const address = keypair?.publicKey.toBase58() ?? null
+  const address = burner?.address ?? null
   const portfolio = usePoll(address && `portfolio:${address}`, () =>
     api.portfolio(address as string),
   )
@@ -174,7 +180,9 @@ export function WalletProvider({ children }: { children: ReactNode }) {
         if (fundBusy.current) return
         fundBusy.current = true
         setFund({ busy: true })
-        requestFunds(api, kp.publicKey.toBase58())
+        // The faucet call loads with the request (R5c); a failed load shows as its error.
+        import('../lib/faucet')
+          .then(({ requestFunds }) => requestFunds(api, kp.publicKey.toBase58()))
           .then((note) => {
             setFund({ busy: false, note })
             refreshPortfolio()
@@ -184,14 +192,24 @@ export function WalletProvider({ children }: { children: ReactNode }) {
             fundBusy.current = false
           })
       }
-      core.withAge(fundIt, 'faucet', affirmedHere === true)
+      // The key code loads with this first action (R5c); a failed load shows as the fund error.
+      core
+        .withAge(fundIt, 'faucet', affirmedHere === true)
+        .catch((error: unknown) => setFund({ busy: false, error }))
     },
     [core, refreshPortfolio],
   )
 
   const startClaims = useCallback(() => {
-    if (!claimFlight.running()) core.withAge(runClaims, 'claim')
+    if (claimFlight.running()) return
+    core
+      .withAge(runClaims, 'claim')
+      .catch((error: unknown) => setClaimRun({ claiming: false, claimed: [], error }))
   }, [claimFlight, core, runClaims])
+
+  const openGate = useCallback(() => {
+    core.ask().catch((error: unknown) => setFund({ busy: false, error }))
+  }, [core])
 
   const value = useMemo<WalletState>(
     () => ({
@@ -202,10 +220,10 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       walletsCreated,
       portfolio: portfolio.data,
       refreshPortfolio,
-      exportKey: () => (keypair ? exportBurner(keypair) : ''),
+      exportKey: () => (burner ? exportSecret(burner.secretKey) : ''),
       importKey: core.importKey,
       withAge: core.withAge,
-      openGate: core.ask,
+      openGate,
       startClaims,
       claiming: claimRun.claiming,
       claimed: claimRun.claimed,
@@ -217,13 +235,14 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     }),
     [
       opened,
-      keypair,
+      burner,
       address,
       ageOk,
       walletsCreated,
       portfolio.data,
       refreshPortfolio,
       core,
+      openGate,
       startClaims,
       claimRun,
       requestFaucet,

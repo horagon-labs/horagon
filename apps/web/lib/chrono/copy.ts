@@ -110,6 +110,9 @@ export const liveNumber = (state: DialState): boolean =>
 /** The Model line's explanation, in place (audit section 4). */
 export const MODEL_HINT = 'Model: live win chance from score and clock'
 
+/** Why nothing trades once the game is final, open market or halted (R1, R5c). */
+export const BUZZER_CLOSED = 'Trading closed at the final buzzer.'
+
 /** After the close, before a result: who checks, and what comes next. */
 const RESULT_NEXT = 'The result goes on-chain after a box-score check.'
 export const CLOSED_LINE = `Trading closed. ${RESULT_NEXT}`

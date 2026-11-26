@@ -1,7 +1,7 @@
 // The link-preview image (R5), drawn by next/og (Satori): a dial-like gauge with the price, the
 // matchup, the score or the tip-off and the play-money line, in the brand palette. Satori takes
 // inline styles only, and every element with more than one child is a flex box.
-import { PLAY_MONEY_NOTICE } from '@horagon/sdk'
+import { PLAY_MONEY_NOTICE } from '@horagon/sdk/notice'
 import { arcPath, MAX_ANGLE, MIN_ANGLE, polar, priceToAngle } from '../lib/chrono/geometry'
 import { COLORS } from '../lib/chrono/tokens'
 

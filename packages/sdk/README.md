@@ -36,6 +36,11 @@ Amounts are decimal strings of mUSDC (6 decimals); prices are between 0 and 1.
 | `@horagon/sdk/pm-amm`   | pm-AMM accounts and instructions                                              |
 | `@horagon/sdk/program`  | the Horagon program: accounts, instructions, PDAs, errors                     |
 | `@horagon/sdk/replay`   | the recorded-game fixture format the keeper replays                           |
+| `@horagon/sdk/amount`   | `parseAmount`, `formatAmount`, `TOKEN_DECIMALS`                               |
+| `@horagon/sdk/notice`   | `PLAY_MONEY_NOTICE`, the play-money line                                      |
+
+`errors`, `client`, `math`, `evidence`, `amount` and `notice` load no `@solana/web3.js`, so a
+browser page can read the API, amounts and errors without it. `@horagon/sdk` itself does.
 
 ## Errors
 

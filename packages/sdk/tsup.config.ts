@@ -11,6 +11,9 @@ export default defineConfig({
     client: 'src/client/index.ts',
     errors: 'src/errors-entry.ts',
     replay: 'src/replay.ts',
+    // Browser pages read amounts and the play-money line without web3.js (R5c).
+    amount: 'src/amount.ts',
+    notice: 'src/notice.ts',
   },
   format: ['esm', 'cjs'],
   dts: true,

@@ -2,7 +2,8 @@
 // Your position in this game (spec 3.2): paid, worth now and what it pays if that team wins,
 // with Sell. Claim all is a HoldButton running the wallet's own startClaims, so a claim is
 // still the whole wallet's (one run at a time, every copy shows it).
-import { type PositionsResponse, parseAmount, type Side } from '@horagon/sdk'
+import type { PositionsResponse, Side } from '@horagon/sdk'
+import { parseAmount } from '@horagon/sdk/amount'
 import { explorerTx, usdc } from '../../lib/format'
 import { ErrorText } from '../error-text'
 import { HoldButton } from './hold-button'

@@ -6,7 +6,8 @@
 // button stays off until the box is ticked, and nothing is created or sent before that. Until the
 // wallet's storage has opened (the server render, the first browser render) the wallet part is a
 // neutral "Loading your balance…" line: a returning visitor never sees the set-up state flash.
-import { type GameDetail, type MarketSummary, parseAmount } from '@horagon/sdk'
+import type { GameDetail, MarketSummary } from '@horagon/sdk'
+import { parseAmount } from '@horagon/sdk/amount'
 import { useState } from 'react'
 import { buySteps, percentOf, sellSteps, stepIndex } from '../../lib/chrono/bezel'
 import { dialCaption } from '../../lib/chrono/copy'

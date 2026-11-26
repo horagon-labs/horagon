@@ -1,7 +1,8 @@
 // What the Pusher shows (spec 3.2, 4.3, 6.1): the two buy buttons, the faucet button for an
 // empty wallet, or one line once trading is over. A visitor with no wallet yet sees the buy
 // buttons too (R5): the crown sets the wallet up, so the first trade starts from a Buy.
-import { parseAmount, type TradeAction } from '@horagon/sdk'
+import type { TradeAction } from '@horagon/sdk'
+import { parseAmount } from '@horagon/sdk/amount'
 import { countdown } from '../format'
 import type { Ready } from '../trade-view'
 import { CLOSED_LINE } from './copy'

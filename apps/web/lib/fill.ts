@@ -2,13 +2,8 @@
 // the signer's position (shares, for a buy) or balance (mUSDC, for a sell) before the trade and
 // after it, both from the portfolio the page already polls. Until that number is seen, the
 // success line gives the quote's number as "about", never as a fact.
-import {
-  formatAmount,
-  type PositionsResponse,
-  parseAmount,
-  type Side,
-  type TradeAction,
-} from '@horagon/sdk'
+import type { PositionsResponse, Side, TradeAction } from '@horagon/sdk'
+import { formatAmount, parseAmount } from '@horagon/sdk/amount'
 import { usdc } from './format'
 
 /** One signer's holding in one market side, in raw units (6 decimals). */

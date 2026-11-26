@@ -6,24 +6,17 @@
 // Sell wait, so a Buy is never checked against an unknown balance. With no wallet yet, the
 // first send sets one up (R5): the crown's own 18+ box, then a new burner and the faucet, while
 // the side and the amount on screen stay for the Buy that follows.
-import {
-  effectiveTime,
-  type GameDetail,
-  type MarketSummary,
-  type Position,
-  parseAmount,
-  type Quote,
-  type Side,
-  type TradeAction,
-} from '@horagon/sdk'
+import type { GameDetail, MarketSummary, Position, Quote, Side, TradeAction } from '@horagon/sdk'
+import { parseAmount } from '@horagon/sdk/amount'
+import { effectiveTime } from '@horagon/sdk/math'
 import type { Keypair } from '@solana/web3.js'
 import { useEffect, useRef, useState } from 'react'
 import { useWallet } from '../components/wallet'
 import { api } from './api'
 import { clearedByFaucet, errorEffect, quoteError } from './chrono/errors'
 import { awaitFill, createFillTracker, fillLine, holding } from './fill'
-import { DEFAULT_SLIPPAGE_BPS, executeTrade, type TradeStage } from './trade'
 import { checkTrade, type TradeCheck, tradeReady } from './trade-form'
+import { DEFAULT_SLIPPAGE_BPS, type TradeStage } from './trade-shared'
 import {
   BUY_AMOUNT,
   freshQuote,
@@ -202,6 +195,8 @@ export function useTrade(game: GameDetail, market: MarketSummary, opts: TradeOpt
     setFundNoteHidden(true)
     const before = holding(portfolio, keypair.publicKey.toBase58(), market.pubkey, side)
     try {
+      // The signer loads with the first send (R5c): web3.js is not part of any page's first load.
+      const { executeTrade } = await import('./trade')
       const r = await executeTrade(
         api,
         keypair,
@@ -293,7 +288,13 @@ export function useTrade(game: GameDetail, market: MarketSummary, opts: TradeOpt
       if (ready === 'no-wallet') return requestFaucet(ticked)
       // The button's own rule, kept here for callers that skip the button (a hold gesture).
       if (sendDisabled(ready, check.ok, stage)) return
-      withAge((kp) => void submit(kp), 'trade', ticked)
+      // The wallet's key code loads with the first send (R5c): a load that fails shows here,
+      // and nothing was signed or sent.
+      withAge((kp) => void submit(kp), 'trade', ticked).catch((err: unknown) => {
+        setError(err)
+        setErrorAt(Date.now() / 1000)
+        setFailedAction(action)
+      })
     },
   }
 }

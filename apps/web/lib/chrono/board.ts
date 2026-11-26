@@ -1,13 +1,8 @@
 // The board's rows (spec 4.1): one per game, built from the winner market (the UI shows no
 // second-half market), the wallet's positions and the shared clock.
-import {
-  effectiveTime,
-  formatAmount,
-  type Game,
-  type MarketSummary,
-  type PositionsResponse,
-  parseAmount,
-} from '@horagon/sdk'
+import type { Game, MarketSummary, PositionsResponse } from '@horagon/sdk'
+import { formatAmount, parseAmount } from '@horagon/sdk/amount'
+import { effectiveTime } from '@horagon/sdk/math'
 import { isTonight, percent, usdc } from '../format'
 import { rowSubject, started } from './copy'
 import { timeLeftFraction } from './geometry'

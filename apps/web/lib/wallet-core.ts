@@ -58,16 +58,28 @@ export function walletCore(ui: WalletUi, gate = createAgeGate()) {
     ui.openGate()
   }
 
+  /**
+   * Takes the opened store: reads only, asks nothing; a first visit has no burner. A device that
+   * ticked the box before gets its missing burner back (loadWallet).
+   */
+  const open = (o: Opened): Opened => {
+    opened = o
+    ui.setAgeOk(ageAffirmed(o.store))
+    setKeypair(loadWallet(o.store))
+    return o
+  }
+
   return {
     gate,
     /** The page loaded (R5): reads only, asks nothing; a first visit has no burner. */
     mount(storage: () => KeyStore): Opened {
-      const o = openKeyStore(storage)
-      opened = o
-      ui.setAgeOk(ageAffirmed(o.store))
-      setKeypair(loadWallet(o.store))
-      return o
+      return open(openKeyStore(storage))
     },
+    /**
+     * The store the page opened on load (lib/wallet-loader.ts, R5c): this core loads with the
+     * first action, and reads the same store, so an in-memory one (storage blocked) is shared.
+     */
+    open,
     /**
      * Another tab imported, created or removed the key, or ticked the box: follow it, so two tabs
      * never sign with different wallets. Reads only. A removed burner waits for the next action

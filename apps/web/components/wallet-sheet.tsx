@@ -39,18 +39,21 @@ export default function WalletSheet(p: {
     if (p.atPositions) positions.current?.scrollIntoView({ block: 'start' })
   }, [p.atPositions])
 
-  function onImport() {
+  async function onImport() {
     if (!window.confirm(replacePrompt(ephemeral))) return
     setImportError(undefined)
     try {
-      if (!importKey(importText, importAge)) return
+      // The key code loads with the first import (R5c), so this waits for it.
+      if (!(await importKey(importText, importAge))) return
       setImportText('')
       setImportAge(false)
       setShown(undefined)
       setNote('Wallet imported.')
     } catch (err) {
-      // The key's own problem (not base58, wrong length, mismatched halves), in words.
-      setImportError(err instanceof Error ? err.message : 'This key could not be imported.')
+      // The key's own problem (not base58, wrong length, mismatched halves), in words; a key
+      // code that failed to load (a ChunkLoadError, a TypeError) gets no raw message.
+      const own = err instanceof Error && err.name === 'Error'
+      setImportError(own ? err.message : 'This key could not be imported.')
     }
   }
 
@@ -123,7 +126,7 @@ export default function WalletSheet(p: {
           <button
             type="button"
             disabled={!importText.trim() || (ageNeeded && !importAge)}
-            onClick={onImport}
+            onClick={() => void onImport()}
             className="inline-flex min-h-11 items-center underline disabled:opacity-50"
           >
             Import

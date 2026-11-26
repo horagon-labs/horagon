@@ -1,7 +1,8 @@
 // The game screen's dial (spec 4.2, 4.3): the state table, the needle (a proposal turns it
 // toward the proposed side), and the time ring from the market's real start_ts once the market
 // state has loaded; tip-off - 60 min stands in until then, as on the board.
-import { effectiveTime, type Game, type MarketSummary, type Outcome } from '@horagon/sdk'
+import type { Game, MarketSummary, Outcome } from '@horagon/sdk'
+import { effectiveTime } from '@horagon/sdk/math'
 import { timeLeftFraction } from './geometry'
 import {
   type DialState,

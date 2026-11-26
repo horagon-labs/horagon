@@ -1,7 +1,8 @@
 // Titles, descriptions and the share card's words (R5). A shared game link unfurls as
 // "LAC @ MEM · MEM to win 62% · Horagon" with the score or the tip-off, and every description
 // ends on the play-money line (PLAY_MONEY_NOTICE, the one copy of it).
-import { type GameDetail, PLAY_MONEY_NOTICE } from '@horagon/sdk'
+import type { GameDetail } from '@horagon/sdk'
+import { PLAY_MONEY_NOTICE } from '@horagon/sdk/notice'
 import { winnerOf } from './chrono/board'
 import { dialCaption, liveNumber, toWin, verdict } from './chrono/copy'
 import { gameDial } from './chrono/game'
