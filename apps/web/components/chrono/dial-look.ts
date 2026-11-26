@@ -77,12 +77,12 @@ export function stateLine(
     case 'halted':
       return 'Trading halted'
     case 'closed':
-      return 'Trading closed, waiting for the result'
+      return 'Trading closed · result pending'
     case 'closing':
     case 'live':
       return `closes in ${countdown(secsLeft ?? 0, 0)}`
     case 'pre': {
-      if (secsLeft === null) return 'market opens 60 min before tip-off'
+      if (secsLeft === null) return 'Opens 60 min before tip-off'
       const tip = Math.floor(Date.parse(game.scheduledTipoff) / 1000)
       return tip > nowSecs ? `tip-off in ${countdown(tip, nowSecs)}` : 'tip-off soon'
     }

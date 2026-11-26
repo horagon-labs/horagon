@@ -56,14 +56,14 @@ describe('keyStep (spec 2.6)', () => {
 describe('itemLabel (spec 2.6)', () => {
   it('reads the score, the dial sentence and your position', () => {
     expect(itemLabel(boardItem(game(), held, NOW))).toBe(
-      'MEM 78, CLE 84. CLE wins, 77 cents, model 74, closes in 1 hour 2 minutes. You hold a position',
+      'MEM 78, CLE 84. CLE to win, 77%, model 74%, closes in 1 hour 2 minutes. You hold a position',
     )
   })
 
   it('reads a game without a market as not open yet', () => {
     const phx = items.find((i) => i.id === 'nba-401810004')
     expect(phx && itemLabel(phx)).toBe(
-      'DEN at PHX. PHX wins, no price yet, model 44, market opens 60 min before tip-off',
+      'DEN at PHX. PHX to win, no price yet, model 44%, market opens 60 min before tip-off',
     )
   })
 })
@@ -96,7 +96,8 @@ describe('NightDial (spec 3.2, 4.1)', () => {
   it('summarises the game that closes soonest when nothing is selected', () => {
     const html = night()
     expect(html).toContain('>BOS @ MIL<')
-    expect(html).toContain('41¢')
+    expect(html).toContain('>41%<')
+    expect(html).toContain('>MIL to win<')
   })
 
   it('draws one arc per segment on its ring and lights your game in lume', () => {
@@ -164,10 +165,12 @@ describe('DialRow (spec 3.2)', () => {
     expect(row).toContain(`aria-label="${itemLabel(cle)}"`)
   })
 
-  it('shows the mini dial, the score, the price in mono 19 px, the ET close and your diamond', () => {
+  it('shows the mini dial, the score, whose chance, the % in mono 19 px, the ET close and your diamond', () => {
     expect(row).toContain('viewBox="0 0 100 100"')
     expect(row).toContain('78–84 · Q3 4:12')
-    expect(row).toContain('font-mono text-19 text-lume-300 tabular-nums">77¢')
+    expect(row).toContain('data-subject="true">CLE to win</span>')
+    expect(row).toContain('font-mono text-19 tabular-nums text-lume-300">77%')
+    expect(row).not.toContain('¢')
     expect(row).toContain('closes 10:10 PM ET')
     expect(row).toContain('◆')
   })

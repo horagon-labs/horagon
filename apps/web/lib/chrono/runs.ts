@@ -92,18 +92,24 @@ export function findRuns(history: GameHistory, market: string): Run[] {
   return runs
 }
 
-/** "CLE on an 8–0 run · price 74 → 77 in 2 min" (spec 3.2), prices on the running side. */
+/**
+ * "CLE on an 8–0 run · price 74% → 77% in 2 min" (spec 3.2), prices on the running side, or
+ * "price held at 62%" when the price did not move (audit section 3: never "62 → 62").
+ */
 export function runLine(run: Run, teams: { home: string; away: string }): string {
-  // The running side's price in whole cents, "<1" and ">99" at the edges (see format.ts).
+  // The running side's chance in whole percent, "<1%" and ">99%" at the edges (see format.ts).
   const side = (p: number | null) =>
-    p === null ? null : whole(run.team === 'home' ? p : 1 - p, '')
+    p === null ? null : whole(run.team === 'home' ? p : 1 - p, '%')
   const mins = Math.max(1, Math.round((run.to - run.from) / 60))
   const from = side(run.priceFrom)
   const to = side(run.priceTo)
   // "an 8", "an 11", "an 18", "an 80"; "a" before every other count.
   const article = /^(8|11|18)/.test(String(run.points)) ? 'an' : 'a'
   const head = `${teams[run.team]} on ${article} ${run.points}–0 run`
-  return from === null || to === null ? head : `${head} · price ${from} → ${to} in ${mins} min`
+  if (from === null || to === null) return head
+  return from === to
+    ? `${head} · price held at ${to}`
+    : `${head} · price ${from} → ${to} in ${mins} min`
 }
 
 /** The newest run, for the Scorebug's line and the Dial's amber flash key. */

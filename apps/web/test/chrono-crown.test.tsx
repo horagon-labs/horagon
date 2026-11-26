@@ -125,7 +125,7 @@ describe('CrownPanel (spec 3.2, 5.5)', () => {
     const html = panel()
     expect(html).toMatch(/<g transform="rotate\(78.3 100 100\)"[^>]*data-needle="ghost"/)
     expect(html).toContain('data-impact')
-    expect(html).toContain('aria-label="CLE wins, 77 cents, after this trade 79 cents"')
+    expect(html).toContain('aria-label="CLE to win, 77%, after this trade 79%"')
   })
 
   it('shows the numbers, the presets and the hold button', () => {

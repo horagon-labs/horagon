@@ -65,7 +65,8 @@ describe('Scorebug (spec 3.2)', () => {
     expect(html).toContain('>84</p>')
     expect(html).toContain('Q3 4:12')
     expect(html).toContain('data-live')
-    expect(html).toContain('CLE on an 8–0 run · price 74 → 77 in 2 min')
+    expect(html).toContain('CLE on an 8–0 run · price 74% → 77% in 2 min')
+    expect(html).toContain('Model: live win chance from score and clock')
   })
 
   it('shows the ET tip-off and no score before the game', () => {

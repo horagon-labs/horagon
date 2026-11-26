@@ -1,7 +1,8 @@
 // The one place that decides how a dial looks (spec 4.3): `deriveDialState` checks the rows of
 // the table in order and the first match wins. Every "now" is chain-adjusted (spec 5.4).
 import { effectiveTime, type Game, type MarketSummary, type Outcome } from '@horagon/sdk'
-import { cents, percent } from '../format'
+import { percent } from '../format'
+import { dialCaption, type VerdictGame } from './copy'
 import { spokenDuration } from './time'
 
 export type DialState =
@@ -79,14 +80,15 @@ export function needlePrice(
 }
 
 export interface DialLabelInput {
-  /** The home team: the needle is its price (YES). */
-  team: string
+  /** The game: the needle is its home side's price (YES). */
+  game: VerdictGame
+  /** The winner market's result, once it has one. */
+  outcome: Outcome | null
   price: number | null
   modelProb: number | null
   state: DialState
   /** Seconds until trading closes; null without a market. */
   secsLeft: number | null
-  gameStatus: Game['status']
 }
 
 function stateWords(i: DialLabelInput): string {
@@ -98,11 +100,11 @@ function stateWords(i: DialLabelInput): string {
     case 'proposed':
       return 'result proposed'
     case 'void':
-      return `game ${i.gameStatus}`
+      return `game ${i.game.status}`
     case 'halted':
       return 'trading halted'
     case 'closed':
-      return 'trading closed, waiting for the result'
+      return 'trading closed, result pending'
     default:
       return i.secsLeft === null
         ? 'market opens 60 min before tip-off'
@@ -110,13 +112,18 @@ function stateWords(i: DialLabelInput): string {
   }
 }
 
-/** "CLE wins, 77 cents, model 74, closes in 1 hour 2 minutes" (spec 2.6). */
+/**
+ * "CLE to win, 77%, model 74%, closes in 1 hour 2 minutes" (spec 2.6, R5): the subject first,
+ * as the dial's caption says it ("Final, CLE lost, result pending" once the game is over). A
+ * result or a void game has no live number to read.
+ */
 export function dialLabel(i: DialLabelInput): string {
-  const parts = [
-    `${i.team} wins`,
-    i.price === null ? 'no price yet' : cents(i.price).replace('¢', ' cents'),
-  ]
-  if (i.modelProb !== null) parts.push(`model ${percent(i.modelProb).replace('%', '')}`)
+  const caption = dialCaption(i.state, i.game, i.outcome).replaceAll(' · ', ', ')
+  const parts = caption ? [caption] : []
+  if (i.state !== 'resolved' && i.state !== 'void') {
+    parts.push(i.price === null ? 'no price yet' : percent(i.price))
+  }
+  if (i.modelProb !== null) parts.push(`model ${percent(i.modelProb)}`)
   parts.push(stateWords(i))
   return parts.join(', ')
 }

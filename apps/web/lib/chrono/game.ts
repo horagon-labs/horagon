@@ -18,7 +18,10 @@ export interface GameDial {
   label: string
 }
 
-type GameFields = Pick<Game, 'status' | 'home' | 'modelProb' | 'scheduledTipoff'>
+type GameFields = Pick<
+  Game,
+  'status' | 'home' | 'away' | 'homeScore' | 'awayScore' | 'modelProb' | 'scheduledTipoff'
+>
 
 export function gameDial(
   game: GameFields,
@@ -39,12 +42,12 @@ export function gameDial(
       )
     : 1
   const label = dialLabel({
-    team: game.home,
+    game,
+    outcome: market?.outcome ?? null,
     price,
     modelProb: game.modelProb,
     state,
     secsLeft,
-    gameStatus: game.status,
   })
   return { state, price, timeLeft, secsLeft, label }
 }

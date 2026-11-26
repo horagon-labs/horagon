@@ -7,9 +7,10 @@
 import { type GameDetail, type MarketSummary, parseAmount } from '@horagon/sdk'
 import { useState } from 'react'
 import { buySteps, percentOf, sellSteps, stepIndex } from '../../lib/chrono/bezel'
+import { dialCaption } from '../../lib/chrono/copy'
 import { errorEffect, requoteShown, retryLeft } from '../../lib/chrono/errors'
 import type { DialState } from '../../lib/chrono/state'
-import { cents, explorerTx, usdc } from '../../lib/format'
+import { cents, explorerTx, percent, usdc } from '../../lib/format'
 import { DEFAULT_SLIPPAGE_BPS } from '../../lib/trade'
 import { sendDisabled, sendText } from '../../lib/trade-view'
 import type { Trade } from '../../lib/use-trade'
@@ -64,8 +65,7 @@ export function CrownPanel(p: CrownPanelProps) {
   const ghost = q && t.check.quote ? q.priceAfter : null
   const spendable = t.balance ? parseAmount(t.balance) > 0n : false
   const tone = t.side === 'home' ? 'lume' : 'brass'
-  const spoken = (x: number) => cents(x).replace('¢', ' cents')
-  const now = p.market.price === null ? 'no price yet' : spoken(p.market.price)
+  const now = p.market.price === null ? 'no price yet' : percent(p.market.price)
   const chip =
     'min-h-11 flex-1 rounded-card border border-line font-mono text-13 aria-pressed:border-lume-300 aria-pressed:text-lume-300 disabled:opacity-40'
   return (
@@ -107,13 +107,13 @@ export function CrownPanel(p: CrownPanelProps) {
           modelProb={p.game.modelProb}
           timeLeft={p.timeLeft}
           state={p.state}
-          team={p.game.home}
+          caption={dialCaption(p.state, p.game, p.market.outcome)}
           ghostPrice={ghost}
           ghostPending={t.quotePending}
           ghostShake={requote}
           stale={p.stale}
           detail={buying ? `${t.amount} mUSDC` : `${t.amount} shares`}
-          label={`${p.game.home} wins, ${now}${ghost === null ? '' : `, after this trade ${spoken(ghost)}`}`}
+          label={`${p.game.home} to win, ${now}${ghost === null ? '' : `, after this trade ${percent(ghost)}`}`}
         />
       </Bezel>
       {q && t.check.quote && (

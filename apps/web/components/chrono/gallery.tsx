@@ -6,6 +6,7 @@
 // verified in the Task 24 e2e run.
 import type { Game, Side, TradeAction } from '@horagon/sdk'
 import { type ReactNode, useState } from 'react'
+import { dialCaption } from '../../lib/chrono/copy'
 import {
   detail,
   evening,
@@ -245,16 +246,16 @@ export function Gallery() {
                   modelProb={0.74}
                   timeLeft={s.timeLeft}
                   state={state}
-                  team="CLE"
+                  caption={dialCaption(state, s.game, state === 'resolved' ? 'yes' : null)}
                   liveDot={s.game.status === 'live'}
                   detail={stateLine(state, s.game, s.secsLeft, NOW)}
                   label={dialLabel({
-                    team: 'CLE',
+                    game: s.game,
+                    outcome: state === 'resolved' ? 'yes' : null,
                     price: s.price,
                     modelProb: 0.74,
                     state,
                     secsLeft: s.secsLeft,
-                    gameStatus: s.game.status,
                   })}
                 />
                 <figcaption className="text-center font-mono text-11 text-ash-400">
@@ -267,22 +268,14 @@ export function Gallery() {
       </Section>
       <Section title="Loading, stale, ghost (spec 4.4, 5.5)">
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
-          <Dial
-            loading
-            price={null}
-            modelProb={null}
-            timeLeft={1}
-            state="pre"
-            team="CLE"
-            label="Loading"
-          />
+          <Dial loading price={null} modelProb={null} timeLeft={1} state="pre" label="Loading" />
           <Dial
             stale
             price={0.77}
             modelProb={0.74}
             timeLeft={0.33}
             state="live"
-            team="CLE"
+            caption="CLE to win"
             label="Stale"
           />
           <Dial
@@ -291,7 +284,7 @@ export function Gallery() {
             modelProb={0.74}
             timeLeft={0.33}
             state="live"
-            team="CLE"
+            caption="CLE to win"
             label="Ghost"
           />
         </div>

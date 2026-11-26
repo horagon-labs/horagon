@@ -8,9 +8,11 @@ import {
   type PositionsResponse,
   parseAmount,
 } from '@horagon/sdk'
-import { isTonight, usdc } from '../format'
+import { isTonight, percent, usdc } from '../format'
+import { rowSubject } from './copy'
 import { timeLeftFraction } from './geometry'
 import { type DialState, deriveDialState, dialLabel, needlePrice, secsToClose } from './state'
+import { etClock } from './time'
 import { gameInterval, type Interval } from './tracks'
 
 export interface BoardItem {
@@ -97,6 +99,23 @@ export function yourHour(
   return { count: open.length, value: usdc(formatAmount(value)) }
 }
 
+/**
+ * A row's three right-hand lines (R5, audit section 13): whose chance the number is, the number
+ * in percent, and the close. "MEM to win · 62% · closes 10:40 PM ET"; once the final buzzer went,
+ * "CHA lost · 74% · result pending"; after the result, "Resolved: MEM won" with no number.
+ */
+export function rowWords(i: BoardItem): { subject: string; value: string; note: string } {
+  const subject = rowSubject(i.state, i.game, i.market?.outcome ?? null)
+  if (i.state === 'resolved') return { subject, value: '', note: 'result final' }
+  if (i.state === 'void') return { subject, value: '', note: '' }
+  const value = i.price === null ? '—' : percent(i.price)
+  const pending = i.game.status === 'final' || i.state === 'proposed' || i.state === 'challenged'
+  if (pending) return { subject, value, note: 'result pending' }
+  if (i.state === 'closed') return { subject, value, note: 'trading closed' }
+  const note = i.market ? `closes ${etClock(i.interval.end)}` : `opens ${etClock(i.interval.start)}`
+  return { subject, value, note }
+}
+
 /** What a screen reader hears for one game, on its row link and in the Night dial's list. */
 export function itemLabel(i: BoardItem): string {
   const g = i.game
@@ -105,12 +124,12 @@ export function itemLabel(i: BoardItem): string {
       ? `${g.away} at ${g.home}`
       : `${g.away} ${g.awayScore}, ${g.home} ${g.homeScore}`
   const words = dialLabel({
-    team: g.home,
+    game: g,
+    outcome: i.market?.outcome ?? null,
     price: i.price,
     modelProb: g.modelProb,
     state: i.state,
     secsLeft: i.secsLeft,
-    gameStatus: g.status,
   })
   return `${teams}. ${words}${i.held ? '. You hold a position' : ''}`
 }

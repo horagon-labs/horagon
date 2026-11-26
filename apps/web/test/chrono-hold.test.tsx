@@ -156,11 +156,11 @@ describe('pusherMode (spec 3.2, 4.3, 6.1)', () => {
   it('says one line once trading is over, and nothing once there is a result', () => {
     expect(mode({ state: 'closed' })).toEqual({
       kind: 'line',
-      text: 'Trading closed, waiting for the result',
+      text: 'Trading closed. The result goes on-chain after a box-score check.',
     })
     expect(mode({ state: 'pre', secsLeft: null })).toEqual({
       kind: 'line',
-      text: 'market opens 60 min before tip-off',
+      text: 'Trading opens 60 min before tip-off',
     })
     for (const state of ['resolved', 'challenged', 'proposed', 'void'] as const) {
       expect(mode({ state })).toEqual({ kind: 'none' })

@@ -96,12 +96,12 @@ export function WalletButton() {
       </button>
       <dialog
         ref={dialog}
-        aria-label="Burner wallet"
+        aria-label="Play wallet"
         className="m-auto w-[min(32rem,calc(100%-2rem))] rounded-face border border-brass-500/20 bg-enamel-900 p-5 text-ivory-100 backdrop:bg-black/70"
       >
         <div className="space-y-4">
           <div className="flex items-center justify-between">
-            <h2 className="text-15 font-semibold">Burner wallet (devnet)</h2>
+            <h2 className="text-15 font-semibold">Play wallet (devnet)</h2>
             <button
               type="button"
               onClick={() => dialog.current?.close()}
@@ -151,7 +151,7 @@ export function WalletButton() {
                   className="inline-flex min-h-11 items-center underline"
                   onClick={() => setShown(exportKey())}
                 >
-                  Show secret key (base58)
+                  Show secret key
                 </button>
               )}
               <textarea

@@ -4,6 +4,7 @@
 import { parseAmount, type TradeAction } from '@horagon/sdk'
 import { countdown } from '../format'
 import type { Ready } from '../trade-view'
+import { CLOSED_LINE } from './copy'
 import type { ErrorEffect } from './errors'
 import type { DialState } from './state'
 
@@ -44,13 +45,13 @@ export function pusherMode(i: PusherInput): PusherMode {
     case 'void':
       return { kind: 'none' }
     case 'closed':
-      return { kind: 'line', text: 'Trading closed, waiting for the result' }
+      return { kind: 'line', text: CLOSED_LINE }
     case 'halted':
       return { kind: 'buy', locked: true, note: null }
     default:
       break
   }
-  if (i.secsLeft === null) return { kind: 'line', text: 'market opens 60 min before tip-off' }
+  if (i.secsLeft === null) return { kind: 'line', text: 'Trading opens 60 min before tip-off' }
   // Only a buy short of mUSDC is cured by the faucet; a sell short of shares or SOL is not.
   const poorBuy = i.effect === 'faucet' && i.failedAction === 'buy'
   if (poorBuy || empty(i)) return { kind: 'faucet' }
