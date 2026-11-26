@@ -125,7 +125,8 @@ export const GameDetailSchema = GameSchema.extend({
 export const GamesQuerySchema = z.strictObject({
   /**
    * YYYY-MM-DD, the US Eastern (ET) day of tip-off, as the NBA dates its games.
-   * Default: today and tomorrow (ET).
+   * Default: from 00:00 ET of the night (the ET date of now - 6 h, `etNight`, so the night
+   * rolls over at 06:00 ET) to the end of the next ET day.
    */
   date: z.iso.date().optional(),
   status: z

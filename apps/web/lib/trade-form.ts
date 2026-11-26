@@ -35,7 +35,7 @@ export function checkTrade(i: TradeFormInput): TradeCheck {
   // The final buzzer closes trading, also before the keeper's halt reaches the index (R5c).
   if (i.gameStatus === 'final') return { ok: false, quote: false, reason: BUZZER_CLOSED }
   if (i.marketStatus === 'halted') {
-    return { ok: false, quote: false, reason: 'Trading is halted while the result is checked.' }
+    return { ok: false, quote: false, reason: 'Trading is halted.' }
   }
   if (i.marketStatus !== 'open' || i.nowSecs >= i.endTs) {
     return { ok: false, quote: false, reason: 'Trading on this market has closed.' }

@@ -5,6 +5,7 @@
 // buttons pick its side.
 import type { GameDetail, MarketSummary, Side } from '@horagon/sdk'
 import { useState } from 'react'
+import { started } from '../../lib/chrono/copy'
 import { errorEffect } from '../../lib/chrono/errors'
 import { useMedia, WIDE } from '../../lib/chrono/feel'
 import { canTrade, crownShown, type GameDial } from '../../lib/chrono/game'
@@ -64,6 +65,7 @@ export function MarketBlock(p: {
     effect: errorEffect(t.error),
     failedAction: t.failedAction,
     secsLeft: p.dial.secsLeft,
+    started: started(p.game),
   })
   // setDirection sets the amount too: a sell's share count never becomes a buy amount in mUSDC.
   const pick = (side: Side) => {

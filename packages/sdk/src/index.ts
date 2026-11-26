@@ -6,6 +6,7 @@ export * from './amount'
 export * from './client'
 export * from './cluster'
 export * from './errors'
+export * from './et'
 export {
   canonicalize,
   EVIDENCE_RULES,

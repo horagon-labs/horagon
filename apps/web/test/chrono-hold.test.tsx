@@ -162,6 +162,11 @@ describe('pusherMode (spec 3.2, 4.3, 6.1)', () => {
       kind: 'line',
       text: 'Trading opens 60 min before tip-off',
     })
+    // A game already on the court gets no market any more (R5c M3).
+    expect(mode({ state: 'pre', secsLeft: null, started: true })).toEqual({
+      kind: 'line',
+      text: 'No market for this game',
+    })
     for (const state of ['resolved', 'challenged', 'proposed', 'void'] as const) {
       expect(mode({ state })).toEqual({ kind: 'none' })
     }

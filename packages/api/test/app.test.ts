@@ -101,6 +101,18 @@ function signAsUser(base64: string): string {
 }
 
 describe('reads', () => {
+  it('lists the night by default: from 00:00 ET of the night, so a late game stays (I1)', async () => {
+    const at = (iso: string) =>
+      createApp({ ...env.deps, now: () => Date.parse(iso) / 1000 }).request('/api/v1/games')
+    const ids = async (res: Response) =>
+      ((await res.json()) as { games: Array<{ id: string }> }).games.map((g) => g.id)
+    // The game tips off at 03:30Z on 20/11 (22:30 ET on the 19th).
+    expect(await ids(await at('2026-11-20T05:30:00Z'))).toEqual([GAME_ID])
+    expect(await ids(await at('2026-11-20T10:59:00Z'))).toEqual([GAME_ID])
+    // From 06:00 ET the night is the 20th: the range starts at 00:00 ET that day.
+    expect(await ids(await at('2026-11-20T11:30:00Z'))).toEqual([])
+  })
+
   it('lists the ET game date with cache headers and a request id', async () => {
     const res = await get('/games?date=2026-11-19')
     expect(res.status).toBe(200)

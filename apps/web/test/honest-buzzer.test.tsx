@@ -125,6 +125,10 @@ describe('final means closed (item 1)', () => {
     expect(checkTrade(buyInput({ gameStatus: 'final', action: 'sell', shares: '5' })).ok).toBe(
       false,
     )
+    // A halt while the game is on the court has no result to check (M6).
+    expect(checkTrade(buyInput({ gameStatus: 'live', marketStatus: 'halted' })).reason).toBe(
+      'Trading is halted.',
+    )
     // The same market while the game is on the court trades.
     expect(checkTrade(buyInput({ gameStatus: 'live' })).ok).toBe(true)
   })

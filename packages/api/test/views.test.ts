@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { etDayRange, etNextDay, etToday } from '../src/views'
+import { etDayRange, etNextDay, etToday, marketRules } from '../src/views'
 
 describe('ET game dates', () => {
   it('maps an ET day to its UTC range, across both clock changes', () => {
@@ -24,5 +24,16 @@ describe('ET game dates', () => {
     expect(etToday(Date.parse('2026-11-20T03:30:00Z') / 1000)).toBe('2026-11-19')
     expect(etToday(Date.parse('2026-11-20T05:00:00Z') / 1000)).toBe('2026-11-20')
     expect(etNextDay('2026-12-31')).toBe('2027-01-01')
+  })
+})
+
+describe('market rules (M6)', () => {
+  it('say when a market closes: the buzzer, the first Final read, 3 h after tip-off', () => {
+    const rules = marketRules({ home: 'MEM', away: 'CHA' }, [0]).join(' ')
+    expect(rules).toContain(
+      'closes at the final buzzer (the keeper halts it on the first Final read)',
+    )
+    expect(rules).toContain('3 hours after the scheduled tip-off at the latest')
+    expect(rules).not.toContain('if the game ends before the market closes')
   })
 })

@@ -5,7 +5,7 @@ import type { TradeAction } from '@horagon/sdk'
 import { parseAmount } from '@horagon/sdk/amount'
 import { countdown } from '../format'
 import type { Ready } from '../trade-view'
-import { CLOSED_LINE } from './copy'
+import { CLOSED_LINE, NO_MARKET } from './copy'
 import type { ErrorEffect } from './errors'
 import type { DialState } from './state'
 
@@ -26,6 +26,8 @@ export interface PusherInput {
   failedAction: TradeAction
   /** Seconds of trading left; null without a market. */
   secsLeft: number | null
+  /** The game is on the court or over: a missing market will not open (R5c M3). */
+  started?: boolean
 }
 
 /** A ready wallet known to hold nothing to spend; an unknown balance is not an empty one. */
@@ -52,7 +54,9 @@ export function pusherMode(i: PusherInput): PusherMode {
     default:
       break
   }
-  if (i.secsLeft === null) return { kind: 'line', text: 'Trading opens 60 min before tip-off' }
+  if (i.secsLeft === null) {
+    return { kind: 'line', text: i.started ? NO_MARKET : 'Trading opens 60 min before tip-off' }
+  }
   // Only a buy short of mUSDC is cured by the faucet; a sell short of shares or SOL is not.
   const poorBuy = i.effect === 'faucet' && i.failedAction === 'buy'
   if (poorBuy || empty(i)) return { kind: 'faucet' }
