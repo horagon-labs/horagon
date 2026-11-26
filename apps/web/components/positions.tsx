@@ -3,6 +3,7 @@
 // (WalletProvider): every copy of this list shows the same run, and one run at a time.
 import type { MarketStatus } from '@horagon/sdk'
 import Link from 'next/link'
+import { signedUsdc } from '../lib/chrono/controls'
 import { positionStatus } from '../lib/chrono/copy'
 import { explorerTx, sideLabel, usdc } from '../lib/format'
 import { WALLET_PREPARING } from '../lib/wallet-copy'
@@ -48,12 +49,8 @@ export function Positions({
                   {statusPart(p.marketStatus)}
                 </p>
               </div>
-              <span
-                className={`font-mono tabular-nums ${p.pnlUsdc.startsWith('-') ? 'text-red-400' : 'text-lume-300'}`}
-              >
-                {p.pnlUsdc.startsWith('-') ? '' : '+'}
-                {usdc(p.pnlUsdc)}
-              </span>
+              {/* One ink for gain and loss: the sign says which (review §4.7, u3 D2). */}
+              <span className="font-mono text-ivory-100 tabular-nums">{signedUsdc(p.pnlUsdc)}</span>
             </li>
           ))}
         </ul>

@@ -346,4 +346,14 @@ describe('P&L in one ink, the sign printed (review §4.7, u3 D2)', () => {
     expect(down).toContain('<span class="text-ivory-100">(−1.20)</span>')
     for (const html of [up, down]) expect(html).not.toMatch(/text-red-400|text-lume-300/)
   })
+
+  it('does the same in the wallet sheet list (positions.tsx, review §4.7)', () => {
+    // The list needs the wallet context to render, so its P&L span is read from the source.
+    const src = read('components', 'positions.tsx')
+    expect(src).toContain(
+      '<span className="font-mono text-ivory-100 tabular-nums">{signedUsdc(p.pnlUsdc)}</span>',
+    )
+    expect(src).not.toMatch(/text-red-400|text-lume-300/)
+    expect(src).not.toContain("startsWith('-') ? '' : '+'")
+  })
 })
