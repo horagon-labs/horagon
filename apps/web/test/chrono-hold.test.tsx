@@ -124,12 +124,19 @@ describe('pusherMode (spec 3.2, 4.3, 6.1)', () => {
     expect(mode({ state: 'halted' })).toEqual({ kind: 'buy', locked: true, note: null })
   })
 
-  it('turns into the faucet for no wallet, an empty wallet or a buy without the funds', () => {
-    expect(mode({ ready: 'no-wallet', balance: undefined })).toEqual({ kind: 'faucet' })
+  it('turns into the faucet for an empty wallet or a buy without the funds', () => {
     expect(mode({ balance: '0' })).toEqual({ kind: 'faucet' })
     const poor = errorEffect(new HoragonError('INSUFFICIENT_FUNDS', 'poor'))
     expect(mode({ effect: poor, failedAction: 'buy' })).toEqual({ kind: 'faucet' })
     expect(mode({ ready: 'loading', balance: undefined }).kind).toBe('buy')
+  })
+
+  it('shows the buy buttons to a visitor with no wallet: the crown sets it up (R5)', () => {
+    expect(mode({ ready: 'no-wallet', balance: undefined })).toEqual({
+      kind: 'buy',
+      locked: false,
+      note: null,
+    })
   })
 
   it('keeps the buy buttons when a sell fails for funds, and once the error is cleared (I3)', () => {
@@ -191,7 +198,7 @@ describe('Pusher (spec 3.2)', () => {
   })
 
   it('offers the faucet and the lines', () => {
-    expect(pusher({ kind: 'faucet' })).toContain('Get test mUSDC')
+    expect(pusher({ kind: 'faucet' })).toContain('Get 1,000 play mUSDC')
     expect(pusher({ kind: 'faucet' }, { funding: true })).toContain('Requesting…')
     expect(pusher({ kind: 'line', text: 'Trading closed, waiting for the result' })).toContain(
       'Trading closed, waiting for the result',

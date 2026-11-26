@@ -130,7 +130,7 @@ describe('GameLoading and NoGame (spec 4.4)', () => {
 })
 
 describe('MarketBlock (spec 3.2, 4.2)', () => {
-  it('offers the faucet before there is a wallet, then the positions, the crown in a sheet', () => {
+  it('offers Buy before there is a wallet, then the positions, the crown in a sheet (R5)', () => {
     const g = detail()
     const html = renderToStaticMarkup(
       <WalletProvider>
@@ -144,11 +144,12 @@ describe('MarketBlock (spec 3.2, 4.2)', () => {
         />
       </WalletProvider>,
     )
-    const faucet = html.indexOf('Get test mUSDC')
+    const buy = html.indexOf('>Buy CLE 77¢</button>')
     const sheet = html.indexOf('<dialog')
     const card = html.indexOf('Your position')
-    expect(faucet).toBeGreaterThanOrEqual(0)
-    expect(sheet).toBeGreaterThan(faucet)
+    expect(html).not.toContain('Get 1,000 play mUSDC</button>')
+    expect(buy).toBeGreaterThanOrEqual(0)
+    expect(sheet).toBeGreaterThan(buy)
     expect(card).toBeGreaterThan(sheet)
     expect(html).toContain('aria-label="Buy CLE"')
     expect(html).toContain('No positions yet.')
@@ -172,7 +173,7 @@ describe('dev gallery (spec 6.2)', () => {
     expect(html).toContain('Demo sends: 0')
     expect(html).toContain('>Buy CLE 77¢</button>')
     expect(html).toContain('closes in 4:12')
-    expect(html).toContain('Get test mUSDC')
+    expect(html).toContain('Get 1,000 play mUSDC')
     expect(html).toContain('Trading closed, waiting for the result')
     expect(html).toContain('<dialog aria-label="Buy CLE"')
   })

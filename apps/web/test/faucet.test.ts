@@ -4,7 +4,7 @@ import { type FaucetClient, requestFunds } from '../lib/faucet'
 describe('requestFunds', () => {
   it('asks the faucet for the wallet and words the amount', async () => {
     const faucet = vi.fn(async () => ({ signature: null, amountUsdc: '100' }))
-    expect(await requestFunds({ faucet } as FaucetClient, 'W1')).toBe('Added 100.00 test mUSDC.')
+    expect(await requestFunds({ faucet } as FaucetClient, 'W1')).toBe('Added 100.00 play mUSDC.')
     expect(faucet).toHaveBeenCalledWith('W1')
   })
 

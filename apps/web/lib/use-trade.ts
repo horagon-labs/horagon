@@ -3,7 +3,9 @@
 // without a change: side and direction, amount, a quote debounced 300 ms, the trade-form check,
 // and the send with its stages and fill line. A send goes through `withAge` (18+ gate, R1) and
 // is never repeated by itself (R2). Until this signer's portfolio has loaded once, Buy and
-// Sell wait, so a Buy is never checked against an unknown balance.
+// Sell wait, so a Buy is never checked against an unknown balance. With no wallet yet, the
+// first send sets one up (R5): the crown's own 18+ box, then a new burner and the faucet, while
+// the side and the amount on screen stay for the Buy that follows.
 import {
   effectiveTime,
   type GameDetail,
@@ -95,13 +97,19 @@ export interface Trade {
   shownError: unknown
   /** The faucet note goes away once a trade starts; a new faucet request brings it back. */
   fundNoteHidden: boolean
-  /** Sets up a wallet, or sends through the 18+ gate. */
-  send: () => void
+  /** The 18+ box was never ticked on this device: the crown asks inline before it sends. */
+  ageNeeded: boolean
+  /**
+   * Sends through the 18+ gate, or, with no wallet yet, sets one up and asks the faucet.
+   * `affirmedHere`: the crown's own box was ticked (only `true` counts).
+   */
+  send: (affirmedHere?: boolean) => void
 }
 
 export function useTrade(game: GameDetail, market: MarketSummary, opts: TradeOptions = {}): Trade {
-  const { address, portfolio, refreshPortfolio, withAge, openGate, funding, fundError } =
-    useWallet()
+  const wallet = useWallet()
+  const { address, portfolio, refreshPortfolio, withAge, requestFaucet, funding } = wallet
+  const { ageNeeded, fundError } = wallet
   const [side, setSide] = useState<Side>('home')
   const [action, setAction] = useState<TradeAction>('buy')
   const [amount, setAmount] = useState(BUY_AMOUNT)
@@ -270,11 +278,15 @@ export function useTrade(game: GameDetail, market: MarketSummary, opts: TradeOpt
     // A quote that fails on the network shows only after three polls in a row (spec 4.4).
     shownError: error ?? fundError ?? (check.quote ? quoteError(quote) : undefined),
     fundNoteHidden,
-    send: () => {
-      if (ready === 'no-wallet') return openGate()
+    ageNeeded,
+    send: (affirmedHere) => {
+      const ticked = affirmedHere === true
+      // No burner yet: create it (the box ticked here, else the dialog asks) and fund it. A new
+      // wallet cannot buy before the faucet lands, so the Buy waits for the hold that follows.
+      if (ready === 'no-wallet') return requestFaucet(ticked)
       // The button's own rule, kept here for callers that skip the button (a hold gesture).
       if (sendDisabled(ready, check.ok, stage)) return
-      withAge((kp) => void submit(kp), 'trade')
+      withAge((kp) => void submit(kp), 'trade', ticked)
     },
   }
 }

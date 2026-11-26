@@ -2,6 +2,7 @@
 // trade-panel.tsx: the send button, the quote's key, and which amount a direction starts from.
 import { type Position, parseAmount, type Quote, type Side, type TradeAction } from '@horagon/sdk'
 import type { TradeStage } from './trade'
+import { SET_UP_BUTTON } from './wallet-copy'
 
 export const QUOTE_DEBOUNCE_MS = 300
 export const QUOTE_POLL_MS = 5_000
@@ -62,7 +63,7 @@ export function sendText(
   action: TradeAction,
   team: string,
 ): string {
-  if (ready === 'no-wallet') return 'Set up wallet to trade'
+  if (ready === 'no-wallet') return SET_UP_BUTTON
   if (ready === 'loading') return 'Loading your balance…'
   if (stage) return STAGE_TEXT[stage]
   return `${action === 'buy' ? 'Buy' : 'Sell'} ${team}`

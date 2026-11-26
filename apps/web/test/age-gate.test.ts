@@ -1,7 +1,14 @@
 import { Keypair } from '@solana/web3.js'
 import { describe, expect, it } from 'vitest'
-import { afterGate, gateClosesOnSync, walletGate } from '../lib/age-gate'
-import { AGE_KEY, affirmAge, BURNER_KEY, exportBurner, type KeyStore } from '../lib/burner'
+import { afterGate, createAgeGate, gateClosesOnSync, loadWallet, walletGate } from '../lib/age-gate'
+import {
+  AGE_KEY,
+  affirmAge,
+  ageAffirmed,
+  BURNER_KEY,
+  exportBurner,
+  type KeyStore,
+} from '../lib/burner'
 
 function memoryStore(): KeyStore & { map: Map<string, string> } {
   const map = new Map<string, string>()
@@ -107,3 +114,145 @@ describe('gateClosesOnSync (fix M4)', () => {
     expect(gateClosesOnSync(unreadable, false)).toBe(false)
   })
 })
+
+describe('loadWallet (R5: no prompt on load)', () => {
+  it('creates and writes nothing on a first visit', () => {
+    const store = memoryStore()
+    expect(loadWallet(store)).toBeNull()
+    expect(store.map.size).toBe(0)
+  })
+
+  it('loads a stored burner, asked or not, and asks nothing', () => {
+    const kp = Keypair.generate()
+    const store = memoryStore()
+    store.setItem(BURNER_KEY, exportBurner(kp))
+    expect(loadWallet(store)?.publicKey.toBase58()).toBe(kp.publicKey.toBase58())
+    expect(store.getItem(AGE_KEY)).toBeNull()
+  })
+
+  it('gives a device that ticked the box before its burner back', () => {
+    const store = memoryStore()
+    affirmAge(store)
+    expect(loadWallet(store)).not.toBeNull()
+    expect(store.getItem(BURNER_KEY)).not.toBeNull()
+  })
+
+  it('has no burner when storage refuses the new one', () => {
+    const map = new Map<string, string>([[AGE_KEY, JSON.stringify({ affirmedAt: 1 })]])
+    const refusing: KeyStore = {
+      getItem: (k) => map.get(k) ?? null,
+      setItem: () => {
+        throw new DOMException('Quota exceeded', 'QuotaExceededError')
+      },
+      removeItem: () => {},
+    }
+    expect(loadWallet(refusing)).toBeNull()
+  })
+})
+
+describe('createAgeGate (R5: ask at the first action, nothing sent before the tick)', () => {
+  const sends = () => {
+    const calls: string[] = []
+    return { calls, send: (kp: Keypair) => void calls.push(kp.publicKey.toBase58()) }
+  }
+
+  it.each(['trade', 'faucet', 'claim'] as const)(
+    'asks on a first %s with no burner, and creates and sends nothing',
+    (action) => {
+      const store = memoryStore()
+      const gate = createAgeGate()
+      const s = sends()
+      expect(gate.request(store, loadWallet(store), s.send, action)).toEqual({ ask: true })
+      expect(gate.waiting()).toBe(true)
+      expect(s.calls).toEqual([])
+      expect(store.map.size).toBe(0)
+    },
+  )
+
+  it('asks a stored burner that was never asked before it sends', () => {
+    const store = memoryStore()
+    store.setItem(BURNER_KEY, exportBurner(Keypair.generate()))
+    const gate = createAgeGate()
+    const s = sends()
+    expect(gate.request(store, loadWallet(store), s.send, 'trade')).toEqual({ ask: true })
+    expect(s.calls).toEqual([])
+    expect(store.getItem(AGE_KEY)).toBeNull()
+  })
+
+  it('sends at once once the box was ticked and the burner exists', () => {
+    const store = memoryStore()
+    affirmAge(store)
+    const kp = loadWallet(store)
+    const gate = createAgeGate()
+    const s = sends()
+    expect(gate.request(store, kp, s.send, 'trade')).toMatchObject({ ask: false, created: false })
+    expect(s.calls).toEqual([kp?.publicKey.toBase58()])
+  })
+
+  it('a cancel drops the waiting action: nothing is created or sent', () => {
+    const store = memoryStore()
+    const gate = createAgeGate()
+    const s = sends()
+    gate.request(store, null, s.send, 'faucet')
+    gate.cancel()
+    expect(gate.waiting()).toBe(false)
+    expect(s.calls).toEqual([])
+    expect(store.map.size).toBe(0)
+  })
+
+  it('the dialog’s tick creates the burner and continues a faucet request, not a trade', () => {
+    const store = memoryStore()
+    const gate = createAgeGate()
+    const faucet = sends()
+    gate.request(store, null, faucet.send, 'faucet')
+    const r = gate.confirm(store)
+    expect(r.created).toBe(true)
+    expect(ageAffirmed(store)).toBe(true)
+    expect(faucet.calls).toEqual([r.keypair.publicKey.toBase58()])
+
+    const other = memoryStore()
+    const trade = sends()
+    gate.request(other, null, trade.send, 'trade')
+    gate.confirm(other)
+    expect(trade.calls).toEqual([])
+    expect(gate.waiting()).toBe(false)
+  })
+
+  it('the crown’s inline tick sets the flag, creates the burner and funds it, with no dialog', () => {
+    const store = memoryStore()
+    const gate = createAgeGate()
+    const s = sends()
+    const out = gate.request(store, null, s.send, 'faucet', true)
+    expect(out.ask).toBe(false)
+    expect(ageAffirmed(store)).toBe(true)
+    expect(store.getItem(BURNER_KEY)).not.toBeNull()
+    expect(s.calls).toHaveLength(1)
+    expect(gate.waiting()).toBe(false)
+  })
+
+  it('an inline tick on a stored burner sends the trade it was ticked for', () => {
+    const kp = Keypair.generate()
+    const store = memoryStore()
+    store.setItem(BURNER_KEY, exportBurner(kp))
+    const gate = createAgeGate()
+    const s = sends()
+    expect(gate.request(store, kp, s.send, 'trade', true)).toMatchObject({ created: false })
+    expect(s.calls).toEqual([kp.publicKey.toBase58()])
+  })
+
+  it('a failed save keeps the dialog’s action waiting for a second Continue', () => {
+    const store = memoryStore()
+    const gate = createAgeGate()
+    const s = sends()
+    gate.request(store, null, s.send, 'faucet')
+    const refusing: KeyStore = { ...store, setItem: () => void raise() }
+    expect(() => gate.confirm(refusing)).toThrow()
+    expect(gate.waiting()).toBe(true)
+    gate.confirm(store)
+    expect(s.calls).toHaveLength(1)
+  })
+})
+
+function raise(): never {
+  throw new DOMException('Quota exceeded', 'QuotaExceededError')
+}

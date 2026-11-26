@@ -7,6 +7,8 @@
 // The 18+ self-declaration (spec section 12, R1) is asked here: no burner is created on a first
 // visit until the box is ticked, and a burner that was never asked sends nothing (trade, claim,
 // faucet) until it is. `withAge` is the only way a component gets the keypair to send with.
+// A page load never asks (R5): the question comes with the first action, inline in the crown
+// (`affirmedHere`) or in the AgeDialog otherwise (lib/age-gate.ts).
 import type { PositionsResponse } from '@horagon/sdk'
 import type { Keypair } from '@solana/web3.js'
 import {
@@ -19,7 +21,14 @@ import {
   useRef,
   useState,
 } from 'react'
-import { afterGate, type GateAction, gateClosesOnSync, walletGate } from '../lib/age-gate'
+import {
+  createAgeGate,
+  type GateAction,
+  type GateOutcome,
+  gateClosesOnSync,
+  loadWallet,
+  type Send,
+} from '../lib/age-gate'
 import { api } from '../lib/api'
 import {
   AGE_KEY,
@@ -27,7 +36,6 @@ import {
   affirmAge,
   ageAffirmed,
   BURNER_KEY,
-  ensureBurner,
   exportBurner,
   importBurner,
   type KeyStore,
@@ -40,8 +48,7 @@ import { claimAll } from '../lib/trade'
 import { usePoll } from '../lib/use-poll'
 import { AgeDialog } from './age-dialog'
 
-/** Something that sends with the burner: a trade, a claim, a faucet request. */
-export type Send = (keypair: Keypair) => void
+export type { Send }
 
 interface WalletState {
   /** False until the browser storage was opened (first render, server render). */
@@ -52,8 +59,9 @@ interface WalletState {
   /** The 18+ box was never ticked on this device: every send asks first. */
   ageNeeded: boolean
   /**
-   * How many burners this tab's gate has created. The wallet sheet opens when it grows, so a
-   * new (empty) wallet goes to the faucet first.
+   * How many burners this tab's AgeDialog has created. The wallet sheet opens when it grows, so
+   * a new (empty) wallet goes to the faucet first. The crown's inline ask does not count: it
+   * funds the new wallet itself and keeps the trade on screen.
    */
   walletsCreated: number
   portfolio: PositionsResponse | undefined
@@ -68,8 +76,9 @@ interface WalletState {
   /**
    * Runs `send` with the burner once the 18+ box is ticked: at once when it already was. When
    * the gate has to create the burner first, only a `faucet` action goes ahead (`afterGate`).
+   * `affirmedHere`: the crown's own box was ticked for this action, so no dialog opens.
    */
-  withAge: (send: Send, action?: GateAction) => void
+  withAge: (send: Send, action?: GateAction, affirmedHere?: boolean) => void
   /** Shows the 18+ gate; ticking it creates the burner. */
   openGate: () => void
   /** Starts Claim all (through the gate); does nothing while a run is in flight. */
@@ -81,10 +90,11 @@ interface WalletState {
   /** What stopped the last Claim all run, if anything. */
   claimError: unknown
   /**
-   * Asks the faucet for test mUSDC for the burner, through the 18+ gate; refreshes the balance
-   * after it lands. One request at a time. The wallet sheet and the trade panel both use it.
+   * Asks the faucet for play mUSDC for the burner, through the 18+ gate; refreshes the balance
+   * after it lands. One request at a time. The wallet sheet and the trade panel both use it; the
+   * crown passes `affirmedHere` when its own box was ticked, which also creates a missing burner.
    */
-  requestFaucet: () => void
+  requestFaucet: (affirmedHere?: boolean) => void
   /** A faucet request is in flight. */
   funding: boolean
   /** What the last faucet request added, until the next one starts. */
@@ -100,11 +110,6 @@ const SAVE_FAILED = 'This browser refused to save the wallet. Try again.'
 interface Opened {
   store: KeyStore
   ephemeral: boolean
-}
-
-interface Pending {
-  send: Send
-  action: GateAction
 }
 
 interface ClaimRun {
@@ -125,85 +130,92 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     claimed: [],
     error: undefined,
   })
-  // What the gate continues once the box is ticked (one at a time; a new ask replaces it).
   const [fund, setFund] = useState<{ busy: boolean; note?: string; error?: unknown }>({
     busy: false,
   })
   const fundBusy = useRef(false)
-  const pending = useRef<Pending | null>(null)
+  // What the gate continues once the box is ticked (one at a time; a new ask replaces it).
+  const gate = useMemo(() => createAgeGate(), [])
   const claimFlight = useMemo(() => singleFlight(), [])
 
-  const ask = useCallback((next: Pending | null, error?: string) => {
-    pending.current = next
+  const show = useCallback((error?: string) => {
     setGateError(error)
     setGateOpen(true)
   }, [])
+
+  /** The dialog with nothing waiting behind it ("Set up wallet", Import without the box). */
+  const ask = useCallback(() => {
+    gate.askOnly()
+    show()
+  }, [gate, show])
 
   useEffect(() => {
     const o = openKeyStore(() => window.localStorage)
     setOpened(o)
     setAgeOk(ageAffirmed(o.store))
-    // A first visit creates nothing: the gate asks, and its confirm creates the burner.
-    if (walletGate(o.store) === 'ask-new') {
-      ask(null)
-    } else {
-      try {
-        setKeypair(ensureBurner(o.store))
-      } catch (err) {
-        ask(null, err instanceof AgeRequired ? undefined : SAVE_FAILED)
-      }
-    }
+    // R5: a page load never asks. A first visit has no burner until an action asks.
+    setKeypair(loadWallet(o.store))
     // Another tab imported, created or removed the key, or ticked the box: follow it, so two
-    // tabs never sign with different wallets. Reads only; a removed burner shows the gate, and
-    // a gate left open here closes once that tab confirmed (unless an action waits here).
+    // tabs never sign with different wallets. Reads only. A removed burner waits for the next
+    // action to ask; a gate left open here closes once that tab confirmed (unless an action
+    // waits here).
     const onStorage = (e: StorageEvent) => {
       if (o.ephemeral || e.storageArea !== window.localStorage) return
       if (e.key !== null && e.key !== BURNER_KEY && e.key !== AGE_KEY) return
       const kp = peekBurner(o.store)
       setKeypair(kp)
       setAgeOk(ageAffirmed(o.store))
-      if (kp === null) ask(null)
-      else if (gateClosesOnSync(o.store, pending.current !== null)) setGateOpen(false)
+      if (kp !== null && gateClosesOnSync(o.store, gate.waiting())) setGateOpen(false)
     }
     window.addEventListener('storage', onStorage)
     return () => window.removeEventListener('storage', onStorage)
-  }, [ask])
+  }, [gate])
 
   const onConfirm = useCallback(() => {
     if (!opened) return
-    let kp: Keypair
-    let created: boolean
+    let r: { keypair: Keypair; created: boolean }
     try {
-      created = peekBurner(opened.store) === null
-      affirmAge(opened.store)
-      kp = ensureBurner(opened.store)
+      // A new wallet holds nothing yet: a waiting trade or claim is dropped, the faucet goes.
+      r = gate.confirm(opened.store)
     } catch {
       setAgeOk(ageAffirmed(opened.store))
       setGateError(SAVE_FAILED)
       return
     }
     setAgeOk(true)
-    setKeypair(kp)
+    setKeypair(r.keypair)
     setGateOpen(false)
-    if (created) setWalletsCreated((n) => n + 1)
-    const next = pending.current
-    pending.current = null
-    // A new wallet holds nothing yet: a trade or a claim cannot succeed, the faucet can.
-    if (next && afterGate(next.action, created) === 'continue') next.send(kp)
-  }, [opened])
+    if (r.created) setWalletsCreated((n) => n + 1)
+  }, [opened, gate])
 
   const onCancel = useCallback(() => {
-    pending.current = null
+    gate.cancel()
     setGateOpen(false)
-  }, [])
+  }, [gate])
 
   const withAge = useCallback(
-    (send: Send, action: GateAction = 'trade') => {
-      // The stored flag is the truth (another tab may have changed it since the last render).
-      if (opened && keypair && ageAffirmed(opened.store)) send(keypair)
-      else ask({ send, action })
+    (send: Send, action: GateAction = 'trade', affirmedHere = false) => {
+      if (!opened) return
+      let out: GateOutcome
+      try {
+        // Strictly true: a click handler's event passed by mistake never counts as a tick.
+        out = gate.request(opened.store, keypair, send, action, affirmedHere === true)
+      } catch {
+        // Only an inline tick writes here: storage refused it, so the dialog says so.
+        setAgeOk(ageAffirmed(opened.store))
+        show(SAVE_FAILED)
+        return
+      }
+      if (out.ask) {
+        show()
+        return
+      }
+      // An inline tick set the flag and may have created the burner. The wallet sheet does not
+      // open for it: the crown that asked stays on screen.
+      setAgeOk(true)
+      setKeypair(out.keypair)
     },
-    [opened, keypair, ask],
+    [opened, keypair, gate, show],
   )
 
   const importKey = useCallback(
@@ -220,7 +232,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       } catch (err) {
         // Never a raw error for the age question: ask it instead.
         if (!(err instanceof AgeRequired)) throw err
-        ask(null)
+        ask()
         return false
       }
     },
@@ -252,22 +264,26 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     [claimFlight, refreshPortfolio],
   )
 
-  const requestFaucet = useCallback(() => {
-    withAge((kp) => {
-      if (fundBusy.current) return
-      fundBusy.current = true
-      setFund({ busy: true })
-      requestFunds(api, kp.publicKey.toBase58())
-        .then((note) => {
-          setFund({ busy: false, note })
-          refreshPortfolio()
-        })
-        .catch((error: unknown) => setFund({ busy: false, error }))
-        .finally(() => {
-          fundBusy.current = false
-        })
-    }, 'faucet')
-  }, [withAge, refreshPortfolio])
+  const requestFaucet = useCallback(
+    (affirmedHere = false) => {
+      const fundIt = (kp: Keypair) => {
+        if (fundBusy.current) return
+        fundBusy.current = true
+        setFund({ busy: true })
+        requestFunds(api, kp.publicKey.toBase58())
+          .then((note) => {
+            setFund({ busy: false, note })
+            refreshPortfolio()
+          })
+          .catch((error: unknown) => setFund({ busy: false, error }))
+          .finally(() => {
+            fundBusy.current = false
+          })
+      }
+      withAge(fundIt, 'faucet', affirmedHere === true)
+    },
+    [withAge, refreshPortfolio],
+  )
 
   const startClaims = useCallback(() => {
     if (!claimFlight.running()) withAge(runClaims, 'claim')
@@ -285,7 +301,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       exportKey: () => (keypair ? exportBurner(keypair) : ''),
       importKey,
       withAge,
-      openGate: () => ask(null),
+      openGate: ask,
       startClaims,
       claiming: claimRun.claiming,
       claimed: claimRun.claimed,

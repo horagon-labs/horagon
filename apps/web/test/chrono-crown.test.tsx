@@ -35,6 +35,7 @@ function trade(over: Partial<Trade> = {}): Trade {
     failedAction: 'buy',
     shownError: undefined,
     fundNoteHidden: false,
+    ageNeeded: false,
     send: noop,
     ...over,
   }
@@ -212,9 +213,28 @@ describe('CrownPanel (spec 3.2, 5.5)', () => {
   it('sets up a wallet with a plain button, not a hold (M12)', () => {
     const html = panel({ ready: 'no-wallet', balance: undefined })
     expect(html).toMatch(
-      /<button type="button" class="min-h-11[^"]*">Set up wallet to trade<\/button>/,
+      /<button type="button" class="min-h-11[^"]*">Get 1,000 play mUSDC to start<\/button>/,
     )
     expect(html).not.toContain('hold-safe')
+  })
+
+  it('asks 18+ inline above the set-up button, which stays off until the tick (R5)', () => {
+    const html = panel({ ready: 'no-wallet', balance: undefined, ageNeeded: true })
+    const box = html.indexOf('I am 18 or older')
+    const button = html.indexOf('Get 1,000 play mUSDC to start')
+    expect(html).toContain('Horagon is play money on Solana devnet. No real value. No prizes.')
+    expect(box).toBeGreaterThan(0)
+    expect(button).toBeGreaterThan(box)
+    expect(html).toMatch(/<button type="button" disabled=""[^>]*>Get 1,000 play mUSDC to start/)
+    expect(html).toMatch(/<input type="checkbox"(?![^>]*checked)[^>]*>/)
+  })
+
+  it('asks 18+ inline for a stored burner never asked, and holds the Buy until the tick', () => {
+    const html = panel({ ageNeeded: true })
+    expect(html).toContain('I am 18 or older')
+    expect(html).toMatch(/<button type="button" disabled=""[^>]*class="hold-safe/)
+    expect(panel()).not.toContain('I am 18 or older')
+    expect(panel()).not.toMatch(/<button type="button" disabled=""[^>]*class="hold-safe/)
   })
 
   it('turns Max off for a balance of zero as well as an unknown one (M15)', () => {

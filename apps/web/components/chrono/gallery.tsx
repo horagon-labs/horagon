@@ -168,6 +168,7 @@ function useDemoTrade(): Trade & { sent: number } {
     failedAction: 'buy',
     shownError: undefined,
     fundNoteHidden: true,
+    ageNeeded: false,
     send: () => setSent((n) => n + 1),
     sent,
   }
@@ -226,6 +227,7 @@ const PUSHER_SAMPLES: [string, Partial<PusherInput>][] = [
   ['closing', { state: 'closing', secsLeft: 252 }],
   ['halted', { state: 'halted' }],
   ['no wallet', { ready: 'no-wallet', balance: undefined }],
+  ['empty wallet', { balance: '0' }],
   ['closed', { state: 'closed', secsLeft: 0 }],
 ]
 

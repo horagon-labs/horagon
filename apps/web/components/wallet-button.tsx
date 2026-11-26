@@ -4,7 +4,7 @@
 // the faucet comes first. The YourHour chip opens it at the positions (Chronometer spec 3.2).
 import { useEffect, useRef, useState } from 'react'
 import { shortKey, usdc } from '../lib/format'
-import { readyHint, replacePrompt } from '../lib/wallet-copy'
+import { FAUCET_BUTTON, readyHint, replacePrompt } from '../lib/wallet-copy'
 import { AgeCheckbox } from './age-dialog'
 import { FeelToggles } from './chrono/feel-toggles'
 import { YourHour } from './chrono/your-hour'
@@ -122,10 +122,10 @@ export function WalletButton() {
           <button
             type="button"
             disabled={funding}
-            onClick={requestFaucet}
+            onClick={() => requestFaucet()}
             className="min-h-11 w-full rounded-card bg-lume-300 py-2 font-semibold text-enamel-950 disabled:opacity-50"
           >
-            {funding ? 'Requesting…' : 'Get test mUSDC'}
+            {funding ? 'Requesting…' : FAUCET_BUTTON}
           </button>
           {note && <p className="text-13 text-lume-300">{note}</p>}
           {fundNote && <p className="text-13 text-lume-300">{fundNote}</p>}
