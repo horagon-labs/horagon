@@ -1,6 +1,14 @@
 import { Keypair } from '@solana/web3.js'
 import { describe, expect, it } from 'vitest'
-import { afterGate, createAgeGate, gateClosesOnSync, loadWallet, walletGate } from '../lib/age-gate'
+import {
+  afterGate,
+  createAgeGate,
+  type GateOutcome,
+  type Go,
+  gateClosesOnSync,
+  loadWallet,
+  walletGate,
+} from '../lib/age-gate'
 import {
   AGE_KEY,
   affirmAge,
@@ -155,6 +163,11 @@ describe('createAgeGate (R5: ask at the first action, nothing sent before the ti
     const calls: string[] = []
     return { calls, send: (kp: Keypair) => void calls.push(kp.publicKey.toBase58()) }
   }
+  /** Runs what the gate let through, as WalletProvider does once its save went well. */
+  const run = <T extends GateOutcome | { go: Go }>(out: T): T => {
+    if (!('ask' in out) || !out.ask) out.go?.()
+    return out
+  }
 
   it.each(['trade', 'faucet', 'claim'] as const)(
     'asks on a first %s with no burner, and creates and sends nothing',
@@ -185,8 +198,30 @@ describe('createAgeGate (R5: ask at the first action, nothing sent before the ti
     const kp = loadWallet(store)
     const gate = createAgeGate()
     const s = sends()
-    expect(gate.request(store, kp, s.send, 'trade')).toMatchObject({ ask: false, created: false })
+    const out = gate.request(store, kp, s.send, 'trade')
+    expect(out).toMatchObject({ ask: false, created: false })
+    // The gate hands the send back; it never runs it itself.
+    expect(s.calls).toEqual([])
+    run(out)
     expect(s.calls).toEqual([kp?.publicKey.toBase58()])
+  })
+
+  it('never runs a send itself, so a send that throws is never taken for a refused save', () => {
+    const store = memoryStore()
+    affirmAge(store)
+    const kp = loadWallet(store)
+    const gate = createAgeGate()
+    const boom = () => {
+      throw new Error('send broke')
+    }
+    const out = gate.request(store, kp, boom, 'trade')
+    expect(out.ask).toBe(false)
+    expect(() => run(out)).toThrow('send broke')
+    const inline = gate.request(memoryStore(), null, boom, 'faucet', true)
+    expect(() => run(inline)).toThrow('send broke')
+    gate.request(store, null, boom, 'faucet')
+    const r = gate.confirm(memoryStore())
+    expect(() => run(r)).toThrow('send broke')
   })
 
   it('a cancel drops the waiting action: nothing is created or sent', () => {
@@ -205,7 +240,7 @@ describe('createAgeGate (R5: ask at the first action, nothing sent before the ti
     const gate = createAgeGate()
     const faucet = sends()
     gate.request(store, null, faucet.send, 'faucet')
-    const r = gate.confirm(store)
+    const r = run(gate.confirm(store))
     expect(r.created).toBe(true)
     expect(ageAffirmed(store)).toBe(true)
     expect(faucet.calls).toEqual([r.keypair.publicKey.toBase58()])
@@ -213,7 +248,7 @@ describe('createAgeGate (R5: ask at the first action, nothing sent before the ti
     const other = memoryStore()
     const trade = sends()
     gate.request(other, null, trade.send, 'trade')
-    gate.confirm(other)
+    expect(run(gate.confirm(other)).go).toBeNull()
     expect(trade.calls).toEqual([])
     expect(gate.waiting()).toBe(false)
   })
@@ -222,8 +257,8 @@ describe('createAgeGate (R5: ask at the first action, nothing sent before the ti
     const store = memoryStore()
     const gate = createAgeGate()
     const s = sends()
-    const out = gate.request(store, null, s.send, 'faucet', true)
-    expect(out.ask).toBe(false)
+    const out = run(gate.request(store, null, s.send, 'faucet', true))
+    expect(out).toMatchObject({ ask: false })
     expect(ageAffirmed(store)).toBe(true)
     expect(store.getItem(BURNER_KEY)).not.toBeNull()
     expect(s.calls).toHaveLength(1)
@@ -236,7 +271,7 @@ describe('createAgeGate (R5: ask at the first action, nothing sent before the ti
     store.setItem(BURNER_KEY, exportBurner(kp))
     const gate = createAgeGate()
     const s = sends()
-    expect(gate.request(store, kp, s.send, 'trade', true)).toMatchObject({ created: false })
+    expect(run(gate.request(store, kp, s.send, 'trade', true))).toMatchObject({ created: false })
     expect(s.calls).toEqual([kp.publicKey.toBase58()])
   })
 
@@ -248,7 +283,7 @@ describe('createAgeGate (R5: ask at the first action, nothing sent before the ti
     const refusing: KeyStore = { ...store, setItem: () => void raise() }
     expect(() => gate.confirm(refusing)).toThrow()
     expect(gate.waiting()).toBe(true)
-    gate.confirm(store)
+    run(gate.confirm(store))
     expect(s.calls).toHaveLength(1)
   })
 })

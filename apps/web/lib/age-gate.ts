@@ -75,17 +75,30 @@ interface Pending {
   action: GateAction
 }
 
-/** What a request did: it asks (the caller shows the question), or the burner went ahead. */
-export type GateOutcome = { ask: true } | { ask: false; keypair: Keypair; created: boolean }
+/**
+ * The action the gate lets through, for the caller to run once its own bookkeeping is done (and
+ * outside any catch of a save, R5 review finding 11); null when `afterGate` dropped it.
+ */
+export type Go = (() => void) | null
+
+/** What a request did: it asks (the caller shows the question), or the burner may go ahead. */
+export type GateOutcome = { ask: true } | { ask: false; keypair: Keypair; created: boolean; go: Go }
+
+const goWith =
+  (send: Send, keypair: Keypair): Go =>
+  () =>
+    send(keypair)
 
 /**
- * The gate's one waiting action and the rules around it, without React.
- * - `request` sends at once when the burner exists and the box was ticked. Otherwise it keeps
- *   the action and asks; a new request replaces the waiting one.
+ * The gate's one waiting action and the rules around it, without React. The gate saves (the
+ * flag, a new burner) but never sends itself: it hands back `go`, so an error a send throws is
+ * never taken for a refused save.
+ * - `request` lets the action go at once when the burner exists and the box was ticked.
+ *   Otherwise it keeps the action and asks; a new request replaces the waiting one.
  * - `affirmedHere`: the crown's own box was ticked for this very action (inline ask). The flag
- *   is set, a missing burner is created, and the action goes ahead as `afterGate` says.
- * - `confirm` (the AgeDialog's box ticked) creates the burner and continues the waiting action.
- * Nothing is created or sent on any other path.
+ *   is set, a missing burner is created, and the action goes as `afterGate` says.
+ * - `confirm` (the AgeDialog's box ticked) creates the burner and lets the waiting action go.
+ * Nothing is created or let through on any other path.
  */
 export function createAgeGate() {
   let pending: Pending | null = null
@@ -101,13 +114,12 @@ export function createAgeGate() {
       if (affirmedHere) {
         pending = null
         const r = confirmAge(store)
-        if (afterGate(action, r.created) === 'continue') send(r.keypair)
-        return { ask: false, ...r }
+        const go = afterGate(action, r.created) === 'continue' ? goWith(send, r.keypair) : null
+        return { ask: false, ...r, go }
       }
       // The stored flag is the truth (another tab may have changed it since the last render).
       if (keypair && ageAffirmed(store)) {
-        send(keypair)
-        return { ask: false, keypair, created: false }
+        return { ask: false, keypair, created: false, go: goWith(send, keypair) }
       }
       pending = { send, action }
       return { ask: true }
@@ -124,12 +136,15 @@ export function createAgeGate() {
      * The box was ticked. Throws when storage refuses the flag or the burner; the action keeps
      * waiting then, so a second Continue can still carry it.
      */
-    confirm(store: KeyStore): { keypair: Keypair; created: boolean } {
+    confirm(store: KeyStore): { keypair: Keypair; created: boolean; go: Go } {
       const r = confirmAge(store)
       const next = pending
       pending = null
-      if (next && afterGate(next.action, r.created) === 'continue') next.send(r.keypair)
-      return r
+      const go =
+        next && afterGate(next.action, r.created) === 'continue'
+          ? goWith(next.send, r.keypair)
+          : null
+      return { ...r, go }
     },
   }
 }
