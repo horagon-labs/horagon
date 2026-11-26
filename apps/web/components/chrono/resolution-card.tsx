@@ -1,20 +1,22 @@
 // How the winner market resolved (spec 3.2): the milestones, the evidence link with its sha256,
-// and the market account, with the words resolution-panel.tsx has always used.
+// and the market account. The status line comes from the dial's state (R5), so it never says
+// "open" next to a dial that says trading closed.
 import type { GameDetail } from '@horagon/sdk'
+import { resolutionStatus } from '../../lib/chrono/copy'
 import { milestones } from '../../lib/chrono/resolution'
+import type { DialState } from '../../lib/chrono/state'
 import { explorerAddress, explorerTx } from '../../lib/format'
 
 const DOT = { done: 'bg-lume-300', now: 'bg-amber-400', next: 'bg-line' } as const
 
-export function ResolutionCard({ game }: { game: GameDetail }) {
+export function ResolutionCard({ game, state }: { game: GameDetail; state: DialState }) {
   const r = game.resolutions.find((x) => x.kind === 'winner')
   if (!r) return null
   return (
     <section className="space-y-3 rounded-card border border-brass-500/15 p-4 text-13">
-      <h2 className="text-11 uppercase tracking-[0.3em] text-brass-500">Resolution</h2>
-      <p>
-        Winner market: <span className="font-medium text-ivory-100">{r.status}</span>
-        {r.outcome && ` · ${r.outcome === 'yes' ? game.home : game.away} won`}
+      <h2 className="text-12 uppercase tracking-[0.3em] text-brass-500">Resolution</h2>
+      <p className="font-medium text-ivory-100" data-status>
+        {resolutionStatus(state, game, r.outcome)}
       </p>
       <ol className="space-y-1">
         {milestones(r).map((m) => (
@@ -51,10 +53,10 @@ export function ResolutionCard({ game }: { game: GameDetail }) {
             rel="noreferrer"
             className="inline-flex min-h-11 items-center underline"
           >
-            Evidence JSON
+            Result evidence (JSON)
           </a>
           {r.evidenceHash && (
-            <span className="ml-2 break-all font-mono text-11 text-ash-400">
+            <span className="ml-2 break-all font-mono text-12 text-ash-400">
               sha256 {r.evidenceHash}
             </span>
           )}
@@ -67,7 +69,7 @@ export function ResolutionCard({ game }: { game: GameDetail }) {
           rel="noreferrer"
           className="inline-flex min-h-11 items-center underline"
         >
-          Market account
+          Market on Solana Explorer
         </a>
         {r.createSig && (
           <a

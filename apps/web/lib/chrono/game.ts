@@ -3,7 +3,14 @@
 // state has loaded; tip-off - 60 min stands in until then, as on the board.
 import { effectiveTime, type Game, type MarketSummary, type Outcome } from '@horagon/sdk'
 import { timeLeftFraction } from './geometry'
-import { type DialState, deriveDialState, dialLabel, needlePrice, secsToClose } from './state'
+import {
+  type DialState,
+  deriveDialState,
+  dialLabel,
+  isTrading,
+  needlePrice,
+  secsToClose,
+} from './state'
 import { PRE_OPEN_SECS } from './tracks'
 
 export interface GameDial {
@@ -18,7 +25,10 @@ export interface GameDial {
   label: string
 }
 
-type GameFields = Pick<Game, 'status' | 'home' | 'modelProb' | 'scheduledTipoff'>
+type GameFields = Pick<
+  Game,
+  'status' | 'home' | 'away' | 'homeScore' | 'awayScore' | 'modelProb' | 'scheduledTipoff'
+>
 
 export function gameDial(
   game: GameFields,
@@ -39,19 +49,18 @@ export function gameDial(
       )
     : 1
   const label = dialLabel({
-    team: game.home,
+    game,
+    outcome: market?.outcome ?? null,
     price,
     modelProb: game.modelProb,
     state,
     secsLeft,
-    gameStatus: game.status,
   })
   return { state, price, timeLeft, secsLeft, label }
 }
 
 /** The crown trades in these states; Sell on the PositionCard shows only then. */
-export const canTrade = (state: DialState): boolean =>
-  state === 'live' || state === 'closing' || state === 'pre'
+export const canTrade = (state: DialState): boolean => isTrading(state)
 
 /**
  * The crown, inline or as the sheet, stays while the market trades, and also while a send is in

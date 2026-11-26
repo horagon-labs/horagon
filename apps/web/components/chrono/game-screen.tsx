@@ -6,6 +6,7 @@ import type { GameDetail, GameHistory } from '@horagon/sdk'
 import Link from 'next/link'
 import type { ReactNode } from 'react'
 import { winnerOf } from '../../lib/chrono/board'
+import { dialCaption } from '../../lib/chrono/copy'
 import type { GameDial } from '../../lib/chrono/game'
 import { findRuns, latestRun } from '../../lib/chrono/runs'
 import { Dial } from './dial'
@@ -29,7 +30,7 @@ export interface GameScreenProps {
 /** The failing-poll line (spec 4.4), on the screen, the loading face and the crown. */
 export function Reconnecting({ stale }: { stale: boolean }) {
   return stale ? (
-    <p role="status" className="text-center font-mono text-11 text-red-400">
+    <p role="status" className="text-center font-mono text-12 text-red-400">
       Reconnecting…
     </p>
   ) : null
@@ -50,7 +51,7 @@ export function GameScreen(p: GameScreenProps) {
             modelProb={game.modelProb}
             timeLeft={dial.timeLeft}
             state={dial.state}
-            team={game.home}
+            caption={dialCaption(dial.state, game, winner?.outcome ?? null)}
             label={dial.label}
             detail={stateLine(dial.state, game, dial.secsLeft, p.now)}
             liveDot={game.status === 'live'}
@@ -64,7 +65,7 @@ export function GameScreen(p: GameScreenProps) {
         </div>
         <div className="space-y-6" data-column="right">
           {p.right}
-          <ResolutionCard game={game} />
+          <ResolutionCard game={game} state={dial.state} />
         </div>
       </div>
       <details className="rounded-card border border-line p-4 text-13">
@@ -81,7 +82,7 @@ export function GameScreen(p: GameScreenProps) {
   )
 }
 
-/** First load: the dial frame at full size with the needle at 12 o'clock (spec 4.4). */
+/** First load: the dial frame at full size, with no needle and no number yet (R5). */
 export function GameLoading({ stale }: { stale: boolean }) {
   return (
     <div className="space-y-3">
@@ -93,7 +94,6 @@ export function GameLoading({ stale }: { stale: boolean }) {
         modelProb={null}
         timeLeft={1}
         state="pre"
-        team=""
         label="Loading game"
         className="mx-auto max-w-md"
       />
@@ -110,7 +110,6 @@ export function NoGame() {
         modelProb={null}
         timeLeft={0}
         state="void"
-        team=""
         detail="No game here"
         label="No game here"
         className="mx-auto max-w-md"

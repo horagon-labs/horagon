@@ -64,7 +64,7 @@ export function Positions({
           href={explorerTx(sig)}
           target="_blank"
           rel="noreferrer"
-          className="flex min-h-11 items-center text-11 text-brass-400 underline"
+          className="flex min-h-11 items-center text-12 text-brass-400 underline"
         >
           Claimed: view transaction
         </a>

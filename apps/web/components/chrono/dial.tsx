@@ -3,6 +3,7 @@
 // draws; every decision about what to show arrives in props.
 import * as m from 'motion/react-m'
 import { useEffect, useId, useRef, useState } from 'react'
+import { liveNumber } from '../../lib/chrono/copy'
 import { useMotionReduced } from '../../lib/chrono/feel'
 import { arcPath, polar, priceToAngle } from '../../lib/chrono/geometry'
 import type { DialState } from '../../lib/chrono/state'
@@ -28,11 +29,17 @@ export interface DialProps {
   ghostShake?: boolean
   /** The full spoken sentence (spec 2.6). */
   label: string
-  /** The home team, for "CLE wins"; empty on a face with no game (loading, not found). */
-  team: string
+  /**
+   * What the number means (R5, lib/chrono/copy.ts): "CLE to win", "Final · CLE lost · result
+   * pending", "Resolved: MEM won". None on a face with no game (loading, not found).
+   */
+  caption?: string
   detail?: string
   liveDot?: boolean
-  /** First load: the frame at full size, the needle at 12 o'clock (spec 4.4). */
+  /**
+   * First load: the frame at full size with no needle and no number (R5), so the face never
+   * reads as a price of 50 before the data is in.
+   */
   loading?: boolean
   /** Polls failing: a thin red line on the bezel (spec 4.4). */
   stale?: boolean
@@ -68,6 +75,9 @@ export function Dial(p: DialProps) {
   const price = p.state === 'void' ? null : p.price
   const ghost = p.loading ? null : (p.ghostPrice ?? null)
   const blink = p.state === 'closing' ? 'animate-blink' : ''
+  // The number is a chance while the market trades; once it stops, it greys like the needle.
+  const tone = liveNumber(p.state) ? 'text-ivory-100' : 'text-ash-400'
+  const shown = !p.loading && price !== null && Number.isFinite(price)
   return (
     <div
       role="img"
@@ -181,11 +191,11 @@ export function Dial(p: DialProps) {
             <line x1={C} y1={C} x2={C} y2={C - 70} strokeWidth={1.5} strokeDasharray="4 3" />
           </Needle>
         )}
-        {(p.loading || price !== null) && (
+        {!p.loading && price !== null && (
           <Needle
-            angle={p.loading || price === null ? 0 : priceToAngle(price)}
+            angle={priceToAngle(price)}
             kind="price"
-            className={`${needleClass(p.state)} ${p.loading || p.state === 'proposed' ? 'opacity-40' : ''}`}
+            className={`${needleClass(p.state)} ${p.state === 'proposed' ? 'opacity-40' : ''}`}
           >
             <line x1={C} y1={C + 12} x2={C} y2={C - 72} strokeWidth={2.5} strokeLinecap="round" />
           </Needle>
@@ -224,17 +234,28 @@ export function Dial(p: DialProps) {
         aria-hidden="true"
         className="absolute inset-x-0 top-[54%] flex flex-col items-center gap-1 text-center"
       >
-        <RollingNumber
-          text={p.loading ? '—' : priceDigits(price)}
-          className="font-mono text-40 text-ivory-100 tabular-nums"
-        />
-        {p.team && (
-          <span className="flex items-center gap-1.5 text-11 uppercase tracking-[0.2em] text-brass-500">
-            {p.liveDot && <span className="size-1.5 rounded-full bg-lume-300" data-live />}
-            {p.team} wins
+        {p.loading ? (
+          <span className="block h-10 w-20 rounded-card bg-line/60" data-skeleton />
+        ) : (
+          // Resolved: the caption says who won; a locked 100 or 0 beside it would read as the
+          // home side's number next to an away win.
+          p.state !== 'resolved' && (
+            <span className={`flex items-baseline font-mono tabular-nums ${tone}`}>
+              <RollingNumber text={priceDigits(price)} className="font-mono text-40 tabular-nums" />
+              {shown && <span className="text-19">%</span>}
+            </span>
+          )
+        )}
+        {p.caption && (
+          <span
+            className="flex max-w-[70%] items-center justify-center gap-1.5 text-12 uppercase tracking-[0.16em] text-brass-500"
+            data-caption
+          >
+            {p.liveDot && <span className="size-1.5 shrink-0 rounded-full bg-lume-300" data-live />}
+            {p.caption}
           </span>
         )}
-        {p.detail && <span className="font-mono text-11 text-ash-400">{p.detail}</span>}
+        {p.detail && <span className="font-mono text-12 text-ash-400">{p.detail}</span>}
       </div>
     </div>
   )

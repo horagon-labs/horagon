@@ -1,15 +1,13 @@
 'use client'
-// One game in the board's list (spec 3.2, L1 style): MiniDial, teams and score, the price, the
-// latest close in ET and a diamond for your position. The whole row is one link to the game.
+// One game in the board's list (spec 3.2, L1 style): MiniDial, teams and score, whose chance the
+// number is and the number in percent (R5), the latest close in ET while it trades (R1) and a
+// diamond for your position. The whole row is one link to the game.
 import Link from 'next/link'
-import { type BoardItem, itemLabel } from '../../lib/chrono/board'
-import type { DialState } from '../../lib/chrono/state'
+import { type BoardItem, itemLabel, rowWords } from '../../lib/chrono/board'
+import { liveNumber } from '../../lib/chrono/copy'
 import { etClock } from '../../lib/chrono/time'
-import { cents, gameClock } from '../../lib/format'
+import { gameClock } from '../../lib/format'
 import { MiniDial } from './mini-dial'
-
-/** A market in these states still trades: it closes at the final buzzer, at the latest at end_ts. */
-const TRADING: ReadonlySet<DialState> = new Set(['pre', 'live', 'closing'])
 
 export function DialRow(p: {
   item: BoardItem
@@ -19,6 +17,9 @@ export function DialRow(p: {
 }) {
   const { item } = p
   const g = item.game
+  const words = rowWords(item)
+  // Lume while the number is a live chance; ash once trading stopped (audit section 3).
+  const tone = liveNumber(item.state) ? 'text-lume-300' : 'text-ash-400'
   return (
     <Link
       href={`/game/${encodeURIComponent(g.id)}`}
@@ -41,17 +42,16 @@ export function DialRow(p: {
             : `${g.awayScore}–${g.homeScore} · ${gameClock(g)}`}
         </span>
       </span>
-      <span className="text-right">
-        <span className="block font-mono text-19 text-lume-300 tabular-nums">
-          {item.price === null ? '—' : cents(item.price)}
-        </span>
-        <span className="block font-mono text-11 text-ash-400">
-          {!item.market
-            ? `opens ${etClock(item.interval.start)}`
-            : TRADING.has(item.state)
-              ? `latest ${etClock(item.interval.end)}`
-              : 'closed'}
-        </span>
+      <span className="shrink-0 text-right">
+        {words.subject && (
+          <span className="block text-12 text-brass-400" data-subject>
+            {words.subject}
+          </span>
+        )}
+        {words.value && (
+          <span className={`block font-mono text-19 tabular-nums ${tone}`}>{words.value}</span>
+        )}
+        {words.note && <span className="block font-mono text-12 text-ash-400">{words.note}</span>}
       </span>
       {item.held && <span className="text-15 text-lume-300">◆</span>}
     </Link>

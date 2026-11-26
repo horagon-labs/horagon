@@ -62,21 +62,33 @@ describe('milestones (spec 3.2, 4.3)', () => {
 describe('ResolutionCard (spec 3.2)', () => {
   it('links the evidence with its sha256 and the market account', () => {
     const html = renderToStaticMarkup(
-      <ResolutionCard game={detail({ resolutions: [resolution()] })} />,
+      <ResolutionCard game={detail({ resolutions: [resolution()] })} state="proposed" />,
     )
-    expect(html).toContain('Evidence JSON')
+    expect(html).toContain('Result evidence (JSON)')
     expect(html).toContain(`sha256 ${'a'.repeat(64)}`)
-    expect(html).toContain('Market account')
+    expect(html).toContain('Market on Solana Explorer')
+    expect(html).toContain('Result proposed: the challenge window is open')
     expect(html).toContain('data-mark="now"')
     expect(html).toContain('Challenge window')
   })
 
   it('names the winner once there is an outcome, and shows nothing without a resolution', () => {
     const won = resolution({ status: 'finalized', outcome: 'yes', finalizeSig: SIG })
-    expect(
-      renderToStaticMarkup(<ResolutionCard game={detail({ resolutions: [won] })} />),
-    ).toContain(' · CLE won')
-    expect(renderToStaticMarkup(<ResolutionCard game={detail()} />)).toBe('')
+    const final = detail({ status: 'final', resolutions: [won] })
+    expect(renderToStaticMarkup(<ResolutionCard game={final} state="resolved" />)).toContain(
+      'Resolved: CLE won',
+    )
+    expect(renderToStaticMarkup(<ResolutionCard game={detail()} state="live" />)).toBe('')
+  })
+
+  it('says the status from the dial state, never the raw "open" of a closed market (R5)', () => {
+    const open = resolution({ status: 'open' })
+    const final = detail({ status: 'final', homeScore: 105, awayScore: 107, resolutions: [open] })
+    const html = renderToStaticMarkup(<ResolutionCard game={final} state="closed" />)
+    expect(html).toContain(
+      'Final MEM 107–105 CLE. The result goes on-chain after a box-score check.',
+    )
+    expect(html).not.toContain('Winner market')
   })
 })
 

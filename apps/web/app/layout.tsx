@@ -7,6 +7,7 @@ import { Wordmark } from '../components/chrono/wordmark'
 import { PlayMoneyBanner } from '../components/play-money-banner'
 import { WalletProvider } from '../components/wallet'
 import { WalletButton } from '../components/wallet-button'
+import { SITE_DESCRIPTION, SITE_NAME, SITE_TITLE, siteUrl } from '../lib/meta'
 import './globals.css'
 
 // Self-hosted at build time, so no layout shift (spec 2.2).
@@ -14,8 +15,19 @@ const grotesk = Space_Grotesk({ subsets: ['latin'], variable: '--font-grotesk', 
 const mono = JetBrains_Mono({ subsets: ['latin'], variable: '--font-jetbrains', display: 'swap' })
 
 export const metadata: Metadata = {
-  title: 'Horagon: game-day NBA markets',
-  description: 'Play-money in-game NBA prediction markets on Solana devnet.',
+  // Absolute share links (og:image, og:url) on the public site; localhost in a local build, and
+  // Next's own default in a production build without HORAGON_PUBLIC_URL.
+  metadataBase: siteUrl(process.env.HORAGON_PUBLIC_URL),
+  title: { default: SITE_TITLE, template: `%s · ${SITE_NAME}` },
+  description: SITE_DESCRIPTION,
+  applicationName: SITE_NAME,
+  openGraph: {
+    title: SITE_TITLE,
+    description: SITE_DESCRIPTION,
+    siteName: SITE_NAME,
+    type: 'website',
+  },
+  twitter: { card: 'summary_large_image', title: SITE_TITLE, description: SITE_DESCRIPTION },
 }
 
 export const viewport: Viewport = {

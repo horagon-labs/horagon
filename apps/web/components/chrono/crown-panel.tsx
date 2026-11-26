@@ -2,14 +2,22 @@
 // The crown's content (spec 3.2, 5.5): the bezel around a dial whose ghost needle follows the
 // newest quote, the numbers, presets and the amount field, and the HoldButton. It only draws a
 // Trade from useTrade; the same panel is the mobile sheet and the desktop right column.
+// A device that never ticked the 18+ box is asked here, inline above the send button (R5): the
+// button stays off until the box is ticked, and nothing is created or sent before that. Until the
+// wallet's storage has opened (the server render, the first browser render) the wallet part is a
+// neutral "Loading your balance…" line: a returning visitor never sees the set-up state flash.
 import { type GameDetail, type MarketSummary, parseAmount } from '@horagon/sdk'
+import { useState } from 'react'
 import { buySteps, percentOf, sellSteps, stepIndex } from '../../lib/chrono/bezel'
+import { dialCaption } from '../../lib/chrono/copy'
 import { errorEffect, requoteShown, retryLeft } from '../../lib/chrono/errors'
 import type { DialState } from '../../lib/chrono/state'
-import { cents, explorerTx, usdc } from '../../lib/format'
+import { cents, explorerTx, percent, usdc } from '../../lib/format'
 import { DEFAULT_SLIPPAGE_BPS } from '../../lib/trade'
 import { sendDisabled, sendText } from '../../lib/trade-view'
 import type { Trade } from '../../lib/use-trade'
+import { FAUCET_BUTTON, WALLET_LOADING } from '../../lib/wallet-copy'
+import { AgeCheckbox } from '../age-dialog'
 import { ErrorText } from '../error-text'
 import { Bezel } from './bezel'
 import { Dial } from './dial'
@@ -29,7 +37,8 @@ export interface CrownPanelProps {
   now: number
   funding: boolean
   fundNote: string | undefined
-  onFaucet: () => void
+  /** The faucet; `affirmedHere` when this crown's own 18+ box is ticked. */
+  onFaucet: (affirmedHere?: boolean) => void
   /**
    * The game poll is failing (spec 4.4): the crown's own dial shows it too, since the sheet
    * covers the big one on a phone.
@@ -44,6 +53,9 @@ export interface CrownPanelProps {
 
 export function CrownPanel(p: CrownPanelProps) {
   const t = p.trade
+  // The inline 18+ box (R5): asked only while the device never ticked it.
+  const [ticked, setTicked] = useState(false)
+  const blocked = t.ageNeeded && !ticked
   const buying = t.action === 'buy'
   const steps = buying ? buySteps(t.balance) : sellSteps(t.held?.shares)
   const q = t.quote.data ?? t.lastQuote
@@ -55,8 +67,7 @@ export function CrownPanel(p: CrownPanelProps) {
   const ghost = q && t.check.quote ? q.priceAfter : null
   const spendable = t.balance ? parseAmount(t.balance) > 0n : false
   const tone = t.side === 'home' ? 'lume' : 'brass'
-  const spoken = (x: number) => cents(x).replace('¢', ' cents')
-  const now = p.market.price === null ? 'no price yet' : spoken(p.market.price)
+  const now = p.market.price === null ? 'no price yet' : percent(p.market.price)
   const chip =
     'min-h-11 flex-1 rounded-card border border-line font-mono text-13 aria-pressed:border-lume-300 aria-pressed:text-lume-300 disabled:opacity-40'
   return (
@@ -98,13 +109,13 @@ export function CrownPanel(p: CrownPanelProps) {
           modelProb={p.game.modelProb}
           timeLeft={p.timeLeft}
           state={p.state}
-          team={p.game.home}
+          caption={dialCaption(p.state, p.game, p.market.outcome)}
           ghostPrice={ghost}
           ghostPending={t.quotePending}
           ghostShake={requote}
           stale={p.stale}
           detail={buying ? `${t.amount} mUSDC` : `${t.amount} shares`}
-          label={`${p.game.home} wins, ${now}${ghost === null ? '' : `, after this trade ${spoken(ghost)}`}`}
+          label={`${p.game.home} to win, ${now}${ghost === null ? '' : `, after this trade ${percent(ghost)}`}`}
         />
       </Bezel>
       {q && t.check.quote && (
@@ -125,7 +136,9 @@ export function CrownPanel(p: CrownPanelProps) {
           <dd className="text-right text-amber-400">{(q.priceImpactBps / 100).toFixed(2)}%</dd>
           <dt className="font-sans text-ash-400">Fee (2%)</dt>
           <dd className="text-right">{usdc(q.feeUsdc)} mUSDC</dd>
-          <dt className="font-sans text-ash-400">Max slippage {DEFAULT_SLIPPAGE_BPS / 100}%</dt>
+          <dt className="font-sans text-ash-400">
+            Worst case (price moves {DEFAULT_SLIPPAGE_BPS / 100}%)
+          </dt>
           <dd className="text-right">at least {usdc(q.minOut)}</dd>
         </dl>
       )}
@@ -180,7 +193,7 @@ export function CrownPanel(p: CrownPanelProps) {
         />
         <span className="text-13 text-ash-400">{buying ? 'mUSDC' : 'shares'}</span>
       </label>
-      {buying && <p className="text-11 text-ash-400">Each share pays 1 mUSDC if {t.team} wins.</p>}
+      {buying && <p className="text-12 text-ash-400">Each share pays 1 mUSDC if {t.team} wins.</p>}
       {!t.check.ok && t.check.reason && (
         <p className="text-13 text-amber-400">
           {t.check.reason}
@@ -189,35 +202,49 @@ export function CrownPanel(p: CrownPanelProps) {
               {' '}
               <button
                 type="button"
-                disabled={p.funding}
-                onClick={p.onFaucet}
+                disabled={p.funding || blocked}
+                onClick={() => p.onFaucet(ticked)}
                 className="min-h-11 font-semibold underline disabled:opacity-50"
               >
-                {p.funding ? 'Requesting…' : 'Get test mUSDC'}
+                {p.funding ? 'Requesting…' : FAUCET_BUTTON}
               </button>
             </>
           )}
         </p>
       )}
       {p.fundNote && !t.fundNoteHidden && <p className="text-13 text-lume-300">{p.fundNote}</p>}
-      {t.ready === 'no-wallet' ? (
-        // Opening the 18+ gate sends nothing, so it takes one tap, not a hold.
-        <button
-          type="button"
-          onClick={t.send}
-          className={`min-h-11 w-full rounded-card px-4 text-15 font-semibold text-enamel-950 ${
-            tone === 'brass' ? 'bg-brass-500' : 'bg-lume-300'
-          }`}
+      {t.loaded && t.ageNeeded && <AgeCheckbox checked={ticked} onChange={setTicked} />}
+      {!t.loaded ? (
+        <p
+          className="flex min-h-11 items-center justify-center text-13 text-ash-400"
+          data-wallet-wait
         >
-          {label}
-        </button>
+          {WALLET_LOADING}
+        </p>
+      ) : t.ready === 'no-wallet' ? (
+        // Setting up a wallet trades nothing, so it takes one tap, not a hold.
+        <>
+          <button
+            type="button"
+            disabled={blocked || p.funding}
+            onClick={() => t.send(ticked)}
+            className={`min-h-11 w-full rounded-card px-4 text-15 font-semibold text-enamel-950 disabled:opacity-50 ${
+              tone === 'brass' ? 'bg-brass-500' : 'bg-lume-300'
+            }`}
+          >
+            {p.funding ? 'Getting play mUSDC…' : label}
+          </button>
+          <p className="text-12 text-ash-400">
+            Sets up a play wallet in this browser, then you hold to buy.
+          </p>
+        </>
       ) : (
         <HoldButton
           label={label}
           tone={tone}
-          disabled={wait > 0 || sendDisabled(t.ready, t.check.ok, t.stage)}
+          disabled={blocked || wait > 0 || sendDisabled(t.ready, t.check.ok, t.stage)}
           pending={t.stage !== null}
-          onConfirm={t.send}
+          onConfirm={() => t.send(ticked)}
         />
       )}
       {requote && (

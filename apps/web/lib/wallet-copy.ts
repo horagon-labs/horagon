@@ -16,6 +16,18 @@ export function replacePrompt(ephemeral: boolean): string {
 export const WALLET_READY = 'Your play wallet is ready. Get play mUSDC from the faucet to start.'
 
 /**
+ * The faucet's button (audit 13: one CTA, no crypto jargon). The pm-AMM devnet faucet grants
+ * 1,000 mUSDC a claim (S5, lib/faucet.ts reports what it really added).
+ */
+export const FAUCET_BUTTON = 'Get 1,000 play mUSDC'
+
+/** The crown's wallet line before the browser storage has opened (server render, first render). */
+export const WALLET_LOADING = 'Loading your balance…'
+
+/** The crown's first button for a device with no wallet yet (R5): it creates one and funds it. */
+export const SET_UP_BUTTON = 'Get 1,000 play mUSDC to start'
+
+/**
  * The faucet hint for a burner this tab's gate just created, while it holds no mUSDC (or its
  * balance is not known yet); null otherwise.
  */

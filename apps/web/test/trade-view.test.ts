@@ -26,7 +26,7 @@ describe('trade view (Chronometer spec 3.3)', () => {
   })
 
   it('says what the send button does at each step', () => {
-    expect(sendText('no-wallet', null, 'buy', 'CLE')).toBe('Set up wallet to trade')
+    expect(sendText('no-wallet', null, 'buy', 'CLE')).toBe('Get 1,000 play mUSDC to start')
     expect(sendText('loading', null, 'buy', 'CLE')).toBe('Loading your balance…')
     expect(sendText('ready', 'confirming', 'buy', 'CLE')).toBe('Confirming…')
     expect(sendText('ready', null, 'buy', 'CLE')).toBe('Buy CLE')

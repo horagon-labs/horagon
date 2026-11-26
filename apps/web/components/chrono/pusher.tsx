@@ -1,11 +1,13 @@
 'use client'
 // The two buy buttons under the dial (spec 3.2): "Buy CLE 77¢" and "Buy MEM 23¢". On mobile a
 // button opens the crown for that side; on desktop it picks the side of the crown beside it.
-// A new or empty wallet gets the faucet button the wallet sheet already has.
+// An empty wallet gets the faucet button the wallet sheet already has; a visitor with no wallet
+// gets the buy buttons, and the crown sets the wallet up (R5).
 import type { Side } from '@horagon/sdk'
 import type { PusherMode } from '../../lib/chrono/pusher'
 import { cents } from '../../lib/format'
 import { sidePrice } from '../../lib/trade-view'
+import { FAUCET_BUTTON } from '../../lib/wallet-copy'
 
 export function Pusher(p: {
   mode: PusherMode
@@ -29,10 +31,10 @@ export function Pusher(p: {
       <button
         type="button"
         disabled={p.funding}
-        onClick={p.onFaucet}
+        onClick={() => p.onFaucet()}
         className="min-h-14 w-full rounded-card border border-lume-300/50 text-15 font-semibold text-lume-300 disabled:opacity-50"
       >
-        {p.funding ? 'Requesting…' : 'Get test mUSDC'}
+        {p.funding ? 'Requesting…' : FAUCET_BUTTON}
       </button>
     )
   }

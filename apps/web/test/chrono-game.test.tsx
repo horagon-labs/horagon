@@ -38,7 +38,7 @@ describe('gameDial (spec 4.2, 4.3)', () => {
       price: 0.77,
       timeLeft: 0.5,
       secsLeft: 3_730,
-      label: 'CLE wins, 77 cents, model 74, open until the final buzzer',
+      label: 'CLE to win, 77%, model 74%, open until the final buzzer',
     })
   })
 
@@ -63,7 +63,7 @@ describe('gameDial (spec 4.2, 4.3)', () => {
       price: null,
       timeLeft: 1,
       secsLeft: null,
-      label: 'CLE wins, no price yet, model 74, market opens 60 min before tip-off',
+      label: 'CLE to win, no price yet, model 74%, market opens 60 min before tip-off',
     })
   })
 
@@ -114,11 +114,12 @@ describe('GameScreen (spec 4.2)', () => {
 })
 
 describe('GameLoading and NoGame (spec 4.4)', () => {
-  it('holds the dial frame with the needle at 12 o’clock and no team', () => {
+  it('holds the dial frame with no needle, no number and no team (R5)', () => {
     const html = renderToStaticMarkup(<GameLoading stale={false} />)
-    expect(needle(html)).toBe('rotate(0 100 100)')
+    expect(needle(html)).toBeUndefined()
+    expect(html).toContain('data-skeleton')
     expect(html).toContain('aria-label="Loading game"')
-    expect(html).not.toContain(' wins')
+    expect(html).not.toContain(' to win')
   })
 
   it('shows a still face that says there is no game, with the way back', () => {
@@ -130,7 +131,7 @@ describe('GameLoading and NoGame (spec 4.4)', () => {
 })
 
 describe('MarketBlock (spec 3.2, 4.2)', () => {
-  it('offers the faucet before there is a wallet, then the positions, the crown in a sheet', () => {
+  it('offers Buy before there is a wallet, then the positions, the crown in a sheet (R5)', () => {
     const g = detail()
     const html = renderToStaticMarkup(
       <WalletProvider>
@@ -144,14 +145,20 @@ describe('MarketBlock (spec 3.2, 4.2)', () => {
         />
       </WalletProvider>,
     )
-    const faucet = html.indexOf('Get test mUSDC')
+    const buy = html.indexOf('>Buy CLE 77¢</button>')
     const sheet = html.indexOf('<dialog')
     const card = html.indexOf('Your position')
-    expect(faucet).toBeGreaterThanOrEqual(0)
-    expect(sheet).toBeGreaterThan(faucet)
+    expect(html).not.toContain('Get 1,000 play mUSDC</button>')
+    expect(buy).toBeGreaterThanOrEqual(0)
+    expect(sheet).toBeGreaterThan(buy)
     expect(card).toBeGreaterThan(sheet)
     expect(html).toContain('aria-label="Buy CLE"')
     expect(html).toContain('No positions yet.')
+    // The server render knows nothing of the wallet yet: no 18+ box and no set-up call to action
+    // that a returning visitor would see flash (R5 review finding 1).
+    expect(html).toContain('Loading your balance…')
+    expect(html).not.toContain('I am 18 or older')
+    expect(html).not.toContain('Get 1,000 play mUSDC to start')
   })
 })
 
@@ -172,8 +179,8 @@ describe('dev gallery (spec 6.2)', () => {
     expect(html).toContain('Demo sends: 0')
     expect(html).toContain('>Buy CLE 77¢</button>')
     expect(html).toContain('closes in 4:12')
-    expect(html).toContain('Get test mUSDC')
-    expect(html).toContain('Trading closed, waiting for the result')
+    expect(html).toContain('Get 1,000 play mUSDC')
+    expect(html).toContain('Trading closed. The result goes on-chain after a box-score check.')
     expect(html).toContain('<dialog aria-label="Buy CLE"')
   })
 })

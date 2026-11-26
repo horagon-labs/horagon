@@ -2,7 +2,7 @@
 // The Night dial (spec 3.2, 4.1): tonight on one 12-hour ET face, one arc per game on the ring
 // tracks.ts picks. The picture is hidden; a listbox of sr-only options carries the same games.
 import { type KeyboardEvent, type MouseEvent, useId, useState } from 'react'
-import { type BoardItem, itemLabel } from '../../lib/chrono/board'
+import { type BoardItem, itemLabel, rowWords } from '../../lib/chrono/board'
 import { arcPath, etClockAngle, polar } from '../../lib/chrono/geometry'
 import { keyStep } from '../../lib/chrono/keys'
 import {
@@ -14,7 +14,6 @@ import {
   segmentAngles,
   segments,
 } from '../../lib/chrono/tracks'
-import { cents } from '../../lib/format'
 import { stateLine } from './dial-look'
 
 const C = 100
@@ -58,6 +57,7 @@ export function NightDial(p: {
   const ids = labelIds(tracks, { selectedId: p.selectedId, hoverId: hover, now: p.now })
   const spots = labelSpots(tracks, ids, p.now)
   const focus = tracks.find((t) => t.item.id === ids[0])?.item
+  const focusWords = focus ? rowWords(focus) : null
   const angle = etClockAngle(p.now)
   const hand = polar(C, C, 92, angle)
   const hub = polar(C, C, HUB, angle)
@@ -162,7 +162,7 @@ export function NightDial(p: {
             y={s.y}
             textAnchor={s.anchor}
             dominantBaseline="middle"
-            className="fill-ivory-100 font-mono text-[7px]"
+            className="fill-ivory-100 font-mono text-[8px]"
           >
             {tracks.find((t) => t.item.id === s.id)?.item.game.home}
           </text>
@@ -191,7 +191,7 @@ export function NightDial(p: {
             x={C}
             y={C + 28}
             textAnchor="middle"
-            className="fill-ash-400 font-mono text-[8px]"
+            className="fill-ash-400 font-mono text-[9px]"
             data-overflow={overflow.length}
           >
             +{overflow.length}
@@ -203,15 +203,20 @@ export function NightDial(p: {
         className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-0.5 text-center"
       >
         <div className="flex max-w-[32%] flex-col items-center gap-0.5 text-center">
-          {focus ? (
+          {focus && focusWords ? (
             <>
-              <span className="text-11 uppercase tracking-[0.2em] text-brass-500">
+              <span className="text-12 uppercase tracking-[0.16em] text-brass-500">
                 {focus.game.away} @ {focus.game.home}
               </span>
-              <span className="font-mono text-24 text-ivory-100 tabular-nums">
-                {focus.price === null ? '—' : cents(focus.price)}
-              </span>
-              <span className="font-mono text-11 text-ash-400">
+              {focusWords.value && (
+                <span className="font-mono text-24 text-ivory-100 tabular-nums">
+                  {focusWords.value}
+                </span>
+              )}
+              {focusWords.subject && (
+                <span className="text-12 text-brass-400">{focusWords.subject}</span>
+              )}
+              <span className="font-mono text-12 text-ash-400">
                 {stateLine(focus.state, focus.game, focus.secsLeft, p.now)}
               </span>
             </>

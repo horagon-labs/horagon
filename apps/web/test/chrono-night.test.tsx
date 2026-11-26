@@ -56,14 +56,14 @@ describe('keyStep (spec 2.6)', () => {
 describe('itemLabel (spec 2.6)', () => {
   it('reads the score, the dial sentence and your position', () => {
     expect(itemLabel(boardItem(game(), held, NOW))).toBe(
-      'MEM 78, CLE 84. CLE wins, 77 cents, model 74, open until the final buzzer. You hold a position',
+      'MEM 78, CLE 84. CLE to win, 77%, model 74%, open until the final buzzer. You hold a position',
     )
   })
 
   it('reads a game without a market as not open yet', () => {
     const phx = items.find((i) => i.id === 'nba-401810004')
     expect(phx && itemLabel(phx)).toBe(
-      'DEN at PHX. PHX wins, no price yet, model 44, market opens 60 min before tip-off',
+      'DEN at PHX. PHX to win, no price yet, model 44%, market opens 60 min before tip-off',
     )
   })
 })
@@ -96,7 +96,26 @@ describe('NightDial (spec 3.2, 4.1)', () => {
   it('summarises the game that closes soonest when nothing is selected', () => {
     const html = night()
     expect(html).toContain('>BOS @ MIL<')
-    expect(html).toContain('41¢')
+    expect(html).toContain('>41%<')
+    expect(html).toContain('>MIL to win<')
+  })
+
+  it('passes over a game halted at the final buzzer for one that still trades (R1)', () => {
+    const buzzer = evening().map((g) =>
+      g.id === 'nba-401810003'
+        ? {
+            ...g,
+            status: 'final' as const,
+            markets: [market({ ...g.markets[0], status: 'halted' })],
+          }
+        : g,
+    )
+    const html = night({ items: buzzer.map((g) => boardItem(g, undefined, NOW)) })
+    expect(html).toContain('>MEM @ CLE<')
+    expect(html).toContain('>CLE to win<')
+    expect(html).not.toContain('>BOS @ MIL<')
+    // Its arc reads closed in ash, never the amber of an emergency halt.
+    expect(html).not.toContain('stroke-amber-400')
   })
 
   it('draws one arc per segment on its ring and lights your game in lume', () => {
@@ -164,10 +183,12 @@ describe('DialRow (spec 3.2)', () => {
     expect(row).toContain(`aria-label="${itemLabel(cle)}"`)
   })
 
-  it('shows the mini dial, the score, the price in mono 19 px, the latest ET close and your diamond', () => {
+  it('shows the mini dial, the score, whose chance, the % in mono 19 px, the latest ET close and your diamond', () => {
     expect(row).toContain('viewBox="0 0 100 100"')
     expect(row).toContain('78–84 · Q3 4:12')
-    expect(row).toContain('font-mono text-19 text-lume-300 tabular-nums">77¢')
+    expect(row).toContain('data-subject="true">CLE to win</span>')
+    expect(row).toContain('font-mono text-19 tabular-nums text-lume-300">77%')
+    expect(row).not.toContain('¢')
     expect(row).toContain('latest 10:10 PM ET')
     expect(row).not.toContain('closes')
     expect(row).toContain('◆')
@@ -179,12 +200,19 @@ describe('DialRow (spec 3.2)', () => {
     // Minutes from end_ts, the game still in play: the time stays.
     const closing = game({ markets: [market({ endTs: NOW + 130 })] })
     expect(rowOf(closing)).toContain('latest 9:10 PM ET')
-    // Halted at the final buzzer, then proposed: trading is over.
+    // Halted at the final buzzer, then proposed: trading is over, and R5 says what comes next.
     for (const status of ['halted', 'proposed'] as const) {
       const html = rowOf(game({ status: 'final', markets: [market({ status })] }))
-      expect(html).toContain('>closed<')
+      expect(html).toContain('>result pending<')
       expect(html).not.toContain('latest')
     }
+    // Past end_ts with the game still in play, or halted mid-game: no time either.
+    const late = rowOf(game({ markets: [market({ endTs: NOW - 60 })] }))
+    expect(late).toContain('>trading closed<')
+    expect(late).not.toContain('latest')
+    const halted = rowOf(game({ markets: [market({ status: 'halted' })] }))
+    expect(halted).toContain('>trading halted<')
+    expect(halted).not.toContain('latest')
   })
 
   it('shows the tip-off and the opening time before a market exists', () => {

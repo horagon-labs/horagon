@@ -1,6 +1,7 @@
 import type { Game, MarketSummary } from '@horagon/sdk'
 import { describe, expect, it } from 'vitest'
 import { proposedOutcome } from '../lib/chrono/evidence'
+import { game as sample } from '../lib/chrono/fixtures'
 import {
   CLOSING_SECS,
   DIAL_STATES,
@@ -50,9 +51,15 @@ describe('deriveDialState: the table of spec 4.3, in order', () => {
     expect(state('canceled', market({ status: 'challenged' }))).toBe('challenged')
   })
 
-  it('row 5: halted', () => {
+  it('row 5: halted while the game is on the court', () => {
     expect(state('live', market({ status: 'halted' }))).toBe('halted')
     expect(state('live', market({ status: 'halted' }), END + 50)).toBe('halted')
+    expect(state('scheduled', market({ status: 'halted' }))).toBe('halted')
+  })
+
+  it('row 5 at the final buzzer (R1): a halt under a final game is the normal close', () => {
+    expect(state('final', market({ status: 'halted' }))).toBe('closed')
+    expect(state('final', market({ status: 'halted' }), END + 50)).toBe('closed')
   })
 
   it('row 6: open at or after end_ts is closed', () => {
@@ -150,49 +157,60 @@ describe('proposedOutcome', () => {
   })
 })
 
-describe('dialLabel (spec 2.6)', () => {
+describe('dialLabel (spec 2.6, R5)', () => {
   const base = {
-    team: 'CLE',
+    game: sample(),
+    outcome: null,
     price: 0.77,
     modelProb: 0.74,
     state: 'live' as const,
     secsLeft: 3_720,
-    gameStatus: 'live' as const,
   }
+  const final = (homeScore: number, awayScore: number) =>
+    sample({ status: 'final', homeScore, awayScore })
 
-  it('reads the whole dial in one sentence', () => {
-    expect(dialLabel(base)).toBe('CLE wins, 77 cents, model 74, open until the final buzzer')
-    expect(dialLabel({ ...base, state: 'pre', gameStatus: 'scheduled' })).toMatch(
+  it('reads the whole dial in one sentence, subject first', () => {
+    expect(dialLabel(base)).toBe('CLE to win, 77%, model 74%, open until the final buzzer')
+    const scheduled = sample({ status: 'scheduled' })
+    expect(dialLabel({ ...base, state: 'pre', game: scheduled })).toMatch(
       /open until the final buzzer$/,
     )
   })
 
   it('counts down only in the last 5 min before end_ts, when the market closes then', () => {
     expect(dialLabel({ ...base, state: 'closing', secsLeft: 252 })).toBe(
-      'CLE wins, 77 cents, model 74, closes in 4 minutes',
+      'CLE to win, 77%, model 74%, closes in 4 minutes',
     )
   })
 
   it('says when there is no price, model or market yet', () => {
     expect(dialLabel({ ...base, price: null, modelProb: null, state: 'pre', secsLeft: null })).toBe(
-      'CLE wins, no price yet, market opens 60 min before tip-off',
+      'CLE to win, no price yet, market opens 60 min before tip-off',
     )
   })
 
   it('names every non-trading state', () => {
-    expect(dialLabel({ ...base, state: 'closed' })).toMatch(/trading closed, waiting/)
+    expect(dialLabel({ ...base, state: 'closed' })).toMatch(/trading closed, result pending$/)
     expect(dialLabel({ ...base, state: 'halted' })).toMatch(/trading halted$/)
     expect(dialLabel({ ...base, state: 'proposed' })).toMatch(/result proposed$/)
     expect(dialLabel({ ...base, state: 'challenged' })).toMatch(/under review$/)
-    expect(dialLabel({ ...base, state: 'resolved', price: 1 })).toBe(
-      'CLE wins, 100 cents, model 74, result final',
-    )
-    expect(dialLabel({ ...base, state: 'void', gameStatus: 'postponed' })).toMatch(
-      /game postponed$/,
+    expect(
+      dialLabel({ ...base, game: final(84, 78), outcome: 'yes', state: 'resolved', price: 1 }),
+    ).toBe('Resolved: CLE won, model 74%, result final')
+    expect(dialLabel({ ...base, game: sample({ status: 'postponed' }), state: 'void' })).toBe(
+      'model 74%, game postponed',
     )
   })
 
+  it('never says the losing side wins once the game is over (audit finding 2)', () => {
+    const lost = dialLabel({ ...base, game: final(105, 107), state: 'closed', price: 0.74 })
+    // "result pending" once: the caption says it (R5 review finding 5).
+    expect(lost).toBe('Final, CLE lost, result pending, 74%, model 74%, trading closed')
+    expect(lost.match(/result pending/g)).toHaveLength(1)
+    expect(lost).not.toMatch(/CLE (wins|to win)/)
+  })
+
   it('keeps the honest edges of the price', () => {
-    expect(dialLabel({ ...base, price: 0.996 })).toMatch(/^CLE wins, >99 cents/)
+    expect(dialLabel({ ...base, price: 0.996 })).toMatch(/^CLE to win, >99%/)
   })
 })

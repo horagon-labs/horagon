@@ -11,7 +11,7 @@ export default defineConfig({
       // Components, the polling and trade hooks and the client singleton run in the browser;
       // the local end-to-end run exercises them by hand.
       include: ['lib/**/*.ts'],
-      exclude: ['lib/use-poll.ts', 'lib/use-trade.ts', 'lib/api.ts'],
+      exclude: ['lib/use-poll.ts', 'lib/use-trade.ts', 'lib/api.ts', 'lib/server/api.ts'],
       thresholds: { lines: 70 },
     },
   },

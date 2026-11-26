@@ -1,44 +1,32 @@
-'use client'
-// Tonight (Chronometer spec 4.1): the live board. Games poll every 3 s as before; the positions
-// that light arcs and rows are the wallet's own portfolio poll, so the board adds no request.
-import { useEffect, useState } from 'react'
-import { BoardView } from '../components/chrono/board-view'
-import { useWallet } from '../components/wallet'
-import { api } from '../lib/api'
-import { pollHealth } from '../lib/chrono/health'
-import { useNow } from '../lib/chrono/now'
-import { loadFollows, toggleFollow } from '../lib/follows'
-import { usePoll } from '../lib/use-poll'
+// Tonight (Chronometer spec 4.1, R5): the hero and the live board. Rendered per request, so the
+// first HTML holds tonight's games (lib/server/api.ts); the board then polls in the browser.
+import type { Metadata } from 'next'
+import { connection } from 'next/server'
+import { Hero } from '../components/chrono/hero'
+import { TonightBoard } from '../components/tonight-board'
+import { HOME_TITLE, SITE_DESCRIPTION } from '../lib/meta'
+import { initialBoard } from '../lib/server/api'
 
-const storage = () => {
-  try {
-    return window.localStorage
-  } catch {
-    return null
-  }
+export const metadata: Metadata = {
+  title: { absolute: HOME_TITLE },
+  description: SITE_DESCRIPTION,
+  openGraph: {
+    title: HOME_TITLE,
+    description: SITE_DESCRIPTION,
+    type: 'website',
+    siteName: 'Horagon',
+  },
+  twitter: { title: HOME_TITLE, description: SITE_DESCRIPTION, card: 'summary_large_image' },
 }
 
-export default function TonightPage() {
-  const games = usePoll('games', () => api.games.list())
-  const { address, portfolio } = useWallet()
-  const now = useNow()
-  const [follows, setFollows] = useState<string[]>([])
-  const [selectedId, setSelectedId] = useState<string | null>(null)
-  const [hoverId, setHoverId] = useState<string | null>(null)
-  useEffect(() => setFollows(loadFollows(storage())), [])
-
+export default async function TonightPage() {
+  // Per request: the board's data is live, and the build opens no DB or RPC connection.
+  await connection()
+  const initial = await initialBoard()
   return (
-    <BoardView
-      games={games.data}
-      portfolio={portfolio?.wallet === address ? portfolio : undefined}
-      now={now}
-      health={pollHealth(games)}
-      follows={follows}
-      onToggleFollow={(t) => setFollows(toggleFollow(storage(), t))}
-      selectedId={selectedId}
-      onSelect={setSelectedId}
-      hoverId={hoverId}
-      onHover={setHoverId}
-    />
+    <>
+      <Hero />
+      <TonightBoard initial={initial} />
+    </>
   )
 }

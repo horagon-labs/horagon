@@ -1,6 +1,7 @@
-// The scorebug (spec 3.2): the score in mono, quarter and game clock with a live dot, the model,
-// and the newest scoring run, "CLE on an 8–0 run · price 74 → 77 in 2 min".
+// The scorebug (spec 3.2): the score in mono, quarter and game clock with a live dot, the model
+// with what it is (R5), and the newest scoring run, "CLE on an 8–0 run · price 74% → 77% in 2 min".
 import type { Game } from '@horagon/sdk'
+import { MODEL_HINT } from '../../lib/chrono/copy'
 import { type Run, runLine } from '../../lib/chrono/runs'
 import { etClock } from '../../lib/chrono/time'
 import { gameClock, percent } from '../../lib/format'
@@ -8,7 +9,7 @@ import { gameClock, percent } from '../../lib/format'
 function Team(p: { side: string; name: string; score: number | null }) {
   return (
     <div className="min-w-16 text-center">
-      <p className="text-11 uppercase tracking-[0.2em] text-ash-400">{p.side}</p>
+      <p className="text-12 uppercase tracking-[0.2em] text-ash-400">{p.side}</p>
       <p className="text-15 font-semibold text-ivory-100">{p.name}</p>
       <p className="font-mono text-40 text-ivory-100 tabular-nums">{p.score ?? '–'}</p>
     </div>
@@ -29,14 +30,17 @@ export function Scorebug({ game, run }: { game: Game; run: Run | null }) {
             )}
             {started ? gameClock(game) : `tip-off ${etClock(tip)}`}
           </p>
-          <p className="text-11 text-brass-500">
+          <p className="text-13 text-brass-500" title={MODEL_HINT}>
             Model: {game.home} {percent(game.modelProb)}
           </p>
         </div>
         <Team side="Home" name={game.home} score={started ? game.homeScore : null} />
       </div>
+      <p className="mt-2 text-center text-12 text-ash-400" data-model-hint>
+        {MODEL_HINT}
+      </p>
       {run && (
-        <p className="mt-3 text-center font-mono text-11 text-amber-400" data-run>
+        <p className="mt-2 text-center font-mono text-12 text-amber-400" data-run>
           {runLine(run, game)}
         </p>
       )}

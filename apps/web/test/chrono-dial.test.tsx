@@ -11,8 +11,8 @@ const BASE: DialProps = {
   modelProb: 0.74,
   timeLeft: 0.5,
   state: 'live',
-  label: 'CLE wins, 77 cents, model 74, open until the final buzzer',
-  team: 'CLE',
+  label: 'CLE to win, 77%, model 74%, open until the final buzzer',
+  caption: 'CLE to win',
 }
 
 const dial = (over: Partial<DialProps> = {}) => renderToStaticMarkup(<Dial {...BASE} {...over} />)
@@ -28,7 +28,24 @@ describe('Dial (spec 3.2, 4.3)', () => {
     expect(html).toContain('role="img"')
     expect(html).toContain(`aria-label="${BASE.label}"`)
     expect(html).toContain('data-value="77"')
-    expect(html).toContain('>CLE wins</span>')
+    expect(html).toMatch(/data-caption="true">CLE to win<\/span>/)
+    expect(html).toContain('<span class="text-19">%</span>')
+  })
+
+  it('greys the number once trading stopped, and says the final in the caption (R5)', () => {
+    expect(dial()).toContain('font-mono tabular-nums text-ivory-100')
+    const html = dial({ state: 'closed', caption: 'Final · CLE lost · result pending' })
+    expect(html).toContain('font-mono tabular-nums text-ash-400')
+    expect(html).toContain('Final · CLE lost · result pending')
+    expect(html).not.toContain('wins')
+  })
+
+  it('shows only the caption once resolved: no number beside "Resolved: MEM won"', () => {
+    const html = dial({ state: 'resolved', price: 0, caption: 'Resolved: MEM won' })
+    expect(html).not.toContain('data-value')
+    expect(html).not.toContain('<span class="text-19">%</span>')
+    expect(html).toMatch(/data-caption="true">Resolved: MEM won<\/span>/)
+    expect(needle(html)).toBe('rotate(-135 100 100)')
   })
 
   it('draws no needle and an em dash for a null price, never NaN (Review Focus 1)', () => {
@@ -40,11 +57,12 @@ describe('Dial (spec 3.2, 4.3)', () => {
     expect(html).not.toContain('data-impact')
   })
 
-  it('holds the frame with the needle at 12 o’clock while loading (spec 4.4)', () => {
-    const html = dial({ loading: true, price: null, ghostPrice: 0.8 })
-    expect(needle(html)).toBe('rotate(0 100 100)')
+  it('holds a neutral frame while loading: no needle at 50, no number (R5)', () => {
+    const html = dial({ loading: true, price: null, ghostPrice: 0.8, caption: undefined })
+    expect(needle(html)).toBeUndefined()
     expect(needle(html, 'ghost')).toBeUndefined()
-    expect(html).toContain('data-value="—"')
+    expect(html).toContain('data-skeleton')
+    expect(html).not.toContain('data-value')
   })
 
   it('carries a class and a ring color for every DialState', () => {
@@ -145,11 +163,11 @@ describe('dial words', () => {
   it('says one line per state, with the copy the app already uses', () => {
     expect(stateLine('closing', live, 252, NOW)).toBe('closes in 4:12')
     expect(stateLine('live', live, 3730, NOW)).toBe('Open until the final buzzer')
-    expect(stateLine('closed', live, 0, NOW)).toBe('Trading closed, waiting for the result')
+    expect(stateLine('closed', live, 0, NOW)).toBe('Trading closed · result pending')
     expect(stateLine('challenged', live, 0, NOW)).toBe('Result under review')
     expect(stateLine('halted', live, 900, NOW)).toBe('Trading halted')
     expect(stateLine('void', game({ status: 'postponed' }), null, NOW)).toBe('Postponed')
-    expect(stateLine('pre', live, null, NOW)).toBe('market opens 60 min before tip-off')
+    expect(stateLine('pre', live, null, NOW)).toBe('Opens 60 min before tip-off')
     const later = game({ status: 'scheduled', scheduledTipoff: '2026-11-25T03:30:00Z' })
     expect(stateLine('pre', later, 9000, NOW)).toBe('tip-off in 1:22:00')
     expect(stateLine('pre', later, 9000, at('2026-11-25T03:31:00Z'))).toBe('tip-off soon')

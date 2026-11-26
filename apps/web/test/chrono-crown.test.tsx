@@ -35,6 +35,8 @@ function trade(over: Partial<Trade> = {}): Trade {
     failedAction: 'buy',
     shownError: undefined,
     fundNoteHidden: false,
+    loaded: true,
+    ageNeeded: false,
     send: noop,
     ...over,
   }
@@ -124,7 +126,7 @@ describe('CrownPanel (spec 3.2, 5.5)', () => {
     const html = panel()
     expect(html).toMatch(/<g transform="rotate\(78.3 100 100\)"[^>]*data-needle="ghost"/)
     expect(html).toContain('data-impact')
-    expect(html).toContain('aria-label="CLE wins, 77 cents, after this trade 79 cents"')
+    expect(html).toContain('aria-label="CLE to win, 77%, after this trade 79%"')
   })
 
   it('shows the numbers, the presets and the hold button', () => {
@@ -212,9 +214,44 @@ describe('CrownPanel (spec 3.2, 5.5)', () => {
   it('sets up a wallet with a plain button, not a hold (M12)', () => {
     const html = panel({ ready: 'no-wallet', balance: undefined })
     expect(html).toMatch(
-      /<button type="button" class="min-h-11[^"]*">Set up wallet to trade<\/button>/,
+      /<button type="button" class="min-h-11[^"]*">Get 1,000 play mUSDC to start<\/button>/,
     )
     expect(html).not.toContain('hold-safe')
+  })
+
+  it('asks 18+ inline above the set-up button, which stays off until the tick (R5)', () => {
+    const html = panel({ ready: 'no-wallet', balance: undefined, ageNeeded: true })
+    const box = html.indexOf('I am 18 or older')
+    const button = html.indexOf('Get 1,000 play mUSDC to start')
+    expect(html).toContain('Horagon is play money on Solana devnet. No real value. No prizes.')
+    expect(box).toBeGreaterThan(0)
+    expect(button).toBeGreaterThan(box)
+    expect(html).toMatch(/<button type="button" disabled=""[^>]*>Get 1,000 play mUSDC to start/)
+    expect(html).toMatch(/<input type="checkbox"(?![^>]*checked)[^>]*>/)
+  })
+
+  it('asks 18+ inline for a stored burner never asked, and holds the Buy until the tick', () => {
+    const html = panel({ ageNeeded: true })
+    expect(html).toContain('I am 18 or older')
+    expect(html).toMatch(/<button type="button" disabled=""[^>]*class="hold-safe/)
+    expect(panel()).not.toContain('I am 18 or older')
+    expect(panel()).not.toMatch(/<button type="button" disabled=""[^>]*class="hold-safe/)
+  })
+
+  it('says only "Loading your balance…" until the wallet storage opens (R5 review finding 1)', () => {
+    // The server render and the first browser render: no wallet and no 18+ answer known yet.
+    const html = panel({ loaded: false, ready: 'no-wallet', balance: undefined, ageNeeded: true })
+    expect(html).toContain('data-wallet-wait="true">Loading your balance…</p>')
+    expect(html).not.toContain('I am 18 or older')
+    expect(html).not.toContain('type="checkbox"')
+    expect(html).not.toContain('Get 1,000 play mUSDC')
+    expect(html).not.toContain('hold-safe')
+    // Once it opened, the same visitor sees the ask, or straight away the Buy.
+    expect(panel({ ready: 'no-wallet', balance: undefined, ageNeeded: true })).toContain(
+      'I am 18 or older',
+    )
+    expect(panel()).not.toContain('Loading your balance…')
+    expect(panel()).toContain('hold-safe')
   })
 
   it('turns Max off for a balance of zero as well as an unknown one (M15)', () => {
