@@ -1,8 +1,11 @@
 'use client'
 // The Night dial (spec 3.2, 4.1): tonight on one 12-hour ET face, one arc per game on the ring
 // tracks.ts picks. The picture is hidden; a listbox of sr-only options carries the same games.
+// On a night with no game it rests (culture plan A3): numerals, a lume pip on the now hand and
+// a seconds pip that steps once a second, with the next tip-off in the middle.
 import { type KeyboardEvent, type MouseEvent, useId, useState } from 'react'
 import { type BoardItem, itemLabel, rowWords } from '../../lib/chrono/board'
+import { useMotionReduced } from '../../lib/chrono/feel'
 import { arcPath, etClockAngle, polar } from '../../lib/chrono/geometry'
 import { keyStep } from '../../lib/chrono/keys'
 import {
@@ -20,6 +23,47 @@ const C = 100
 // The readout's hub, inside ring 7 (r = 37, whose lit stroke edge is 34.5).
 const HUB = 33
 const HOURS = Array.from({ length: 12 }, (_, h) => h)
+const HAND = 92
+/** The rest face's numerals: 12 · 3 · 6 · 9 at r 80. */
+const NUMERALS = [12, 3, 6, 9].map((n) => ({ n, at: polar(C, C, 80, (n % 12) * 30) }))
+
+/**
+ * The rest face's marks (culture plan A3): the numerals in mono 9 brass with "ET" under the 6,
+ * and a seconds pip at r 97 that steps 6° a second from the shared clock: no tween, and none
+ * under reduced motion. The lume pip rides on the now hand (NightDial).
+ */
+export function RestFace(p: { now: number; reduced: boolean }) {
+  const sec = polar(C, C, 97, (Math.floor(p.now) % 60) * 6)
+  const six = NUMERALS[2]?.at ?? { x: C, y: 180 }
+  return (
+    <g data-rest>
+      {NUMERALS.map(({ n, at }) => (
+        <text
+          key={n}
+          x={at.x}
+          y={at.y}
+          textAnchor="middle"
+          dominantBaseline="middle"
+          className="fill-brass-500 font-mono text-[9px]"
+        >
+          {n}
+        </text>
+      ))}
+      <text
+        x={six.x}
+        y={six.y + 7}
+        textAnchor="middle"
+        dominantBaseline="middle"
+        className="fill-brass-500 font-mono text-[5px]"
+      >
+        ET
+      </text>
+      {!p.reduced && (
+        <circle cx={sec.x} cy={sec.y} r={1.8} className="fill-ivory-100" data-seconds />
+      )}
+    </g>
+  )
+}
 
 /**
  * Your games glow lume; amber near the close; brass while open; ash once trading stopped, and for
@@ -44,9 +88,12 @@ export function NightDial(p: {
   emptyText: string
   /** Polls failing: a thin red line on the bezel (spec 4.4). */
   stale?: boolean
+  /** No game tonight: the rest face, with `emptyText` (the next tip-off) in the middle. */
+  rest?: boolean
   className?: string
 }) {
   const id = useId()
+  const reduced = useMotionReduced()
   const [active, setActive] = useState<string | null>(null)
   const { tracks, overflow } = packTracks(p.items, p.now)
   // Arrow keys walk the arcs by closing time (spec 3.2).
@@ -61,7 +108,7 @@ export function NightDial(p: {
   const focus = tracks.find((t) => t.item.id === ids[0])?.item
   const focusWords = focus ? rowWords(focus) : null
   const angle = etClockAngle(p.now)
-  const hand = polar(C, C, 92, angle)
+  const hand = polar(C, C, HAND, angle)
   const hub = polar(C, C, HUB, angle)
 
   function onKeyDown(e: KeyboardEvent<HTMLDivElement>) {
@@ -188,6 +235,12 @@ export function NightDial(p: {
           className="stroke-ivory-100"
           data-now
         />
+        {p.rest && (
+          <>
+            <RestFace now={p.now} reduced={reduced} />
+            <circle cx={hand.x} cy={hand.y} r={2} className="fill-lume-300" data-now-pip />
+          </>
+        )}
         {overflow.length > 0 && (
           <text
             x={C}
@@ -204,7 +257,10 @@ export function NightDial(p: {
         aria-hidden="true"
         className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-0.5 text-center"
       >
-        <div className="flex max-w-[32%] flex-col items-center gap-0.5 text-center">
+        {/* At rest no arc rings the face, so the words may run wider, inside the numerals. */}
+        <div
+          className={`flex ${p.rest ? 'max-w-[56%]' : 'max-w-[32%]'} flex-col items-center gap-0.5 text-center`}
+        >
           {focus && focusWords ? (
             <>
               <span className="text-12 uppercase tracking-[0.16em] text-brass-500">

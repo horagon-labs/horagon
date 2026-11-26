@@ -30,6 +30,15 @@ export const etDay = (ts: number): string => DAY.format(new Date(ts * 1000))
 /** "Fri, Nov 27": the ET day of unix second `ts`, for people. */
 export const etDayLabel = (ts: number): string => DAY_LABEL.format(new Date(ts * 1000))
 
+const WEEKDAY = {
+  short: new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', weekday: 'short' }),
+  long: new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', weekday: 'long' }),
+}
+
+/** "Sat" or "Saturday": the ET weekday of unix second `ts`. */
+export const etWeekday = (ts: number, style: 'short' | 'long' = 'short'): string =>
+  WEEKDAY[style].format(new Date(ts * 1000))
+
 const plural = (n: number, unit: string) => `${n} ${unit}${n === 1 ? '' : 's'}`
 
 /** "1 hour 2 minutes", "4 minutes", "45 seconds": for aria labels (spec 2.6). */

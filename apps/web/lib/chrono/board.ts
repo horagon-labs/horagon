@@ -2,6 +2,7 @@
 // second-half market), the wallet's positions and the shared clock.
 import type { Game, MarketSummary, PositionsResponse } from '@horagon/sdk'
 import { formatAmount, parseAmount } from '@horagon/sdk/amount'
+import { etNight } from '@horagon/sdk/et'
 import { effectiveTime } from '@horagon/sdk/math'
 import { isTonight, percent, usdc } from '../format'
 import { rowSubject, started } from './copy'
@@ -15,7 +16,7 @@ import {
   secsToClose,
   stillTrades,
 } from './state'
-import { etClock, etDay, etDayLabel } from './time'
+import { etClock, etDay, etDayLabel, etWeekday } from './time'
 import { gameInterval, type Interval } from './tracks'
 
 export interface BoardItem {
@@ -183,6 +184,63 @@ export function nextLine(u: Upcoming): string {
   return `Next games: ${etDayLabel(u.tip)} · ${games} from ${etClock(u.tip)}`
 }
 
+/**
+ * "Tonight · Thu Nov 27" (culture string 2): the ET night on the board, which rolls over at
+ * 06:00 ET like the API's (etNight), so after midnight it still names the night. CSS uppercases it.
+ */
+export function boardLabel(now: number): string {
+  const noon = Date.parse(`${etNight(now)}T12:00:00Z`) / 1000
+  return `Tonight · ${etDayLabel(noon).replace(',', '')}`
+}
+
+const REST = 'The dial rests tonight.'
+
+/** Whole hours to `tip`, at least 1. */
+const hoursTo = (tip: number, now: number): number => Math.max(1, Math.round((tip - now) / 3_600))
+
+/**
+ * The rest face's words (culture string 3) on a night with no game: "The dial rests tonight.
+ * Next tip-off Fri, Nov 27 · 7:00 PM ET · in 39 h", or the first sentence with none known.
+ */
+export function restLine(next: Upcoming | null, now: number): string {
+  if (!next || next.tip <= now) return REST
+  return `${REST} Next tip-off ${etDayLabel(next.tip)} · ${etClock(next.tip)} · in ${hoursTo(next.tip, now)} h`
+}
+
+/** Culture string 21: "All stopped. Next tip-off Sat 3:30 PM ET.", or "All stopped.". */
+export function stoppedLine(tip: number | null, now: number): string {
+  if (tip === null || tip <= now) return 'All stopped.'
+  return `All stopped. Next tip-off ${etWeekday(tip)} ${etClock(tip)}.`
+}
+
+/** Culture string 4: the next game day's calendar file (app/calendar/[date]), by its ET date. */
+export function calendarLink(next: Upcoming): { href: string; label: string } {
+  return {
+    href: `/calendar/${etDay(next.tip)}`,
+    label: `Add ${etWeekday(next.tip, 'long')}'s games to your calendar`,
+  }
+}
+
+/**
+ * The night's games (ET, 06:00 rollover) all stopped trading, and none is on the court: the board
+ * says "All stopped", and the server looks ahead for the next tip-off (lib/server/initial.ts).
+ */
+export function nightOver(games: readonly Game[], now: number): boolean {
+  if (games.some((g) => g.status === 'live')) return false
+  const night = etNight(now)
+  const ofNight = games.filter((g) => etDay(tipOf(g)) === night)
+  return ofNight.length > 0 && ofNight.every((g) => !boardItem(g, undefined, now).trading)
+}
+
+/** The first scheduled tip-off still ahead in `games`, if any. */
+function nextTip(games: readonly Game[], now: number): number | null {
+  const tips = games
+    .filter((g) => g.status === 'scheduled')
+    .map(tipOf)
+    .filter((t) => t > now)
+  return tips.length > 0 ? Math.min(...tips) : null
+}
+
 export interface BoardModel {
   /** Every team playing tonight, for the follow chips. */
   teams: string[]
@@ -196,6 +254,14 @@ export interface BoardModel {
   next: string | null
   /** The Night dial's clock (spec 5.4): `now` moved up to the newest winner `priceTs` the board has seen. */
   chainNow: number
+  /** "Tonight · Thu Nov 27" (boardLabel). */
+  label: string
+  /** No game tonight: the rest face's words (restLine); null otherwise. */
+  rest: string | null
+  /** With the rest face: the next game day's calendar file, when the next games are known. */
+  calendar: { href: string; label: string } | null
+  /** Every game of the night stopped: "All stopped. Next tip-off …" (stoppedLine); else null. */
+  stopped: string | null
 }
 
 /**
@@ -209,6 +275,7 @@ export function boardModel(
   follows: readonly string[],
   upcoming: Upcoming | null = null,
 ): BoardModel {
+  const label = boardLabel(now)
   if (games === undefined) {
     return {
       teams: [],
@@ -217,6 +284,10 @@ export function boardModel(
       filtered: false,
       next: null,
       chainNow: now,
+      label,
+      rest: null,
+      calendar: null,
+      stopped: null,
     }
   }
   // Every endTs comparison on the Night dial uses chain time (spec 5.4), like each row does.
@@ -229,15 +300,27 @@ export function boardModel(
       ? tonight
       : tonight.filter((g) => follows.includes(g.home) || follows.includes(g.away))
   const items = shown.map((g) => boardItem(g, portfolio, now)).sort(listOrder)
-  if (items.length > 0) return { teams, items, empty: null, filtered: false, next: null, chainNow }
+  const later = upcomingOf(games, now) ?? upcoming
+  const ahead = later && later.tip > now ? later : null
+  const over = nightOver(games, now)
+  // A night whose games all stopped is over, not at rest, even once they left the 4 h window.
+  const resting = tonight.length === 0 && !over
+  const base = {
+    teams,
+    items,
+    chainNow,
+    label,
+    rest: resting ? restLine(ahead, now) : null,
+    calendar: resting && ahead ? calendarLink(ahead) : null,
+    stopped: over ? stoppedLine(nextTip(games, now) ?? ahead?.tip ?? null, now) : null,
+  }
+  if (items.length > 0) return { ...base, empty: null, filtered: false, next: null }
   if (follows.length > 0) {
     const empty = 'No games for the teams you follow in the next 24 hours.'
-    return { teams, items, empty, filtered: true, next: null, chainNow }
+    return { ...base, empty, filtered: true, next: null }
   }
-  const later = upcomingOf(games, now) ?? upcoming
-  const next = later && later.tip > now ? nextLine(later) : null
-  const empty = 'No NBA games in the next 24 hours.'
-  return { teams, items, empty, filtered: false, next, chainNow }
+  const next = ahead ? nextLine(ahead) : null
+  return { ...base, empty: 'No NBA games in the next 24 hours.', filtered: false, next }
 }
 
 /**
