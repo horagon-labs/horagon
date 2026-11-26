@@ -32,6 +32,11 @@ const tag = (html: string, attr: string) =>
   html.match(new RegExp(`<[a-z]+ [^>]*${attr}[^>]*>`))?.[0]
 const num = (t: string | undefined, a: string) =>
   Number(t?.match(new RegExp(` ${a}="([^"]+)"`))?.[1])
+const classAt = (html: string, marker: string) => {
+  const at = html.indexOf(marker)
+  const open = html.lastIndexOf('<', at)
+  return html.slice(open, html.indexOf('>', at) + 1).match(/class="([^"]*)"/)?.[1] ?? ''
+}
 const dist = (x: number, y: number, c = 100) => Math.hypot(x - c, y - c)
 /** Clockwise from 12 o'clock, in degrees, -180..180. */
 const angleOf = (x: number, y: number, c = 100) => (Math.atan2(x - c, c - y) * 180) / Math.PI
@@ -125,6 +130,24 @@ describe('Dial face and case (review §4.2)', () => {
     expect(angleOf(...at('100'))).toBeCloseTo(142, 1)
     expect(dist(...at('50'))).toBeCloseTo(69, 2)
     expect(angleOf(...at('50'))).toBeCloseTo(0, 1)
+  })
+
+  it('keeps the longest caption on one line on a phone-width face, clear of 0 and 100 (§8 risk 3)', () => {
+    // "Final · CLE lost · result pending" wrapped at 70 % on a 343 px face (375 px phone) and its
+    // second line sat between 0 and 100. 80 % holds it on one line from a 336 px face up; below
+    // that (a 320 px phone) the face is a container narrow enough to drop the caption's tracking.
+    const html = dial({ state: 'closed', caption: 'Final · CLE lost · result pending' })
+    expect(html.match(/<div role="img"[^>]*class="([^"]+)"/)?.[1]).toContain('@container')
+    const caption = classAt(html, 'data-caption')
+    expect(caption).toContain('max-w-[80%]')
+    expect(caption).toContain('tracking-[0.16em]')
+    expect(caption).toContain('@max-[21rem]:tracking-normal')
+    expect(caption).not.toContain('max-w-[70%]')
+    // ...and a narrow face also sets the number at 36 and lifts the block a little.
+    expect(html).toContain(
+      'leading-none font-mono text-40 tabular-nums @max-[21rem]:text-[2.25rem]',
+    )
+    expect(html).toMatch(/top-\[54%\][^"]*@max-\[21rem\]:top-\[53%\] @max-\[21rem\]:gap-0.5/)
   })
 
   it('holds the loading frame on a sunk slot, not a translucent rule', () => {

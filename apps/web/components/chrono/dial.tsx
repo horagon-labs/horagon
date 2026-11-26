@@ -101,7 +101,8 @@ export function Dial(p: DialProps) {
       role="img"
       aria-label={p.label}
       data-state={p.state}
-      className={`dial dial-${p.state} relative aspect-square w-full ${p.className ?? ''}`}
+      // A container, so the caption can read the face's own width (review §8 risk 3).
+      className={`dial dial-${p.state} @container relative aspect-square w-full ${p.className ?? ''}`}
     >
       <svg viewBox="0 0 200 200" aria-hidden="true" className="absolute inset-0 size-full">
         {/* A flat white sheet: no gradient, no shadow (spec 2.3, light branding review §4.2). */}
@@ -262,7 +263,7 @@ export function Dial(p: DialProps) {
       </svg>
       <div
         aria-hidden="true"
-        className="absolute inset-x-0 top-[54%] flex flex-col items-center gap-1 text-center"
+        className="absolute inset-x-0 top-[54%] flex flex-col items-center gap-1 text-center @max-[21rem]:top-[53%] @max-[21rem]:gap-0.5"
       >
         {p.loading ? (
           <span className="block h-10 w-20 rounded-card bg-enamel-800" data-skeleton />
@@ -271,14 +272,22 @@ export function Dial(p: DialProps) {
           // home side's number next to an away win.
           p.state !== 'resolved' && (
             <span className={`flex items-baseline font-mono tabular-nums ${tone}`}>
-              <RollingNumber text={priceDigits(price)} className="font-mono text-40 tabular-nums" />
+              <RollingNumber
+                text={priceDigits(price)}
+                // 36 on a face under 336 px, so the caption below stays above 0 and 100.
+                className="font-mono text-40 tabular-nums @max-[21rem]:text-[2.25rem]"
+              />
               {shown && <span className="text-19">%</span>}
             </span>
           )
         )}
         {p.caption && (
+          // One line, clear of 0 and 100 (review §4.2, §8 risk 3): the longest caption, "Final ·
+          // CLE lost · result pending", fits 80 % of a face from 336 px; a narrower face (a 320 px
+          // phone, the crown) drops the tracking, a size of number and a little height instead of
+          // wrapping onto the scale's numbers.
           <span
-            className="flex max-w-[70%] items-center justify-center gap-1.5 text-12 uppercase tracking-[0.16em] text-brass-500"
+            className="flex max-w-[80%] items-center justify-center gap-1.5 text-12 uppercase tracking-[0.16em] text-brass-500 @max-[21rem]:tracking-normal"
             data-caption
           >
             {p.liveDot && <span className="size-1.5 shrink-0 rounded-full bg-lume-300" data-live />}
