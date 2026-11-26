@@ -4,10 +4,19 @@ import type { Metadata } from 'next'
 import { connection } from 'next/server'
 import { Hero } from '../components/chrono/hero'
 import { TonightBoard } from '../components/tonight-board'
+import { HOME_TITLE, SITE_DESCRIPTION } from '../lib/meta'
 import { initialBoard } from '../lib/server/api'
 
 export const metadata: Metadata = {
-  title: { absolute: "Horagon · Tonight's NBA games, live" },
+  title: { absolute: HOME_TITLE },
+  description: SITE_DESCRIPTION,
+  openGraph: {
+    title: HOME_TITLE,
+    description: SITE_DESCRIPTION,
+    type: 'website',
+    siteName: 'Horagon',
+  },
+  twitter: { title: HOME_TITLE, description: SITE_DESCRIPTION, card: 'summary_large_image' },
 }
 
 export default async function TonightPage() {

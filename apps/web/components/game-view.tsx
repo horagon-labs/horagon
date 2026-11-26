@@ -12,11 +12,13 @@ import { proposedOutcome } from '../lib/chrono/evidence'
 import { gameDial } from '../lib/chrono/game'
 import { pollHealth } from '../lib/chrono/health'
 import { useNow } from '../lib/chrono/now'
+import { fullTitle, gameMeta } from '../lib/meta'
 import type { InitialGame } from '../lib/server/initial'
 import { usePoll } from '../lib/use-poll'
 import { GameLoading, GameScreen, NoGame } from './chrono/game-screen'
 import { GamePositions, MarketBlock } from './chrono/market-block'
 import { ErrorText } from './error-text'
+import { ShareButton } from './share-button'
 
 const SLOW_POLL_MS = 60_000
 
@@ -57,8 +59,15 @@ export function GameView({ id, initial }: { id: string; initial?: InitialGame })
 
   const proposed = evidence.data ? proposedOutcome(evidence.data.json) : null
   const dial = gameDial(game, winner, marketState.data?.startTs ?? null, proposed, now)
+  const meta = gameMeta(game, now)
   return (
     <div className="space-y-3">
+      <div className="flex items-start justify-between gap-3">
+        <h1 className="pt-3 text-13 font-medium uppercase tracking-[0.2em] text-brass-500">
+          {game.away} @ {game.home}
+        </h1>
+        <ShareButton title={fullTitle(meta.title)} text={meta.title} />
+      </div>
       <GameScreen
         game={game}
         history={history.data}
