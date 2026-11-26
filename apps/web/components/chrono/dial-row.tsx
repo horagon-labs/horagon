@@ -29,7 +29,7 @@ export function DialRow(p: {
       onPointerLeave={() => p.onHover?.(null)}
       onFocus={() => p.onHover?.(g.id)}
       onBlur={() => p.onHover?.(null)}
-      className="flex min-h-16 items-center gap-3 rounded-card border border-brass-500/15 px-3 py-2 hover:bg-enamel-800 data-[lit=true]:bg-enamel-800"
+      className="flex min-h-16 items-center gap-3 rounded-card border border-line px-3 py-2 hover:border-ivory-100 data-[lit=true]:border-ivory-100"
     >
       <MiniDial price={item.price} timeLeft={item.timeLeft} state={item.state} />
       <span className="min-w-0 flex-1">

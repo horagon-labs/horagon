@@ -3,6 +3,7 @@
 // Space (spec 3.2, 2.6). `hold-safe` stops iOS from selecting text or opening its callout. The
 // ring is `keep-motion`: it is the button's meaning, not decoration, so reduced motion keeps it.
 import { useEffect, useRef, useState } from 'react'
+import { DISABLED } from '../../lib/chrono/controls'
 import { useFeel } from '../../lib/chrono/feel'
 import { buzz, CONFIRM_BUZZ_MS } from '../../lib/chrono/haptics'
 import { DOUBLE_MS, HOLD_MS, type HoldInput, hold, IDLE } from '../../lib/chrono/hold'
@@ -90,7 +91,7 @@ export function HoldButton(p: {
         onClick={() => apply('press')}
         onContextMenu={(e) => e.preventDefault()}
         data-pressing={pressing ? 'true' : undefined}
-        className={`hold-safe flex min-h-14 w-full items-center justify-center gap-3 rounded-card px-4 text-15 font-semibold text-enamel-950 disabled:opacity-50 ${
+        className={`hold-safe group flex min-h-14 w-full items-center justify-center gap-3 rounded-card px-4 text-15 font-semibold text-enamel-950 ${DISABLED} ${
           p.tone === 'brass' ? 'bg-brass-500' : 'bg-lume-300'
         }`}
       >
@@ -105,7 +106,7 @@ export function HoldButton(p: {
             r={10}
             fill="none"
             strokeWidth={2.5}
-            className="stroke-enamel-950/25"
+            className="stroke-enamel-950/25 group-disabled:stroke-rule-faint"
           />
           <circle
             cx={12}
@@ -117,7 +118,7 @@ export function HoldButton(p: {
             strokeDasharray="100"
             strokeDashoffset={p.pending ? 70 : pressing ? 0 : 100}
             transform="rotate(-90 12 12)"
-            className={`keep-motion stroke-enamel-950 ${
+            className={`keep-motion stroke-enamel-950 group-disabled:stroke-ash-400 ${
               pressing ? 'transition-[stroke-dashoffset] duration-500 ease-linear' : ''
             }`}
             data-progress

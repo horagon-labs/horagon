@@ -10,7 +10,7 @@ const choiceOf = (v: boolean | null): MotionChoice => (v === null ? 'system' : v
 
 export function FeelForm(p: { feel: Feel; onChange: (next: Feel) => void; vibrates: boolean }) {
   const { feel } = p
-  const box = 'size-5 accent-lume-300'
+  const box = 'size-5 accent-ivory-100'
   const row = 'flex min-h-11 items-center justify-between gap-3 text-13 text-ivory-100'
   return (
     <fieldset className="space-y-1">

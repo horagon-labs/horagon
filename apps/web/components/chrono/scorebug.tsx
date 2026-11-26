@@ -20,7 +20,7 @@ export function Scorebug({ game, run }: { game: Game; run: Run | null }) {
   const started = game.status !== 'scheduled'
   const tip = Math.floor(Date.parse(game.scheduledTipoff) / 1000)
   return (
-    <section className="rounded-card border border-brass-500/15 bg-enamel-900 p-4">
+    <section className="rounded-card border border-rule-faint bg-enamel-900 p-4">
       <div className="flex items-center justify-between gap-2">
         <Team side="Away" name={game.away} score={started ? game.awayScore : null} />
         <div className="text-center">

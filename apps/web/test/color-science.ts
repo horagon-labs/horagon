@@ -109,3 +109,12 @@ export function deltaE2000([l1, a1, b1]: Vec3, [l2, a2, b2]: Vec3): number {
 export function visionDelta(a: string, b: string, vision: Vision): number {
   return deltaE2000(lab(simulate(a, vision)), lab(simulate(b, vision)))
 }
+
+/** Alpha over a background, blended in gamma sRGB as browsers do. */
+export function over(fg: string, alpha: number, bg: string): string {
+  const ch = (hex: string, i: number) => Number.parseInt(hex.slice(1 + 2 * i, 3 + 2 * i), 16)
+  return `#${[0, 1, 2]
+    .map((i) => Math.round(ch(fg, i) * alpha + ch(bg, i) * (1 - alpha)))
+    .map((v) => v.toString(16).padStart(2, '0'))
+    .join('')}`
+}

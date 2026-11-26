@@ -7,13 +7,24 @@ import { milestones } from '../../lib/chrono/resolution'
 import type { DialState } from '../../lib/chrono/state'
 import { explorerAddress, explorerTx } from '../../lib/format'
 
-const DOT = { done: 'bg-lume-300', now: 'bg-amber-400', next: 'bg-line' } as const
+// The milestones told apart by shape, not hue (review §4.7, u3 §3.2): done is a filled ink dot,
+// now an empty 2 px ink ring a size up, next an empty 1 px rule ring.
+const DOT = {
+  done: 'size-2 rounded-full bg-ivory-100',
+  now: 'size-2.5 rounded-full border-2 border-ivory-100',
+  next: 'size-2 rounded-full border border-line',
+} as const
+const WORDS = {
+  done: 'text-ivory-100',
+  now: 'font-semibold text-ivory-100',
+  next: 'text-ash-400',
+} as const
 
 export function ResolutionCard({ game, state }: { game: GameDetail; state: DialState }) {
   const r = game.resolutions.find((x) => x.kind === 'winner')
   if (!r) return null
   return (
-    <section className="space-y-3 rounded-card border border-brass-500/15 p-4 text-13">
+    <section className="space-y-3 rounded-card border border-rule-faint p-4 text-13">
       <h2 className="text-12 uppercase tracking-[0.3em] text-brass-500">Resolution</h2>
       <p className="font-medium text-ivory-100" data-status>
         {resolutionStatus(state, game, r.outcome)}
@@ -21,7 +32,7 @@ export function ResolutionCard({ game, state }: { game: GameDetail; state: DialS
       <ol className="space-y-1">
         {milestones(r).map((m) => (
           <li key={m.label} className="flex items-center gap-2" data-mark={m.mark}>
-            <span aria-hidden="true" className={`size-2 rounded-full ${DOT[m.mark]}`} />
+            <span aria-hidden="true" className={DOT[m.mark]} />
             {m.sig ? (
               <a
                 href={explorerTx(m.sig)}
@@ -32,9 +43,7 @@ export function ResolutionCard({ game, state }: { game: GameDetail; state: DialS
                 {m.label}
               </a>
             ) : (
-              <span className={m.mark === 'next' ? 'text-ash-400' : 'text-ivory-100'}>
-                {m.label}
-              </span>
+              <span className={WORDS[m.mark]}>{m.label}</span>
             )}
           </li>
         ))}

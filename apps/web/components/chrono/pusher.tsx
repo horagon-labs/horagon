@@ -4,6 +4,7 @@
 // An empty wallet gets the faucet button the wallet sheet already has; a visitor with no wallet
 // gets the buy buttons, and the crown sets the wallet up (R5).
 import type { Side } from '@horagon/sdk'
+import { DISABLED, SELECTED } from '../../lib/chrono/controls'
 import type { PusherMode } from '../../lib/chrono/pusher'
 import { cents } from '../../lib/format'
 import { sidePrice } from '../../lib/trade-view'
@@ -34,7 +35,7 @@ export function Pusher(p: {
         type="button"
         disabled={p.funding || p.preparing}
         onClick={() => p.onFaucet()}
-        className="min-h-14 w-full rounded-card border border-lume-300/50 text-15 font-semibold text-lume-300 disabled:opacity-50"
+        className={`min-h-14 w-full rounded-card border border-lume-300/50 text-15 font-semibold text-lume-300 ${DISABLED}`}
       >
         {p.funding ? 'Requesting…' : p.preparing ? WALLET_PREPARING : FAUCET_BUTTON}
       </button>
@@ -54,7 +55,7 @@ export function Pusher(p: {
             disabled={mode.locked}
             aria-pressed={p.selected === undefined ? undefined : p.selected === side}
             onClick={() => p.onPick(side)}
-            className={`min-h-14 rounded-card border-2 font-mono text-15 font-semibold tabular-nums disabled:opacity-40 aria-pressed:bg-enamel-800 ${look}`}
+            className={`min-h-14 rounded-card border-2 font-mono text-15 font-semibold tabular-nums ${SELECTED} ${DISABLED} ${look}`}
           >
             Buy {team} {cents(sidePrice(p.price, side))}
           </button>

@@ -14,7 +14,7 @@ export function YourHour(p: { portfolio: PositionsResponse | undefined; onOpen: 
       type="button"
       onClick={p.onOpen}
       aria-label={`${hour.count} open ${noun}, worth ${hour.value} mUSDC`}
-      className="min-h-11 rounded-full border border-lume-300/40 px-3 font-mono text-13 text-lume-300 tabular-nums"
+      className="min-h-11 rounded-full border border-line px-3 font-mono text-13 text-ivory-100 tabular-nums"
     >
       <span className="text-live">◆</span> {hour.count} · {hour.value}
     </button>

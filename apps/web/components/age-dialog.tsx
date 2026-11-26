@@ -3,6 +3,7 @@
 // imported, and before the first send of a burner that was never asked. The answer stays on
 // this device (lib/burner.ts); it is never sent, logged or put in a URL.
 import { useEffect, useRef, useState } from 'react'
+import { DISABLED } from '../lib/chrono/controls'
 
 export function AgeCheckbox(props: { checked: boolean; onChange: (checked: boolean) => void }) {
   return (
@@ -13,7 +14,7 @@ export function AgeCheckbox(props: { checked: boolean; onChange: (checked: boole
           type="checkbox"
           checked={props.checked}
           onChange={(e) => props.onChange(e.target.checked)}
-          className="size-5 accent-lume-300"
+          className="size-5 accent-ivory-100"
         />
         I am 18 or older
       </label>
@@ -48,7 +49,7 @@ export function AgeDialog(props: {
       aria-labelledby="age-gate-title"
       // Escape or "Not now" while the gate is still wanted: the pending action is dropped.
       onClose={() => props.open && props.onCancel()}
-      className="m-auto w-[min(28rem,calc(100%-2rem))] rounded-face border border-brass-500/20 bg-enamel-900 p-5 text-ivory-100 backdrop:bg-ivory-100/30"
+      className="m-auto w-[min(28rem,calc(100%-2rem))] rounded-face border border-ash-400 bg-enamel-900 p-5 text-ivory-100 backdrop:bg-ivory-100/30"
     >
       <div className="space-y-4">
         <h2 id="age-gate-title" className="text-15 font-semibold tracking-wide text-brass-400">
@@ -72,7 +73,7 @@ export function AgeDialog(props: {
             type="button"
             disabled={!ticked}
             onClick={() => ticked && props.onConfirm()}
-            className="min-h-11 flex-1 rounded-card bg-lume-300 py-2 font-semibold text-enamel-950 disabled:opacity-50"
+            className={`min-h-11 flex-1 rounded-card bg-lume-300 py-2 font-semibold text-enamel-950 ${DISABLED}`}
           >
             Continue
           </button>

@@ -49,7 +49,7 @@ export function WalletButton() {
             setFailed(false)
             openGate().catch(() => setFailed(true))
           }}
-          className="min-h-11 rounded-full border border-brass-500/40 px-4 text-13 text-brass-400 disabled:opacity-50"
+          className="min-h-11 rounded-full border border-line px-4 text-13 text-brass-400 disabled:opacity-50"
         >
           {preparing ? WALLET_PREPARING : 'Set up wallet'}
         </button>
@@ -81,7 +81,7 @@ export function WalletButton() {
         ref={dialog}
         aria-label="Play wallet"
         onClose={() => setSheet(null)}
-        className="m-auto w-[min(32rem,calc(100%-2rem))] rounded-face border border-brass-500/20 bg-enamel-900 p-5 text-ivory-100 backdrop:bg-ivory-100/30"
+        className="m-auto w-[min(32rem,calc(100%-2rem))] rounded-face border border-ash-400 bg-enamel-900 p-5 text-ivory-100 backdrop:bg-ivory-100/30"
       >
         {sheet && (
           <WalletSheet atPositions={sheet.atPositions} onClose={() => dialog.current?.close()} />

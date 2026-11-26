@@ -12,6 +12,7 @@ import type { GameDetail, MarketSummary } from '@horagon/sdk'
 import { parseAmount } from '@horagon/sdk/amount'
 import { useState } from 'react'
 import { buySteps, percentOf, sellSteps, stepIndex } from '../../lib/chrono/bezel'
+import { DISABLED, SELECTED } from '../../lib/chrono/controls'
 import { dialCaption } from '../../lib/chrono/copy'
 import { errorEffect, requoteShown, retryLeft } from '../../lib/chrono/errors'
 import { crownLabel, type DialState } from '../../lib/chrono/state'
@@ -75,8 +76,7 @@ export function CrownPanel(p: CrownPanelProps) {
   const ghost = q && t.check.quote ? q.priceAfter : null
   const spendable = t.balance ? parseAmount(t.balance) > 0n : false
   const tone = t.side === 'home' ? 'lume' : 'brass'
-  const chip =
-    'min-h-11 flex-1 rounded-card border border-line font-mono text-13 aria-pressed:border-lume-300 aria-pressed:text-lume-300 disabled:opacity-40'
+  const chip = `min-h-11 flex-1 rounded-card border border-line font-mono text-13 ${SELECTED} disabled:opacity-40`
   return (
     <div className="space-y-4">
       <Reconnecting stale={p.staleLine ?? false} />
@@ -196,7 +196,7 @@ export function CrownPanel(p: CrownPanelProps) {
           })
         )}
       </div>
-      <label className="flex min-h-11 items-center gap-2 rounded-card border border-line px-3">
+      <label className="flex min-h-11 items-center gap-2 rounded-card border border-line px-3 focus-within:border-ivory-100">
         <input
           inputMode="decimal"
           value={t.amount}
@@ -249,7 +249,7 @@ export function CrownPanel(p: CrownPanelProps) {
             type="button"
             disabled={blocked || p.funding || preparing}
             onClick={() => t.send(ticked)}
-            className={`min-h-11 w-full rounded-card px-4 text-15 font-semibold text-enamel-950 disabled:opacity-50 ${
+            className={`min-h-11 w-full rounded-card px-4 text-15 font-semibold text-enamel-950 ${DISABLED} ${
               tone === 'brass' ? 'bg-brass-500' : 'bg-lume-300'
             }`}
           >

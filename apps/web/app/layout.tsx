@@ -45,7 +45,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
       <body className="min-h-dvh pb-14">
         <ChronoMotion>
           <WalletProvider>
-            <header className="sticky top-0 z-10 flex min-h-14 items-center justify-between gap-3 border-b border-brass-500/15 bg-enamel-950/90 px-4 py-1.5 backdrop-blur">
+            <header className="sticky top-0 z-10 flex min-h-14 items-center justify-between gap-3 border-b border-rule-faint bg-enamel-900 px-4 py-1.5">
               <Link
                 href="/"
                 aria-label="Horagon, tonight's games"

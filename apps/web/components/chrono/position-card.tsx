@@ -4,6 +4,7 @@
 // still the whole wallet's (one run at a time, every copy shows it).
 import type { PositionsResponse, Side } from '@horagon/sdk'
 import { parseAmount } from '@horagon/sdk/amount'
+import { signedUsdc } from '../../lib/chrono/controls'
 import { explorerTx, usdc } from '../../lib/format'
 import { WALLET_PREPARING } from '../../lib/wallet-copy'
 import { ErrorText } from '../error-text'
@@ -30,7 +31,7 @@ export function PositionCard(p: PositionCardProps) {
   )
   const claimable = rows.some((x) => x.claimable)
   return (
-    <section className="space-y-3 rounded-card border border-brass-500/15 p-4">
+    <section className="space-y-3 rounded-card border border-rule-faint p-4">
       <h2 className="text-12 uppercase tracking-[0.3em] text-brass-500">Your position</h2>
       {rows.length === 0 ? (
         <p className="text-13 text-ash-400">No positions yet.</p>
@@ -38,7 +39,6 @@ export function PositionCard(p: PositionCardProps) {
         <ul className="divide-y divide-line">
           {rows.map((x) => {
             const team = p.teams[x.side]
-            const down = x.pnlUsdc.startsWith('-')
             return (
               <li key={`${x.market}-${x.side}`} className="flex items-center gap-3 py-2">
                 {/* Yours, one live ◆ for either side: teams have no colour (review §3.2). */}
@@ -51,10 +51,8 @@ export function PositionCard(p: PositionCardProps) {
                   </p>
                   <p className="text-ash-400">
                     paid {usdc(x.costUsdc)} · worth {usdc(x.valueUsdc)}{' '}
-                    <span className={down ? 'text-red-400' : 'text-lume-300'}>
-                      ({down ? '' : '+'}
-                      {usdc(x.pnlUsdc)})
-                    </span>
+                    {/* One ink for gain and loss, the sign printed (review §4.7, u3 D2). */}
+                    <span className="text-ivory-100">({signedUsdc(x.pnlUsdc)})</span>
                   </p>
                   <p className="text-ash-400">
                     {x.outcome === null

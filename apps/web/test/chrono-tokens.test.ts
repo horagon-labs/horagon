@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import manifest from '../app/manifest'
 import { COLORS, type ColorToken, contrast, luminance } from '../lib/chrono/tokens'
-import { deltaE2000, VISIONS, visionDelta } from './color-science'
+import { deltaE2000, over, VISIONS, visionDelta } from './color-science'
 
 const root = join(import.meta.dirname, '..')
 const read = (...path: string[]) => readFileSync(join(root, ...path), 'utf8')
@@ -92,16 +92,9 @@ const UI_PAIRS: [string, ColorToken, ColorToken][] = [
   ['U14 buzzer index across the track', 'brass-700', 'rule-faint'],
   ['U15 focus on the page', 'ivory-100', 'enamel-950'],
   ['U15 focus on a slot', 'ivory-100', 'enamel-800'],
+  ['U16 hovered or lit row edge', 'ivory-100', 'enamel-950'],
+  ['disabled dashed edge on the page', 'line', 'enamel-950'],
 ]
-
-/** Alpha over a background, blended in gamma sRGB as browsers do. */
-function over(fg: string, alpha: number, bg: string): string {
-  const ch = (hex: string, i: number) => Number.parseInt(hex.slice(1 + 2 * i, 3 + 2 * i), 16)
-  return `#${[0, 1, 2]
-    .map((i) => Math.round(ch(fg, i) * alpha + ch(bg, i) * (1 - alpha)))
-    .map((v) => v.toString(16).padStart(2, '0'))
-    .join('')}`
-}
 
 /**
  * Colors that meet on one element and must stay apart for every viewer (u3 §3.3): CIEDE2000 of 20
@@ -145,7 +138,7 @@ const OLD_COLORS_KEY = new RegExp(`COLORS(?:\\['(?:${OLD_NAMES})'\\]|\\.line\\b)
  * fall. Lower these when a line moves to a semantic name; raise one only for a line the light
  * branding review's Phase 1 asks for by its old name, and say so in the commit.
  */
-const OLD_UTILITY_CEILING = 224
+const OLD_UTILITY_CEILING = 222
 const OLD_COLORS_KEY_CEILING = 28
 
 describe('Chronometer tokens (spec 2.1, light branding review §3)', () => {

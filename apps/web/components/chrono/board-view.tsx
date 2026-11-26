@@ -7,6 +7,7 @@
 // and hovering an arc lights its row.
 import type { Game, PositionsResponse } from '@horagon/sdk'
 import { boardModel, followChips, followSummary, type Upcoming } from '../../lib/chrono/board'
+import { SELECTED } from '../../lib/chrono/controls'
 import type { Health } from '../../lib/chrono/health'
 import { ErrorText } from '../error-text'
 import { DialRow } from './dial-row'
@@ -60,7 +61,7 @@ export function BoardView(p: BoardViewProps) {
                     type="button"
                     aria-pressed={p.follows.includes(t)}
                     onClick={() => p.onToggleFollow(t)}
-                    className="min-h-11 rounded-full border border-line px-3 text-13 text-ash-400 aria-pressed:border-lume-300 aria-pressed:text-lume-300"
+                    className={`min-h-11 rounded-full border border-line px-3 text-13 text-ash-400 aria-pressed:text-ivory-100 ${SELECTED}`}
                   >
                     {p.follows.includes(t) ? '★' : '☆'} {t}
                   </button>
