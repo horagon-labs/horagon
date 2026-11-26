@@ -129,7 +129,18 @@ export function ShareCard(p: ShareCardProps) {
             {p.headline}
           </div>
         )}
-        <div style={{ fontSize: 24, color: COLORS['amber-400'], marginTop: 16 }}>
+        {/* The play-money line in the one look it has everywhere (light branding review §4.1). */}
+        <div
+          style={{
+            fontSize: 24,
+            fontWeight: 600,
+            color: COLORS['ivory-100'],
+            background: COLORS['enamel-900'],
+            borderTop: `2px solid ${COLORS['brass-700']}`,
+            padding: '10px 16px',
+            marginTop: 16,
+          }}
+        >
           {PLAY_MONEY_NOTICE}
         </div>
       </div>

@@ -145,8 +145,8 @@ const OLD_COLORS_KEY = new RegExp(`COLORS(?:\\['(?:${OLD_NAMES})'\\]|\\.line\\b)
  * fall. Lower these when a line moves to a semantic name; raise one only for a line the light
  * branding review's Phase 1 asks for by its old name, and say so in the commit.
  */
-const OLD_UTILITY_CEILING = 233
-const OLD_COLORS_KEY_CEILING = 36
+const OLD_UTILITY_CEILING = 235
+const OLD_COLORS_KEY_CEILING = 38
 
 describe('Chronometer tokens (spec 2.1, light branding review §3)', () => {
   it('computes WCAG luminance and contrast', () => {

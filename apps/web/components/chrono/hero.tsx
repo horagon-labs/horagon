@@ -18,7 +18,10 @@ export function Hero() {
       >
         {HERO_LINE}
       </h1>
-      <p className="text-13 text-brass-400">{HERO_SUB}</p>
+      <p className="flex items-center gap-2 text-14 font-medium text-ivory-100">
+        <span aria-hidden="true" className="h-px w-3.5 flex-none bg-brass-700" />
+        {HERO_SUB}
+      </p>
       <ol className="grid gap-1 text-13 text-ash-400 sm:grid-cols-3 sm:gap-4">
         {HERO_STEPS.map((step, i) => (
           <li key={step} className="flex gap-2">
