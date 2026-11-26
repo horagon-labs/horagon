@@ -127,7 +127,8 @@ export function decide(v: MarketView, ctx: DecideContext): Decision {
   if (now >= v.endTs - p.endBufferSecs) return skip('closing')
   if (model === null || !Number.isFinite(model) || model < 0 || model > 1) return skip('no-model')
   if (v.modelAt === null || now - v.modelAt > p.modelMaxAgeSecs) return skip('stale-model')
-  // 2. A fan traded recently: let fans set the price.
+  // 2. Any other wallet traded recently (a fan, or a team or bot wallet: the fan-lag check counts
+  // every wallet but the agent's): let that trade set the price.
   if (v.lastFanTradeAt !== null && now - v.lastFanTradeAt <= p.fanLagSecs) {
     return skip('fan-trade')
   }

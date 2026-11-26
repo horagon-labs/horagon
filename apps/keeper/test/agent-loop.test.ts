@@ -17,7 +17,7 @@ import {
 import { Keypair } from '@solana/web3.js'
 import pino from 'pino'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
-import { type AgentDeps, ReferenceAgent } from '../src/agent/agent'
+import { type AgentDeps, ReferenceAgent, SLOW_READS_MSG } from '../src/agent/agent'
 import { type AgentParams, defaultAgentParams } from '../src/agent/config'
 import type { Decision } from '../src/agent/decide'
 import { ProgramFailure, UnresolvedAttempt } from '../src/executor'
@@ -129,6 +129,8 @@ function movePrice(fields: MarketFields, price: number): void {
 const reasons = (ds: Decision[]) => ds.map((d) => (d.action === 'skip' ? d.reason : 'swap'))
 const sizesOf = (ds: Decision[]) => ds.map((d) => (d.action === 'swap' ? d.amountIn : 0n))
 const keys = () => alerts.map(([k]) => k)
+/** The `agent` row of keeper_heartbeats. */
+const agentRow = async () => (await getHeartbeat(h.db, 'agent'))?.info
 
 describe('a dry run', () => {
   it('logs every decision and sends nothing', async () => {
@@ -273,8 +275,31 @@ describe('a live round', () => {
     for (const m of markets) await setModel(m.gameId, 0.7)
     const second = await a.round()
     expect(second.cut).toBeNull()
-    expect(reasons(second.decisions).sort()).toEqual(['in-band', 'swap'])
+    // It starts with the market the first round left.
+    expect(reasons(second.decisions)).toEqual(['swap', 'in-band'])
     expect(sender.specs.map((s) => s.label)).toEqual([sentFirst, other])
+  })
+
+  it('starts each round at the market after the last one decided, so a cut leaves none behind', async () => {
+    const markets = [await liveMarket(1), await liveMarket(2), await liveMarket(3)]
+    // Every send takes 90 s: each round decides one market, swaps it and is cut.
+    sender.onSend = () => {
+      clock += 90
+    }
+    const a = agentWith()
+    const decided: string[] = []
+    for (let round = 1; round <= 4; round++) {
+      // The keeper's tick keeps the model fresh meanwhile.
+      for (const m of markets) await setModel(m.gameId, 0.7)
+      const report = await a.round()
+      expect(report.cut, `round ${round}`).toBe('stale')
+      expect(reasons(report.decisions), `round ${round}`).toEqual(['swap'])
+      decided.push(report.decisions[0]?.gameId ?? '')
+    }
+    // Every market is decided within 3 rounds, and the fourth wraps around to the first.
+    expect(decided.slice(0, 3).sort()).toEqual(['nba-1', 'nba-2', 'nba-3'])
+    expect(decided[3]).toBe(decided[0])
+    expect(sender.specs.map((s) => s.label)).toEqual(decided.map((g) => `swap ${g}`))
   })
 
   it('decides on the clock read after the hourly faucet and claims, not before', async () => {
@@ -379,15 +404,64 @@ describe('a live round', () => {
   it('writes its heartbeat', async () => {
     await liveMarket(1)
     await agentWith({ dryRun: true }).round()
-    const hb = await getHeartbeat(h.db, 'agent')
-    expect(hb?.info).toEqual({
+    expect(await agentRow()).toEqual({
       round: 1,
       dryRun: true,
       paused: false,
       markets: 1,
+      decided: 1,
+      cut: null,
       sent: 0,
       disabled: [],
     })
+  })
+
+  it('writes the cut in its heartbeat, and warns at most every 10 min while slow reads cut every round', async () => {
+    const { gameId } = await liveMarket(1)
+    const a = agentWith({ dryRun: true })
+    const warnings = () => logs.filter((l) => l.msg === SLOW_READS_MSG)
+    // A degraded RPC: every chain read takes 15 s, so the snapshot is older than half an
+    // interval (10 s) before the first decision.
+    chain.onRead = () => {
+      clock += 15
+    }
+    const first = await a.round()
+    expect(first.cut).toBe('stale')
+    expect(first.decisions).toEqual([])
+    expect(await agentRow()).toMatchObject({ markets: 1, decided: 0, cut: 'stale', sent: 0 })
+    await a.round()
+    expect(warnings()).toEqual([])
+    // The third round in a row cut before its first decision.
+    await a.round()
+    expect(warnings()).toHaveLength(1)
+    expect(warnings()[0]).toMatchObject({ level: 40, rounds: 3, freshSecs: 10, markets: 1 })
+    const warnedAt = clock
+    // Still slow: no other warning for 10 min.
+    clock = warnedAt + 584
+    await a.round()
+    expect(clock).toBe(warnedAt + 599)
+    expect(warnings()).toHaveLength(1)
+    await a.round()
+    expect(warnings()).toHaveLength(2)
+    expect(warnings()[1]).toMatchObject({ rounds: 5 })
+    // The RPC answers fast again: a round that decides ends the streak.
+    chain.onRead = null
+    await setModel(gameId, 0.7)
+    const fast = await a.round()
+    expect(fast.cut).toBeNull()
+    expect(reasons(fast.decisions)).toEqual(['swap'])
+    expect(await agentRow()).toMatchObject({ markets: 1, decided: 1, cut: null })
+    // Slow again 10 min later: the count starts over, and the third round warns.
+    clock += 600
+    chain.onRead = () => {
+      clock += 15
+    }
+    await a.round()
+    await a.round()
+    expect(warnings()).toHaveLength(2)
+    await a.round()
+    expect(warnings()).toHaveLength(3)
+    expect(warnings()[2]).toMatchObject({ rounds: 3 })
   })
 })
 
@@ -506,6 +580,40 @@ describe('failures', () => {
     expect(after.sent).toBe(1)
   })
 
+  it('starts a pause when the failure is seen: after a 90 s send it lasts the full 10 min', async () => {
+    await liveMarket(1)
+    await liveMarket(2)
+    // One failure pauses. The first send gives up after 90 s, its result unknown.
+    sender.onAttempt = () => {
+      clock += 90
+    }
+    sender.fail = new UnresolvedAttempt('swap nba-1: unresolved after 90 s')
+    const a = agentWith({ params: { maxFailures: 1 } })
+    const report = await a.round()
+    expect(report.failures).toBe(1)
+    expect(keys()).toEqual(['agent-paused'])
+    // The pause runs from the failure, 90 s after the round's read.
+    expect(a.failures.pausedUntil).toBe(NOW + 90 + 600)
+    // It ends the round before the other market.
+    expect(report.cut).toBe('pause')
+    expect(report.decisions).toHaveLength(1)
+    expect(await agentRow()).toMatchObject({
+      paused: true,
+      pausedUntil: NOW + 690,
+      cut: 'pause',
+      markets: 2,
+      decided: 1,
+    })
+    sender.fail = null
+    sender.onAttempt = null
+    clock = NOW + 90 + 599
+    expect((await a.round()).paused).toBe(true)
+    clock = NOW + 90 + 600
+    const after = await a.round()
+    expect(after.paused).toBe(false)
+    expect(after.markets).toBe(2)
+  })
+
   it('counts failed reads, and a clean round ends the streak', async () => {
     await liveMarket(1)
     const a = agentWith({ dryRun: true })
@@ -560,49 +668,48 @@ describe('balances, faucet and claims', () => {
     expect(faucetCalls).toHaveLength(2)
   })
 
+  /**
+   * A finalized market `n` the agent traded, resolved on the chain to `winningSide`, with the
+   * agent's YES and NO balances there (null: no account).
+   */
+  const settled = async (n: number, winningSide: number, yes: bigint | null, no: bigint | null) => {
+    const { key, fields, gameId } = await liveMarket(n)
+    await setModel(gameId, 1, 'final')
+    await updateMarket(h.db, key.toBase58(), { status: 'finalized' })
+    chain.setMarket({ ...fields, resolved: true, winningSide })
+    const yesMint = deriveYesMint(key)
+    const noMint = deriveNoMint(key)
+    if (yes !== null)
+      chain.set(
+        ataAddress({ owner: agent.publicKey, mint: yesMint }),
+        tokenInfo(yesMint, agent.publicKey, yes),
+      )
+    if (no !== null)
+      chain.set(
+        ataAddress({ owner: agent.publicKey, mint: noMint }),
+        tokenInfo(noMint, agent.publicKey, no),
+      )
+    await insertTrades(h.db, [
+      {
+        sig: `t${n}`,
+        ixIndex: 3,
+        market: key.toBase58(),
+        wallet: agent.publicKey.toBase58(),
+        direction: 'usdcToYes',
+        usdcAmount: 10n * M,
+        usdcDelta: -10n * M,
+        yesDelta: 15n * M,
+        noDelta: 0n,
+        fee: 0n,
+        slot: 1n,
+        blockTime: new Date((clock - 3_600) * 1000),
+        botMemo: true,
+      },
+    ])
+    return key
+  }
+
   it('claims settled markets where it holds winning shares, without a memo', async () => {
-    const wallet = agent.publicKey.toBase58()
-    const settled = async (
-      n: number,
-      winningSide: number,
-      yes: bigint | null,
-      no: bigint | null,
-    ) => {
-      const { key, fields, gameId } = await liveMarket(n)
-      await setModel(gameId, 1, 'final')
-      await updateMarket(h.db, key.toBase58(), { status: 'finalized' })
-      chain.setMarket({ ...fields, resolved: true, winningSide })
-      const yesMint = deriveYesMint(key)
-      const noMint = deriveNoMint(key)
-      if (yes !== null)
-        chain.set(
-          ataAddress({ owner: agent.publicKey, mint: yesMint }),
-          tokenInfo(yesMint, agent.publicKey, yes),
-        )
-      if (no !== null)
-        chain.set(
-          ataAddress({ owner: agent.publicKey, mint: noMint }),
-          tokenInfo(noMint, agent.publicKey, no),
-        )
-      await insertTrades(h.db, [
-        {
-          sig: `t${n}`,
-          ixIndex: 3,
-          market: key.toBase58(),
-          wallet,
-          direction: 'usdcToYes',
-          usdcAmount: 10n * M,
-          usdcDelta: -10n * M,
-          yesDelta: 15n * M,
-          noDelta: 0n,
-          fee: 0n,
-          slot: 1n,
-          blockTime: new Date((clock - 3_600) * 1000),
-          botMemo: true,
-        },
-      ])
-      return key
-    }
     const won = await settled(2, 1, 15n * M, null)
     await settled(3, 2, 15n * M, null) // lost: no NO shares
     await settled(4, 1, null, 3n * M) // only NO shares of a YES market
@@ -620,6 +727,22 @@ describe('balances, faucet and claims', () => {
     // Hourly, like the faucet.
     await a.round()
     expect(sender.specs).toHaveLength(1)
+  })
+
+  it('sends no claim after the stop signal, and no swap after that', async () => {
+    await settled(2, 1, 15n * M, null)
+    await settled(3, 1, 15n * M, null)
+    await liveMarket(4)
+    const stop = new AbortController()
+    // The signal comes while the first claim is in flight: that send completes, no other starts.
+    sender.onSend = () => stop.abort()
+    const report = await agentWith().round(stop.signal)
+    expect(sender.specs.map((s) => s.label)).toEqual([expect.stringMatching(/^claim nba-[23]$/)])
+    // The live market is read, then the round ends before its first decision.
+    expect(report.cut).toBe('stop')
+    expect(report.markets).toBe(1)
+    expect(report.decisions).toEqual([])
+    expect(report.sent).toBe(0)
   })
 
   it('logs a claim in a dry run instead of sending it', async () => {

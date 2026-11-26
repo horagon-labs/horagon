@@ -3,8 +3,9 @@
 // move with the game and fans find a counterparty. Every swap carries the `horagon:bot` memo, so
 // it never counts as a fan. One round (every AGENT_INTERVAL_SECS): read the keeper's DB and the
 // chain, decide per market (decide.ts), send at most one swap per market, check the swaps of the
-// round before, page on low balances. A round ends early when the stop signal comes or when its
-// snapshot is older than half an interval. Hourly: the faucet and the claims of settled markets.
+// round before, page on low balances. A round ends early when the stop signal comes, when a
+// pause starts or when its snapshot is older than half an interval, and the next round starts
+// at the market after the last one decided. Hourly: the faucet and the claims of settled markets.
 import {
   type Db,
   getHeartbeat,
@@ -33,11 +34,19 @@ import { dueEvery } from '../loop'
 import { isMissingAccount } from '../treasury'
 import type { AgentParams } from './config'
 import { type Decision, decide, leagueAllowed, type MarketView } from './decide'
-import { AnomalyWatch, FailureGuard, SpendBook } from './guards'
+import { AnomalyWatch, FailureGuard, Rotation, SpendBook } from './guards'
 import { agentClaimInstructions, agentSwapInstructions, CLAIM_COMPUTE_UNITS } from './tx'
 
 /** The faucet and the claims run at most this often. */
 export const AGENT_HOURLY_SECS = 3_600
+
+/**
+ * Rounds in a row cut before their first decision (a read slower than half an interval: the
+ * RPC or the database is degraded) before the agent logs SLOW_READS_MSG, and how often at most.
+ */
+export const SLOW_READS_ROUNDS = 3
+export const SLOW_READS_WARN_SECS = 600
+export const SLOW_READS_MSG = 'agent: rounds cut before their first decision, the reads are slow'
 
 type AgentConnection = Pick<
   Connection,
@@ -67,20 +76,25 @@ export interface AgentDeps {
 
 export interface RoundReport {
   paused: boolean
+  /** The markets the round read (0 when it read nothing: paused, or the read failed). */
+  markets: number
+  /** One per market decided, in the order decided. */
   decisions: Decision[]
   /** Swaps that landed this round. */
   sent: number
   failures: number
   /**
-   * Why the round ended before its last market, which then waits for the next round's read:
-   * `stale` when its snapshot grew older than half an interval (a slow send), `stop` when the
-   * stop signal came. Null when it went through every market.
+   * Why the round ended before its last market, whose turn then comes first in the next round:
+   * `stale` when its snapshot grew older than half an interval (a slow send, or a slow read when
+   * nothing was decided), `stop` when the stop signal came, `pause` when one of its failures
+   * started a pause. Null when it went through every market.
    */
-  cut: 'stale' | 'stop' | null
+  cut: 'stale' | 'stop' | 'pause' | null
 }
 
 const emptyReport = (): RoundReport => ({
   paused: false,
+  markets: 0,
   decisions: [],
   sent: 0,
   failures: 0,
@@ -107,9 +121,13 @@ export class ReferenceAgent {
   readonly book = new SpendBook()
   readonly watch = new AnomalyWatch()
   readonly failures: FailureGuard
+  private readonly rotation = new Rotation()
   private readonly hourlyDue = dueEvery(AGENT_HOURLY_SECS)
   private rounds = 0
   private last: RoundReport = emptyReport()
+  /** Rounds in a row that read and were cut before their first decision, and the last warning. */
+  private slowRounds = 0
+  private slowWarnedAt: number | null = null
 
   constructor(private readonly d: AgentDeps) {
     this.failures = new FailureGuard(d.params.maxFailures, d.params.pauseSecs)
@@ -175,7 +193,7 @@ export class ReferenceAgent {
     }
     if (this.hourlyDue(started)) {
       await this.fund()
-      report.failures += await this.claimAll(started, signal)
+      report.failures += await this.claimAll(signal)
     }
     // The clock again: the faucet and the claims may have taken minutes. The snapshot is read
     // as of `now`, and every decision of the round is made on both.
@@ -184,44 +202,73 @@ export class ReferenceAgent {
     try {
       snap = await this.read(now)
     } catch (err) {
-      await this.failed(now, 'read', err)
+      await this.failed('read', err)
       report.failures++
       await this.beat(report, now)
       return report
     }
+    report.markets = snap.views.length
     await this.balanceAlerts(snap)
     // What the round may still spend. Every swap it plans comes off, sent or not: a dry run,
     // a send whose result is unknown and one that failed alike, so one round never plans more
     // than the wallet held when it was read.
     let balance = snap.musdc
-    for (const [i, view] of snap.views.entries()) {
-      if (this.failures.paused(now)) break
-      // Before each decision: a stop signal, or a snapshot that a slow send made old, ends the
-      // round. The markets left are decided on the next round's fresh read.
+    // In turn: from the market after the last one decided, wrapping around.
+    const order = snap.views.map((v) => v.market)
+    const start = this.rotation.start(order)
+    const views = [...snap.views.slice(start), ...snap.views.slice(0, start)]
+    for (const [i, view] of views.entries()) {
+      // Before each decision: a pause that a failure of this round started, a stop signal, or
+      // a snapshot that a slow read or send made old, ends the round. The markets left are
+      // decided first on the next round's fresh read.
       const ageSecs = this.d.now() - now
-      const cut = signal?.aborted ? 'stop' : ageSecs > this.freshSecs ? 'stale' : null
+      let cut: RoundReport['cut'] = null
+      if (this.failures.paused(now)) cut = 'pause'
+      else if (signal?.aborted) cut = 'stop'
+      else if (ageSecs > this.freshSecs) cut = 'stale'
       if (cut) {
         report.cut = cut
-        this.d.log.info(
-          { reason: cut, ageSecs, left: snap.views.length - i },
-          'agent round cut short',
-        )
+        this.d.log.info({ reason: cut, ageSecs, left: views.length - i }, 'agent round cut short')
         break
       }
       const decision = decide(view, { now, balance, params: this.d.params })
       report.decisions.push(decision)
+      this.rotation.decided(view.market, order)
       this.logDecision(decision)
       if (decision.action !== 'swap') continue
       balance -= decision.amountIn
       if (this.d.dryRun) continue
       const account = snap.accounts.get(view.market)
       if (!account) continue
-      if (await this.swap(decision, account, now)) report.sent++
+      if (await this.swap(decision, account)) report.sent++
       else report.failures++
     }
     if (report.failures === 0) this.failures.clean()
+    this.slowReads(report)
     await this.beat(report, now)
     return report
+  }
+
+  /**
+   * A round cut `stale` before its first decision read slower than half an interval: a degraded
+   * RPC or database, and the agent trades nothing (safe, but silent). From SLOW_READS_ROUNDS such
+   * rounds in a row, a warning at most every SLOW_READS_WARN_SECS. Any other round that read
+   * ends the streak; a paused round and a failed read leave it as it was.
+   */
+  private slowReads(report: RoundReport): void {
+    if (report.cut !== 'stale' || report.decisions.length > 0) {
+      this.slowRounds = 0
+      return
+    }
+    this.slowRounds++
+    const at = this.d.now()
+    if (this.slowRounds < SLOW_READS_ROUNDS) return
+    if (this.slowWarnedAt !== null && at - this.slowWarnedAt < SLOW_READS_WARN_SECS) return
+    this.slowWarnedAt = at
+    this.d.log.warn(
+      { rounds: this.slowRounds, freshSecs: this.freshSecs, markets: report.markets },
+      SLOW_READS_MSG,
+    )
   }
 
   /** The keeper's DB rows, the fan trades and the agent's totals, then the chain. */
@@ -353,7 +400,6 @@ export class ReferenceAgent {
   private async swap(
     d: Extract<Decision, { action: 'swap' }>,
     account: MarketAccount,
-    now: number,
   ): Promise<boolean> {
     const market = new PublicKey(d.market)
     try {
@@ -396,7 +442,7 @@ export class ReferenceAgent {
       // It may still land: counted as spent, and checked on the next read like a landed one (a
       // read that shows no move proves nothing and clears the check).
       if (err instanceof UnresolvedAttempt) this.sentSwap(d)
-      await this.failed(now, 'send', err)
+      await this.failed('send', err)
       return false
     }
   }
@@ -425,7 +471,7 @@ export class ReferenceAgent {
    * claim_winnings on every settled market where the agent holds winning shares (the chain
    * decides: resolved, and a winning balance above 0). Returns the failures.
    */
-  private async claimAll(now: number, signal?: AbortSignal): Promise<number> {
+  private async claimAll(signal?: AbortSignal): Promise<number> {
     let failures = 0
     let rows: Array<{ pubkey: string; gameId: string }>
     let infos: Array<AccountInfo<Buffer> | null>
@@ -434,7 +480,7 @@ export class ReferenceAgent {
       if (rows.length === 0) return 0
       infos = await this.accountInfos(rows.map((r) => new PublicKey(r.pubkey)))
     } catch (err) {
-      await this.failed(now, 'read', err)
+      await this.failed('read', err)
       return 1
     }
     for (const [i, row] of rows.entries()) {
@@ -486,16 +532,20 @@ export class ReferenceAgent {
         )
       } catch (err) {
         failures++
-        await this.failed(now, 'send', err)
+        await this.failed('send', err)
       }
     }
     return failures
   }
 
-  private async failed(now: number, kind: 'read' | 'send', err: unknown): Promise<void> {
+  /**
+   * One failed read or send, seen now: after the call returned, which for a send can be 90 s or
+   * more after the round's read. A pause it starts lasts the full AGENT_PAUSE_SECS from here.
+   */
+  private async failed(kind: 'read' | 'send', err: unknown): Promise<void> {
     const error = errorSummary(err).message
     this.d.log.warn({ kind, error, streak: this.failures.count + 1 }, `agent ${kind} failed`)
-    if (this.failures.fail(now)) {
+    if (this.failures.fail(this.d.now())) {
       const { maxFailures, pauseSecs } = this.d.params
       this.d.log.error({ pauseSecs }, 'agent paused')
       await this.d.alerts.send(
@@ -507,7 +557,8 @@ export class ReferenceAgent {
 
   /**
    * The `agent` row of keeper_heartbeats, written after every round, a paused or failed one
-   * included, and once more with `stopped` at a clean stop; a failed write is only logged.
+   * included, and once more with `stopped` at a clean stop; a failed write is only logged. It
+   * carries the markets the round read and the ones it decided, and why it was cut, if it was.
    */
   private async beat(report: RoundReport, now: number, stopped = false): Promise<void> {
     this.last = report
@@ -518,7 +569,9 @@ export class ReferenceAgent {
         dryRun: this.d.dryRun,
         paused,
         ...(paused ? { pausedUntil: this.failures.pausedUntil } : {}),
-        markets: report.decisions.length,
+        markets: report.markets,
+        decided: report.decisions.length,
+        cut: report.cut,
         sent: report.sent,
         disabled: this.watch.disabledMarkets,
         ...(stopped ? { stopped: true } : {}),

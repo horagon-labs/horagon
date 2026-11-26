@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { AnomalyWatch, FailureGuard, SpendBook } from '../src/agent/guards'
+import { AnomalyWatch, FailureGuard, Rotation, SpendBook } from '../src/agent/guards'
 
 describe('AnomalyWatch', () => {
   const yes = { gameId: 'nba-1', side: 'yes' as const, model: 0.7, price: 0.6 }
@@ -71,5 +71,35 @@ describe('SpendBook', () => {
     expect(b.totals('A')).toEqual({ spent: 50n, swaps: 2 })
     expect(b.totals('A', { spent: 10n, swaps: 5 })).toEqual({ spent: 50n, swaps: 5 })
     expect(b.totals('A', { spent: 90n, swaps: 1 })).toEqual({ spent: 90n, swaps: 2 })
+  })
+})
+
+describe('Rotation', () => {
+  it('starts at the first market until one is decided, then at the one after it, wrapping', () => {
+    const r = new Rotation()
+    expect(r.start(['A', 'B', 'C'])).toBe(0)
+    r.decided('A', ['A', 'B', 'C'])
+    expect(r.start(['A', 'B', 'C'])).toBe(1)
+    r.decided('C', ['A', 'B', 'C'])
+    expect(r.start(['A', 'B', 'C'])).toBe(0)
+    expect(r.start([])).toBe(0)
+  })
+
+  it('starts at a market listed since, when it comes right after the last one decided', () => {
+    const r = new Rotation()
+    r.decided('B', ['A', 'B', 'C'])
+    expect(r.start(['A', 'B', 'X', 'C'])).toBe(2)
+  })
+
+  it('starts at the next market still listed when the last one decided is gone', () => {
+    const r = new Rotation()
+    r.decided('B', ['A', 'B', 'C', 'D'])
+    // B's game ended: C comes next.
+    expect(r.start(['A', 'C', 'D'])).toBe(1)
+    // B and C gone: D; B, C and D gone: A, wrapping around.
+    expect(r.start(['A', 'D'])).toBe(1)
+    expect(r.start(['X', 'A'])).toBe(1)
+    // None of the markets listed then is listed now.
+    expect(r.start(['X', 'Y'])).toBe(0)
   })
 })

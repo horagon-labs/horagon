@@ -60,22 +60,22 @@ the alert table; the key itself is in the keeper's `alert` log line (the last co
 
 ## What lives where
 
-| What                                       | Where                                                                                                                                                                                                                                           |
-| ------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Keeper code                                | The VPS, `~/horagon` (a tarball of the deployed commit; `~/horagon/REVISION` names it)                                                                                                                                                          |
-| Keeper variables                           | The VPS, `~/horagon/.env.keeper` (`chmod 600`), read by both units                                                                                                                                                                              |
-| Agent key (the reference agent's wallet)   | The VPS, `~/horagon/.keys/agent.json` (`chmod 600`), and nowhere else; procedure J                                                                                                                                                              |
-| Attestor key (the keeper's signer)         | The VPS, `~/horagon/.keys/attestor.json` (`chmod 600`), and nowhere else                                                                                                                                                                        |
-| Elo ratings and model sigma                | The VPS, `~/horagon/apps/keeper/data/elo.json` (copied by hand, `docs/deploy.md`); the keeper does not start without it. Sigma, the in-game model's spread, is the measured standard deviation of the home margin over the 2025-26 season: 16.5 |
-| Raw ESPN archive                           | The VPS, `~/horagon/apps/keeper/data/archive/<ET date>.ndjson`; gzipped after 2 days, deleted after 30                                                                                                                                          |
-| Units                                      | The VPS, `~/.config/systemd/user/`: `horagon-keeper.service`, `horagon-watchdog.service`, `horagon-watchdog.timer`, `horagon-agent.service` (copied from `ops/systemd` by every deploy)                                                         |
-| Admin and guardian keys                    | Your machine, `.keys/deployer.json` and `.keys/guardian.json`                                                                                                                                                                                   |
-| Web app and API v1                         | Vercel; the sponsor key is its `SPONSOR_SECRET_KEY`                                                                                                                                                                                             |
-| Database                                   | Supabase Postgres (`DATABASE_URL`)                                                                                                                                                                                                              |
-| `keeper_heartbeats` row `keeper`           | Written by the keeper after every round (5 s): `round`, `actions`, `feed` and the failure streaks `failing.tick` and `failing.index`. `status` prints it; `/api/v1/health` reads its age                                                        |
-| `keeper_heartbeats` row `agent`            | Written by the reference agent after every round (20 s), paused ones too: its round count, dry run or not, paused or not (and until when), the markets it looked at, the swaps it sent, the markets it disabled; `stopped` after a clean stop   |
-| `keeper_heartbeats` row `watchdog`         | The time of the watchdog's last `heartbeat` page (`pagedAt`), so a new watchdog run knows when it paged                                                                                                                                         |
-| `keeper_heartbeats` row `propose:<gameId>` | The `propose` attempts of one game: the evidence hash, the challenge round, and how each send ended. `status` prints the newest one                                                                                                             |
+| What                                       | Where                                                                                                                                                                                                                                                                                                                                                          |
+| ------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Keeper code                                | The VPS, `~/horagon` (a tarball of the deployed commit; `~/horagon/REVISION` names it)                                                                                                                                                                                                                                                                         |
+| Keeper variables                           | The VPS, `~/horagon/.env.keeper` (`chmod 600`), read by both units                                                                                                                                                                                                                                                                                             |
+| Agent key (the reference agent's wallet)   | The VPS, `~/horagon/.keys/agent.json` (`chmod 600`), and nowhere else; procedure J                                                                                                                                                                                                                                                                             |
+| Attestor key (the keeper's signer)         | The VPS, `~/horagon/.keys/attestor.json` (`chmod 600`), and nowhere else                                                                                                                                                                                                                                                                                       |
+| Elo ratings and model sigma                | The VPS, `~/horagon/apps/keeper/data/elo.json` (copied by hand, `docs/deploy.md`); the keeper does not start without it. Sigma, the in-game model's spread, is the measured standard deviation of the home margin over the 2025-26 season: 16.5                                                                                                                |
+| Raw ESPN archive                           | The VPS, `~/horagon/apps/keeper/data/archive/<ET date>.ndjson`; gzipped after 2 days, deleted after 30                                                                                                                                                                                                                                                         |
+| Units                                      | The VPS, `~/.config/systemd/user/`: `horagon-keeper.service`, `horagon-watchdog.service`, `horagon-watchdog.timer`, `horagon-agent.service` (copied from `ops/systemd` by every deploy)                                                                                                                                                                        |
+| Admin and guardian keys                    | Your machine, `.keys/deployer.json` and `.keys/guardian.json`                                                                                                                                                                                                                                                                                                  |
+| Web app and API v1                         | Vercel; the sponsor key is its `SPONSOR_SECRET_KEY`                                                                                                                                                                                                                                                                                                            |
+| Database                                   | Supabase Postgres (`DATABASE_URL`)                                                                                                                                                                                                                                                                                                                             |
+| `keeper_heartbeats` row `keeper`           | Written by the keeper after every round (5 s): `round`, `actions`, `feed` and the failure streaks `failing.tick` and `failing.index`. `status` prints it; `/api/v1/health` reads its age                                                                                                                                                                       |
+| `keeper_heartbeats` row `agent`            | Written by the reference agent after every round (20 s), paused ones too: its round count, dry run or not, paused or not (and until when), the markets it read and the ones it decided, `cut` when the round ended early (`stale`, `stop` or `pause`; null when it decided them all), the swaps it sent, the markets it disabled; `stopped` after a clean stop |
+| `keeper_heartbeats` row `watchdog`         | The time of the watchdog's last `heartbeat` page (`pagedAt`), so a new watchdog run knows when it paged                                                                                                                                                                                                                                                        |
+| `keeper_heartbeats` row `propose:<gameId>` | The `propose` attempts of one game: the evidence hash, the challenge round, and how each send ended. `status` prints the newest one                                                                                                                                                                                                                            |
 
 ## The day before (by 05:00 UTC)
 
@@ -382,10 +382,14 @@ ssh "$HORAGON_VPS" systemctl --user stop horagon-agent
   `systemctl --user restart horagon-agent`. A deploy never restarts it. A crash or a stall exit,
   which systemd restarts on its own, keeps it disabled: at start the agent reads its last
   heartbeat, and when that row has no `stopped` it disables the markets listed there again (log
-  line `agent: the markets disabled before an unplanned restart stay disabled`). If a stop by hand
-  took over 120 s and systemd killed it, that row has no `stopped` either: restart it once more.
+  line `agent: the markets disabled before an unplanned restart stay disabled`). A stop by hand
+  that did not end cleanly leaves no `stopped` in that row either, so the next start keeps the
+  markets off: restart it once more. That happens when systemd killed it after 120 s, when a
+  second signal made it exit at once (code 130), or when its last heartbeat was not written (log
+  line `agent heartbeat not written`).
 - **A pause** (5 failed reads or sends in a row, `agent-paused`) lasts `AGENT_PAUSE_SECS`
-  (600 s). It reads and sends nothing meanwhile, but goes on writing its heartbeat every round
+  (600 s), counted from the failure that started it: after a send that took 90 s, from its end.
+  It reads and sends nothing meanwhile, but goes on writing its heartbeat every round
   (`paused: true` and `pausedUntil` in the `agent` row) and stays alive: a pause never trips the
   stall exit.
 - **Limits** (defaults, all in `.env.example`): at most 100 mUSDC a swap, 2,000 mUSDC and 40
@@ -394,8 +398,15 @@ ssh "$HORAGON_VPS" systemctl --user stop horagon-agent
   per market come from the trades table and from its own count, whichever is larger, and one
   round never plans more than the wallet held when the round read it. A round decides every
   market on one read, taken after the hourly faucet and claims; once that read is older than half
-  an interval (10 s, a slow send), the round ends (`agent round cut short`) and the markets left
-  wait for the next round's read.
+  an interval (10 s, a slow send), the round ends (`agent round cut short`, and `cut: 'stale'` in
+  the `agent` row) and the markets left wait for the next round's read. Each round starts at the
+  market after the last one decided, wrapping around, so the markets late in the list (by
+  `end_ts`, then address) get their turn on a busy night.
+- **Slow reads.** When the read itself takes over 10 s (a degraded RPC or database), every round
+  is cut before its first decision and the agent trades nothing. From the third such round in a
+  row it logs `agent: rounds cut before their first decision, the reads are slow` (a warning, at
+  most every 10 min). Nothing is wrong with the markets: check the RPC and the database, which
+  the keeper uses too; the agent goes on by itself once the reads are fast again.
 
 ## Alerts
 

@@ -1,6 +1,6 @@
 // The reference agent's in-process state: what it spent per market (the indexer lags, so the
-// DB alone can count low), the check that follows each landed swap, and the failure streak
-// that pauses it.
+// DB alone can count low), the check that follows each landed swap, the failure streak that
+// pauses it, and where the next round starts.
 import type { Side } from './decide'
 
 /** Spend and swap count per market, as this process sent them. */
@@ -127,5 +127,39 @@ export class FailureGuard {
   /** A round without a failure. */
   clean(): void {
     this.streak = 0
+  }
+}
+
+/**
+ * Where a round starts in its list of markets (read in the same order every round: end_ts, then
+ * address). A round can end before its last market (a slow send, the stop signal), so each one
+ * starts at the market after the last one the rounds before decided, wrapping around: a market
+ * late in the list is not left behind round after round. A round that decides nothing leaves the
+ * place where it was.
+ */
+export class Rotation {
+  /** The list of the round that decided `last`, in its order. */
+  private order: readonly string[] = []
+  private last: string | null = null
+
+  /** The index in `markets` (this round's list) to start at. */
+  start(markets: readonly string[]): number {
+    if (this.last === null || markets.length === 0) return 0
+    const here = markets.indexOf(this.last)
+    if (here >= 0) return (here + 1) % markets.length
+    // The last market decided is no longer listed (its game ended): the first market after it,
+    // in the order it was listed in then, that still is.
+    const at = this.order.indexOf(this.last)
+    for (let k = 1; k < this.order.length; k++) {
+      const i = markets.indexOf(this.order[(at + k) % this.order.length] as string)
+      if (i >= 0) return i
+    }
+    return 0
+  }
+
+  /** The round decided `market`; `markets` is that round's list. */
+  decided(market: string, markets: readonly string[]): void {
+    this.last = market
+    this.order = markets
   }
 }
