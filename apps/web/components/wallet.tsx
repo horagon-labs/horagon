@@ -11,6 +11,7 @@
 // (`affirmedHere`) or in the AgeDialog otherwise (lib/age-gate.ts).
 import type { PositionsResponse } from '@horagon/sdk'
 import type { Keypair } from '@solana/web3.js'
+import dynamic from 'next/dynamic'
 import {
   createContext,
   type ReactNode,
@@ -44,9 +45,11 @@ import {
 } from '../lib/burner'
 import { requestFunds } from '../lib/faucet'
 import { singleFlight } from '../lib/single-flight'
-import { claimAll } from '../lib/trade'
 import { usePoll } from '../lib/use-poll'
-import { AgeDialog } from './age-dialog'
+
+// Off the first load (R5): the dialog is the fallback ask (the trade panel asks inline), and the
+// claim code runs only when a position is claimable.
+const AgeDialog = dynamic(() => import('./age-dialog').then((m) => m.AgeDialog), { ssr: false })
 
 export type { Send }
 
@@ -250,6 +253,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       void claimFlight.run(async () => {
         setClaimRun({ claiming: true, claimed: [], error: undefined })
         try {
+          const { claimAll } = await import('../lib/trade')
           // Each claim shows as it lands, so a later failure still lists the ones before it.
           await claimAll(api, signer, (sig) =>
             setClaimRun((run) => ({ ...run, claimed: [...run.claimed, sig] })),
@@ -331,7 +335,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   return (
     <WalletContext.Provider value={value}>
       {children}
-      <AgeDialog open={gateOpen} error={gateError} onConfirm={onConfirm} onCancel={onCancel} />
+      {gateOpen && <AgeDialog open error={gateError} onConfirm={onConfirm} onCancel={onCancel} />}
     </WalletContext.Provider>
   )
 }
