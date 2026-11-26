@@ -266,7 +266,7 @@ They are summarized in [`docs/spikes.md`](docs/spikes.md):
 ## Tested, in numbers
 
 Counted on 2026-11-19. Coverage, the devnet figures and the recorded night are from commit
-`b513e65` on `main`; the test count and the `end_ts` row add the end-ts measurement.
+`a42801b` on `main`; the test count and the `end_ts` row add the end-ts measurement.
 
 | What                                       | Figure                                                                                                                                                                                                                                          | Source                                                                                                                             |
 | ------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
@@ -516,11 +516,15 @@ against a local Surfpool, and S4 sends no transactions. Commits follow Conventio
 ## Prior work
 
 Design and code started on 2026-11-18. The first commit is
-[`2b45e81`](https://github.com/horagon-labs/horagon/commit/2b45e81), at 04:48 UTC. At that time
+[`e8ff40d`](https://github.com/horagon-labs/horagon/commit/e8ff40d), at 04:48 UTC. At that time
 the hackathon page still listed the event as scheduled, with no launch date or rules published.
-Everything since is in the git history. Tier 0 landed as
-[pull request #1](https://github.com/horagon-labs/horagon/pull/1), whose 23 commits were reviewed
-task by task.
+Everything since is in the git history. Tier 0 landed as pull request #1, merged in
+[`a42801b`](https://github.com/horagon-labs/horagon/commit/a42801b); its 23 commits were reviewed
+task by task. The reviewed pull request is in the original repository, which is private.
+
+Before this repository was made public, its history was rewritten: commit identities became the
+project identity and references to the original repository now name this one. Commit dates and
+times were kept.
 
 ## Libraries, templates and AI-assisted code
 
