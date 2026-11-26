@@ -39,6 +39,7 @@ const TimingsSchema = z
     notStartedSecs: z.number().int().min(60),
     postponedResolveSecs: z.number().int().min(60),
     missingSourceSecs: z.number().int().min(60),
+    secondSourceWaitSecs: z.number().int().min(0),
   })
   .partial()
 

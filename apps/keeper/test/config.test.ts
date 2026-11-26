@@ -437,6 +437,15 @@ describe('loadConfig', () => {
     expect(() => loadConfig(env({ KEEPER_TIMINGS: 'not json' }))).toThrow('KEEPER_TIMINGS')
   })
 
+  it('reads the second-source wait of auto-propose from KEEPER_TIMINGS', () => {
+    expect(DEFAULT_TIMINGS.secondSourceWaitSecs).toBe(600)
+    const c = loadConfig(env({ KEEPER_TIMINGS: '{"secondSourceWaitSecs":300}' }))
+    expect(c.timings.secondSourceWaitSecs).toBe(300)
+    expect(() => loadConfig(env({ KEEPER_TIMINGS: '{"secondSourceWaitSecs":-1}' }))).toThrow(
+      'KEEPER_TIMINGS',
+    )
+  })
+
   it('needs both Telegram values or neither, and reads the sponsor public key', () => {
     const sponsor = Keypair.generate().publicKey.toBase58()
     const c = loadConfig(
