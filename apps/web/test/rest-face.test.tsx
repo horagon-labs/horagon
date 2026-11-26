@@ -253,6 +253,31 @@ describe('the rest face of the Night dial', () => {
     expect(empty).toContain('data-hub')
   })
 
+  it('starts the now hand past the wider words at rest, so it never strikes through them', () => {
+    // At rest the words may run 56% of the face wide: 56 units each side of the centre. Every
+    // 10 minutes of the 12-hour face, 3:00 and 9:00 ET included, the hand starts past them.
+    const start = (html: string) => {
+      const line = html.match(/<line [^>]*data-now[^>]*>/)?.[0] ?? ''
+      const num = (a: string) => Number(line.match(new RegExp(`${a}="([^"]+)"`))?.[1])
+      return Math.hypot(num('x1') - 100, num('y1') - 100)
+    }
+    const threeEt = at('2026-11-26T08:00:00Z')
+    for (let m = 0; m < 12 * 60; m += 10) {
+      const now = threeEt + m * 60
+      const html = renderToStaticMarkup(
+        <NightDial items={[]} now={now} selectedId={null} onSelect={noop} emptyText="x" rest />,
+      )
+      const half = Number(html.match(/max-w-\[(\d+)%\]/)?.[1])
+      expect(half).toBe(56)
+      expect(start(html)).toBeGreaterThan(half + 4)
+    }
+    // With arcs on the face, the hand still starts at the r 33 readout ring.
+    const empty = renderToStaticMarkup(
+      <NightDial items={[]} now={threeEt} selectedId={null} onSelect={noop} emptyText="x" />,
+    )
+    expect(start(empty)).toBeCloseTo(33, 2)
+  })
+
   it('puts an ink pip on the now hand and a seconds pip at r 97, stepping 6° a second', () => {
     const now = REST_NOW + 15
     const html = renderToStaticMarkup(

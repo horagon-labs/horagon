@@ -24,6 +24,9 @@ import { STALE_ARC, STALE_CASE, stateLine } from './dial-look'
 const C = 100
 // The readout's hub, inside ring 7 (r = 37, whose lit stroke edge is 34.5).
 const HUB = 33
+// At rest the words run 56% of the face wide (56 units each side), so the hand starts past
+// them: from the centre it struck through them whenever the clock read near 3:00 or 9:00.
+const REST_HUB = 62
 const HOURS = Array.from({ length: 12 }, (_, h) => h)
 const HAND = 92
 /** The rest face's numerals: 12 · 3 · 6 · 9 at r 80. */
@@ -123,7 +126,7 @@ export function NightDial(p: {
   const focusWords = focus ? rowWords(focus) : null
   const angle = etClockAngle(p.now)
   const hand = polar(C, C, HAND, angle)
-  const hub = polar(C, C, HUB, angle)
+  const hub = polar(C, C, p.rest ? REST_HUB : HUB, angle)
 
   function onKeyDown(e: KeyboardEvent<HTMLDivElement>) {
     const current = order[index]
