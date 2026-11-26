@@ -87,6 +87,65 @@ describe('the rest line (string 3) and the calendar link (string 4)', () => {
   })
 })
 
+describe('a night with no game, the next slate under 24 h away (R7 review adv-1, finding 1)', () => {
+  // Thu, Nov 26, 8:00 PM ET: the night of Thu, Nov 26 has no game; Friday's tip at 7:00 PM ET is
+  // 23 h away, so the 24 h list already holds it.
+  const THU8 = at('2026-11-27T01:00:00Z')
+  const fri = () => [
+    scheduled('2026-11-28T00:00:00.000Z', { id: 'nba-fri-1' }),
+    scheduled('2026-11-28T00:30:00.000Z', { id: 'nba-fri-2', home: 'TOR', away: 'BOS' }),
+  ]
+
+  it('rests the dial by the night, not by the 24 h window', () => {
+    const m = boardModel(fri(), undefined, THU8, [])
+    expect(m.rest).toBe('The dial rests tonight. Next tip-off Fri, Nov 27 · 7:00 PM ET · in 23 h')
+    expect(m.calendar?.href).toBe('/calendar/2026-11-27')
+    expect(m.stopped).toBeNull()
+    // The resting dial draws no arc: the next night's games are not tonight's.
+    expect(m.dial).toEqual([])
+  })
+
+  it("lists the next night's games under their own date, never under tonight's", () => {
+    const m = boardModel(fri(), undefined, THU8, [])
+    expect(m.items.map((i) => i.id).sort()).toEqual(['nba-fri-1', 'nba-fri-2'])
+    expect(m.label).toBe('Next · Fri Nov 27')
+    const html = board({ games: fri(), now: THU8 })
+    expect(html).not.toContain('Tonight · Thu Nov 26')
+    expect(html).toMatch(/<h2 class="[^"]*uppercase[^"]*">Next · Fri Nov 27<\/h2>/)
+    expect(html).toContain('data-rest')
+    expect(html).toContain(
+      'The dial rests tonight. Next tip-off Fri, Nov 27 · 7:00 PM ET · in 23 h',
+    )
+    expect(html).not.toMatch(/data-id="nba-fri-1"/)
+  })
+
+  it('rests the same way in the morning, with the slate past 24 h', () => {
+    const m = boardModel(fri(), undefined, at('2026-11-26T15:00:00Z'), [])
+    expect(m.items).toHaveLength(0)
+    expect(m.label).toBe('Tonight · Thu Nov 26')
+    expect(m.rest).toBe('The dial rests tonight. Next tip-off Fri, Nov 27 · 7:00 PM ET · in 33 h')
+  })
+
+  it('after a night whose games stopped, heads the next games by their date', () => {
+    // Wed, Nov 25, 3:30 AM ET: the night of Tue, Nov 24 is over and out of the 4 h window;
+    // Wednesday's 7:00 PM ET game is on the list.
+    const late = at('2026-11-25T08:30:00Z')
+    const wed = scheduled('2026-11-26T00:00:00.000Z', { id: 'nba-wed' })
+    const m = boardModel([...finals(), wed], undefined, late, [])
+    expect(m.items.map((i) => i.id)).toEqual(['nba-wed'])
+    expect(m.label).toBe('Next · Wed Nov 25')
+    expect(m.rest).toBeNull()
+    expect(m.stopped).toBe('All stopped. Next tip-off Wed 7:00 PM ET.')
+  })
+
+  it("keeps tonight's date while a game of the night is listed", () => {
+    expect(boardModel(evening(), undefined, NOW, []).label).toBe('Tonight · Tue Nov 24')
+    expect(boardModel(evening(), undefined, NOW, []).dial).toHaveLength(
+      boardModel(evening(), undefined, NOW, []).items.length,
+    )
+  })
+})
+
 describe('All stopped (string 21)', () => {
   it('says the next tip-off once every game of the night stopped', () => {
     expect(stoppedLine(SAT330, NOW)).toBe('All stopped. Next tip-off Sat 3:30 PM ET.')

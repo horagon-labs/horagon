@@ -193,6 +193,32 @@ export function boardLabel(now: number): string {
   return `Tonight · ${etDayLabel(noon).replace(',', '')}`
 }
 
+/**
+ * "Next · Fri Nov 27": the board's heading when every game it lists belongs to a later night (an
+ * evening with no game of its own, or after midnight once the night's games left the list), so
+ * those games are never headed with tonight's date.
+ */
+export function nextLabel(tip: number): string {
+  return `Next · ${etDayLabel(tip).replace(',', '')}`
+}
+
+/** The game is on the court, or tips off on the ET night `night` (etNight, 06:00 rollover). */
+const ofNight = (g: Game, night: string): boolean =>
+  g.status === 'live' || etDay(tipOf(g)) === night
+
+/** The first scheduled games still ahead in `games`, the 24 h window included. */
+function firstAhead(games: readonly Game[], now: number): Upcoming | null {
+  const tips = games
+    .filter((g) => g.status === 'scheduled')
+    .map(tipOf)
+    .filter((t) => t > now)
+    .sort((a, b) => a - b)
+  const first = tips[0]
+  if (first === undefined) return null
+  const day = etDay(first)
+  return { tip: first, count: tips.filter((t) => etDay(t) === day).length }
+}
+
 const REST = 'The dial rests tonight.'
 
 /** Whole hours to `tip`, at least 1. */
@@ -254,9 +280,14 @@ export interface BoardModel {
   next: string | null
   /** The Night dial's clock (spec 5.4): `now` moved up to the newest winner `priceTs` the board has seen. */
   chainNow: number
-  /** "Tonight · Thu Nov 27" (boardLabel). */
+  /** The Night dial's arcs: `items`, or none while the dial rests (no game of the night). */
+  dial: BoardItem[]
+  /**
+   * "Tonight · Thu Nov 27" (boardLabel), or "Next · Fri Nov 27" (nextLabel) when every listed
+   * game belongs to a later night.
+   */
   label: string
-  /** No game tonight: the rest face's words (restLine); null otherwise. */
+  /** No game of the night (ET, 06:00 rollover): the rest face's words (restLine); else null. */
   rest: string | null
   /** With the rest face: the next game day's calendar file, when the next games are known. */
   calendar: { href: string; label: string } | null
@@ -280,6 +311,7 @@ export function boardModel(
     return {
       teams: [],
       items: [],
+      dial: [],
       empty: 'Loading games…',
       filtered: false,
       next: null,
@@ -303,15 +335,23 @@ export function boardModel(
   const later = upcomingOf(games, now) ?? upcoming
   const ahead = later && later.tip > now ? later : null
   const over = nightOver(games, now)
-  // A night whose games all stopped is over, not at rest, even once they left the 4 h window.
-  const resting = tonight.length === 0 && !over
+  // The dial rests on a night with no game of its own (R7 review adv-1, finding 1): the 24 h list
+  // may already hold the next night's games, which never make tonight a game night. A night whose
+  // games all stopped is over, not at rest, even once they left the 4 h window.
+  const night = etNight(now)
+  const resting = !games.some((g) => ofNight(g, night)) && !over
+  const restNext = resting ? (firstAhead(games, now) ?? ahead) : null
+  // Every listed game is of a later night: head the list with that night's date, not tonight's.
+  const firstListed = Math.min(...tonight.map(tipOf))
+  const laterOnly = tonight.length > 0 && !tonight.some((g) => ofNight(g, night))
   const base = {
     teams,
     items,
+    dial: resting ? [] : items,
     chainNow,
-    label,
-    rest: resting ? restLine(ahead, now) : null,
-    calendar: resting && ahead ? calendarLink(ahead) : null,
+    label: laterOnly ? nextLabel(firstListed) : label,
+    rest: resting ? restLine(restNext, now) : null,
+    calendar: restNext ? calendarLink(restNext) : null,
     stopped: over ? stoppedLine(nextTip(games, now) ?? ahead?.tip ?? null, now) : null,
   }
   if (items.length > 0) return { ...base, empty: null, filtered: false, next: null }

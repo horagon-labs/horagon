@@ -116,7 +116,7 @@ export function BoardView(p: BoardViewProps) {
       </div>
       <div className="mx-auto w-full max-w-sm lg:sticky lg:top-20 lg:order-first lg:max-w-none">
         <NightDial
-          items={model.items}
+          items={model.dial}
           now={model.chainNow}
           selectedId={p.selectedId}
           onSelect={p.onSelect}
