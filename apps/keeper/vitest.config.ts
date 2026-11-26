@@ -10,7 +10,7 @@ export default defineConfig({
       provider: 'v8',
       include: ['src/**/*.ts'],
       // Entry points and RPC glue are exercised by the local end-to-end run on Surfpool, not here.
-      exclude: ['src/main.ts', 'src/ops/cli.ts'],
+      exclude: ['src/main.ts', 'src/agent-main.ts', 'src/ops/cli.ts'],
       thresholds: {
         lines: 70,
         'src/planner.ts': { lines: 95 },

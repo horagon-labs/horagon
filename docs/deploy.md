@@ -25,6 +25,7 @@ that command ends. The attestor is the one exception: it lives on the VPS.
 | `attestor.json` | Keeper signer: `create_game_market`, `halt`, `propose_result`; also the keeper wallet that claims the faucet and fills the treasury    | the VPS (`~/horagon/.keys/`) and nowhere else      | ≥ 0.2 SOL (below it, `sol-keeper` alerts) |
 | `guardian.json` | Guardian 1: `challenge`, `propose_result`, `halt`; `horagon-ops` guardian commands sign with it                                        | your machine                                       | ~0.05 SOL                                 |
 | `sponsor.json`  | Pays fees and token-account rent of player transactions                                                                                | Vercel env `SPONSOR_SECRET_KEY` (local: see below) | 1–2 SOL, topped up by hand                |
+| `agent.json`    | The reference agent (procedure J of `docs/runbook.md`): signs and pays its own swaps and claims; never the sponsor                     | the VPS (`~/horagon/.keys/`) and nowhere else      | ≥ 0.1 SOL (below it, `agent-sol` alerts)  |
 
 Local runs only: instead of `SPONSOR_SECRET_KEY`, set `SPONSOR_KEYPAIR` to the **absolute**
 path of the keypair file (for example `$PWD/.keys/sponsor.json` from the repo root). The web
@@ -74,6 +75,22 @@ variables it needs exported (`docs/runbook.md`, "Before you start").
    scp apps/keeper/data/elo.json "$HORAGON_VPS":horagon/apps/keeper/data/elo.json
    ```
 
+## Reference agent (once, before its first swap)
+
+The agent is optional and off by default (`AGENT_ENABLED` unset). Before it ever trades:
+
+1. **Key:** `solana-keygen new --no-bip39-passphrase -o .keys/agent.json`, note its public key
+   (`solana-keygen pubkey .keys/agent.json`), copy it to `~/horagon/.keys/agent.json` on the VPS
+   (`chmod 600`) and remove the local copy. Send it about 0.5 devnet SOL; it claims its mUSDC
+   from the faucet every hour.
+2. **Disclosure:** add its public key to `docs/metrics-wallets.json` as a `team-burner` entry in a
+   public commit (the pre-registered metric reads that file), and mark it a team wallet in the
+   database: `horagon-ops team <agent pubkey>`.
+3. **Variables:** add the "Reference agent" part of `.env.example` to `~/horagon/.env.keeper`, with
+   `AGENT_ENABLED=1` and `AGENT_DRY_RUN=1` for the first run.
+4. **Start** it by hand after a deploy (`docs/runbook.md`, procedure J), read its dry-run
+   decisions, then set `AGENT_DRY_RUN=0` and restart it.
+
 ## Every deploy
 
 ```bash
@@ -84,8 +101,10 @@ HORAGON_VPS=<your SSH host alias> bash ops/deploy-keeper.sh
 The script moves to the repo root, refuses a dirty tree, and ships `HEAD` as a tarball over
 ssh to `~/horagon` (it never copies keys or `.env.keeper`). Then, in a login shell on the VPS,
 it writes `~/horagon/REVISION`, runs `corepack pnpm install --frozen-lockfile` for the keeper
-and its dependencies, builds the SDK, copies the three units of `ops/systemd` to
+and its dependencies, builds the SDK, copies the four units of `ops/systemd` to
 `~/.config/systemd/user`, enables and starts `horagon-watchdog.timer`, enables
-`horagon-keeper` and restarts it, then prints its status. A restart is safe during a night, but
-avoid the last 30 min before a close (`docs/runbook.md`, procedure G). Logs:
+`horagon-keeper` and restarts it, then prints its status. It never enables or starts
+`horagon-agent`: a running agent is restarted on the new revision (`try-restart`), a stopped one
+stays stopped. A restart is safe during a night, but avoid the last 30 min before a close
+(`docs/runbook.md`, procedure G). Logs:
 `ssh "$HORAGON_VPS" journalctl --user -u horagon-keeper -f -o cat`.

@@ -14,7 +14,8 @@ import { BACKUP_RPC_TRIES, createLogger, loadConfig, makeConnection, verifyClust
 import { connectKeeperDb } from './db'
 import { loadRatings } from './elo'
 import { TxSender } from './executor'
-import { espnFeed, RawArchive, USER_AGENT } from './feeds/espn'
+import { faucetClaim } from './faucet'
+import { espnFeed, RawArchive } from './feeds/espn'
 import { loadReplayDir, replayFeed } from './feeds/replay'
 import type { Feed } from './feeds/types'
 import { indexOnce } from './indexer'
@@ -27,16 +28,6 @@ import { treasuryTick } from './treasury'
 const TICK_MS = 5_000
 const HOURLY_SECS = 3_600
 const ATA_WATCH_SECS = 600
-
-async function faucetClaim(url: string, wallet: string): Promise<void> {
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', 'user-agent': USER_AGENT },
-    body: JSON.stringify({ wallet }),
-    signal: AbortSignal.timeout(15_000),
-  })
-  if (!res.ok) throw new Error(`faucet answered ${res.status}`)
-}
 
 async function main(): Promise<void> {
   const cfg = loadConfig()

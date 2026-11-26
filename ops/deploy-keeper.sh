@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# Ships the committed HEAD to the VPS and restarts the keeper. Needs no git remote: the tree
+# Ships the committed HEAD to the VPS and restarts the keeper. It installs the reference agent's
+# unit (horagon-agent) but never enables or starts it: an agent already running is restarted on
+# the new revision, a stopped one stays stopped. Needs no git remote: the tree
 # goes over ssh as a tarball. Run it in Git Bash from anywhere in the repo (it moves to the
 # root first): bash ops/deploy-keeper.sh
 # Keys and .env.keeper stay on the VPS; this script never copies them.
@@ -26,7 +28,7 @@ corepack pnpm install --frozen-lockfile --filter @horagon/keeper...
 corepack pnpm --filter @horagon/sdk build
 mkdir -p ~/.config/systemd/user
 cp ops/systemd/horagon-keeper.service ops/systemd/horagon-watchdog.service \
-  ops/systemd/horagon-watchdog.timer ~/.config/systemd/user/
+  ops/systemd/horagon-watchdog.timer ops/systemd/horagon-agent.service ~/.config/systemd/user/
 systemctl --user daemon-reload
 systemctl --user enable --now horagon-watchdog.timer
 # Enabled so the keeper comes back after a VPS reboot (lingering starts the user manager).
@@ -34,4 +36,8 @@ systemctl --user enable horagon-keeper
 systemctl --user restart horagon-keeper
 sleep 5
 systemctl --user --no-pager status horagon-keeper | head -n 12
+# The reference agent: installed, never enabled or started here. try-restart restarts it only
+# when it is already running, so it runs the revision just shipped.
+systemctl --user try-restart horagon-agent
+echo "horagon-agent: $(systemctl --user is-active horagon-agent || true) (started by hand only)"
 REMOTE

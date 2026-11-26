@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run --coverage",
     "start": "tsx src/main.ts",
+    "agent": "tsx src/agent-main.ts",
     "ops": "tsx src/ops/cli.ts",
     "elo:build": "tsx scripts/elo-build.ts",
     "local:fund": "tsx scripts/local-fund.ts"

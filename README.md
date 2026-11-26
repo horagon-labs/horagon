@@ -151,7 +151,9 @@ NBA market that a keeper seeds once and leaves running through the game:
 
 **What it makes possible.** Horagon can open a market on every game of the night, a dozen on a
 busy night, with a single deposit each. It needs no market maker on duty and no subsidy beyond
-that deposit. Prices move continuously, and a fan can sell at any time before the close.
+that deposit; an optional, disclosed [reference agent](#reference-agent) only nudges a quiet
+market toward the model. Prices move continuously, and a fan can sell at any time before the
+close.
 
 **Where the fit is imperfect.** pm-AMM has no pause and no early resolution:
 
@@ -187,7 +189,7 @@ tier updates this table.
 | ----------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
 | pm-AMM quote engine: accrual (time rescale), the dynamic curve and the 2% fee, in all 6 swap directions                 | **Built** (Tier 0). It matches 6 devnet swaps: 4 exactly, worst error 0.0011%. A lagging client clock quotes at the chain's effective time, never before the last accrual | [`packages/sdk/src/math`](packages/sdk/src/math)                       |
 | pm-AMM bindings: program and mint constants, PDAs, `Market` account decoding, instruction discriminators, error mapping | **Built** (Tier 0)                                                                                                                                                        | [`packages/sdk/src/pm-amm`](packages/sdk/src/pm-amm)                   |
-| Win-probability model: Elo before the game (K 20, home advantage 100), Brownian in-game model                           | **Built** (Tier 0). Used for display only; Horagon never trades on it                                                                                                     | [`packages/sdk/src/model`](packages/sdk/src/model)                     |
+| Win-probability model: Elo before the game (K 20, home advantage 100), Brownian in-game model                           | **Built** (Tier 0). Shown to fans; the reference agent trades toward it                                                                                                   | [`packages/sdk/src/model`](packages/sdk/src/model)                     |
 | Resolution evidence: an RFC 8785 (JCS) canonical JSON and its sha256                                                    | **Built** (Tier 0)                                                                                                                                                        | [`packages/sdk/src/evidence`](packages/sdk/src/evidence)               |
 | Sponsor validator: an allowlist for every instruction of a fee-paid transaction                                         | **Built** (Tier 0), 40 tests. It ties outcome-token ATA creates to the markets the transaction trades, and reports how many it approved                                   | [`packages/api/src/sponsor`](packages/api/src/sponsor)                 |
 | Spikes S1 to S5                                                                                                         | **Done.** S1, S2 (Surfpool), S3a, S3b and S5 pass. S4 fails on the NBA CDN, which refused every host, and ESPN replaces it. All 12 games of 2026-11-18 ET are recorded    | [`docs/spikes.md`](docs/spikes.md), [`spikes/results`](spikes/results) |
@@ -346,8 +348,23 @@ within 7 days of its scheduled tip-off, the market resolves on that game; otherw
 NO. `redeem_pair` (1 YES + 1 NO →
 1 mUSDC) works at any time.
 
-**Horagon does not trade.** No team wallet swaps on a live market except in smoke tests and
-rehearsals, and every team wallet is listed and left out of the metrics.
+<a id="reference-agent"></a>
+
+**Reference agent.** One disclosed team wallet trades toward the win-probability model, so a
+market that fans leave quiet still follows the game. It is off unless enabled, runs as its own
+process beside the keeper ([`apps/keeper/src/agent`](apps/keeper/src/agent)) and pays its own
+fees, never through the sponsor. Every 20 seconds it looks at each live NBA winner market. It
+trades one only when the game has tipped off, more than 2 minutes remain before the close, the
+model was updated in the last 60 seconds and no fan has traded that market for 90 seconds. If the
+pool price is more than 0.04 from the model, it buys YES or NO (it never sells) to bring the price
+to 0.02 short of the model. It caps a swap at 100 mUSDC, and a market at 2,000 mUSDC and 40
+swaps.
+
+Before its first swap, its wallet is added to
+[`docs/metrics-wallets.json`](docs/metrics-wallets.json) as `team-burner`, in a public commit.
+Every swap it sends carries the `horagon:bot` memo, so it never counts as a fan, and its volume
+is reported apart from the fans' volume. Apart from it, no team wallet swaps on a live market
+except in smoke tests and rehearsals, and every team wallet is listed and left out of the metrics.
 
 ## Who can do what
 
@@ -512,10 +529,10 @@ Legal status and demand are not answered by code.
 | [`packages/sdk/vendor/pm-amm`](packages/sdk/vendor)    | The vendored pm-AMM TypeScript SDK, pinned to a commit ([VENDOR.md](packages/sdk/vendor/VENDOR.md))                                                                                                                                                                                                                             |
 | [`packages/api`](packages/api)                         | API v1: a Hono app that `apps/web` mounts at `/api/v1`, with reads, transaction building, the sponsor's submit and the faucet                                                                                                                                                                                                   |
 | [`packages/db`](packages/db)                           | The Postgres schema (Drizzle), its migrations and the queries the API and the keeper share                                                                                                                                                                                                                                      |
-| [`apps/keeper`](apps/keeper)                           | The keeper (schedule, ESPN feed, markets, halts, result drafts, treasury, indexer, alerts) and `horagon-ops`, the guardian's command line                                                                                                                                                                                       |
+| [`apps/keeper`](apps/keeper)                           | The keeper (schedule, ESPN feed, markets, halts, result drafts, treasury, indexer, alerts), `horagon-ops`, the guardian's command line, and the reference agent                                                                                                                                                                 |
 | [`apps/web`](apps/web)                                 | The Next.js web app: the Tonight and Game pages, the burner wallet, trading and claims                                                                                                                                                                                                                                          |
 | [`tests`](tests)                                       | `@horagon/integration`, the program against pm-AMM on Surfpool; [`fixtures/replay`](tests/fixtures/replay), 12 recorded NBA games for the keeper's replay mode and one trimmed raw sample                                                                                                                                       |
-| [`ops`](ops)                                           | The keeper's deploy script and its systemd units (keeper and watchdog)                                                                                                                                                                                                                                                          |
+| [`ops`](ops)                                           | The keeper's deploy script and its systemd units (keeper, watchdog and reference agent)                                                                                                                                                                                                                                         |
 | [`spikes`](spikes)                                     | Tier 0 spike scripts and the S2 Anchor program. Throwaway code, kept for the record; results in [`spikes/results`](spikes/results)                                                                                                                                                                                              |
 | [`scripts/check-claims.mjs`](scripts/check-claims.mjs) | Re-checks this README's devnet claims against the chain                                                                                                                                                                                                                                                                         |
 | [`docs`](docs)                                         | [`dev-setup.md`](docs/dev-setup.md) (developer setup), [`deploy.md`](docs/deploy.md), [`runbook.md`](docs/runbook.md) (game night), [`security.md`](docs/security.md) and [`spikes.md`](docs/spikes.md) (Tier 0 spike report)                                                                                                   |
