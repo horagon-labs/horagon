@@ -170,6 +170,7 @@ function useDemoTrade(): Trade & { sent: number } {
     failedAction: 'buy',
     shownError: undefined,
     fundNoteHidden: true,
+    loaded: true,
     ageNeeded: false,
     send: () => setSent((n) => n + 1),
     sent,

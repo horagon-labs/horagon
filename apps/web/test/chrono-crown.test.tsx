@@ -35,6 +35,7 @@ function trade(over: Partial<Trade> = {}): Trade {
     failedAction: 'buy',
     shownError: undefined,
     fundNoteHidden: false,
+    loaded: true,
     ageNeeded: false,
     send: noop,
     ...over,
@@ -235,6 +236,22 @@ describe('CrownPanel (spec 3.2, 5.5)', () => {
     expect(html).toMatch(/<button type="button" disabled=""[^>]*class="hold-safe/)
     expect(panel()).not.toContain('I am 18 or older')
     expect(panel()).not.toMatch(/<button type="button" disabled=""[^>]*class="hold-safe/)
+  })
+
+  it('says only "Loading your balance…" until the wallet storage opens (R5 review finding 1)', () => {
+    // The server render and the first browser render: no wallet and no 18+ answer known yet.
+    const html = panel({ loaded: false, ready: 'no-wallet', balance: undefined, ageNeeded: true })
+    expect(html).toContain('data-wallet-wait="true">Loading your balance…</p>')
+    expect(html).not.toContain('I am 18 or older')
+    expect(html).not.toContain('type="checkbox"')
+    expect(html).not.toContain('Get 1,000 play mUSDC')
+    expect(html).not.toContain('hold-safe')
+    // Once it opened, the same visitor sees the ask, or straight away the Buy.
+    expect(panel({ ready: 'no-wallet', balance: undefined, ageNeeded: true })).toContain(
+      'I am 18 or older',
+    )
+    expect(panel()).not.toContain('Loading your balance…')
+    expect(panel()).toContain('hold-safe')
   })
 
   it('turns Max off for a balance of zero as well as an unknown one (M15)', () => {

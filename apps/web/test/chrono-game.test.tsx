@@ -154,6 +154,11 @@ describe('MarketBlock (spec 3.2, 4.2)', () => {
     expect(card).toBeGreaterThan(sheet)
     expect(html).toContain('aria-label="Buy CLE"')
     expect(html).toContain('No positions yet.')
+    // The server render knows nothing of the wallet yet: no 18+ box and no set-up call to action
+    // that a returning visitor would see flash (R5 review finding 1).
+    expect(html).toContain('Loading your balance…')
+    expect(html).not.toContain('I am 18 or older')
+    expect(html).not.toContain('Get 1,000 play mUSDC to start')
   })
 })
 

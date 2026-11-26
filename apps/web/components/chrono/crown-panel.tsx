@@ -3,7 +3,9 @@
 // newest quote, the numbers, presets and the amount field, and the HoldButton. It only draws a
 // Trade from useTrade; the same panel is the mobile sheet and the desktop right column.
 // A device that never ticked the 18+ box is asked here, inline above the send button (R5): the
-// button stays off until the box is ticked, and nothing is created or sent before that.
+// button stays off until the box is ticked, and nothing is created or sent before that. Until the
+// wallet's storage has opened (the server render, the first browser render) the wallet part is a
+// neutral "Loading your balance…" line: a returning visitor never sees the set-up state flash.
 import { type GameDetail, type MarketSummary, parseAmount } from '@horagon/sdk'
 import { useState } from 'react'
 import { buySteps, percentOf, sellSteps, stepIndex } from '../../lib/chrono/bezel'
@@ -14,7 +16,7 @@ import { cents, explorerTx, percent, usdc } from '../../lib/format'
 import { DEFAULT_SLIPPAGE_BPS } from '../../lib/trade'
 import { sendDisabled, sendText } from '../../lib/trade-view'
 import type { Trade } from '../../lib/use-trade'
-import { FAUCET_BUTTON } from '../../lib/wallet-copy'
+import { FAUCET_BUTTON, WALLET_LOADING } from '../../lib/wallet-copy'
 import { AgeCheckbox } from '../age-dialog'
 import { ErrorText } from '../error-text'
 import { Bezel } from './bezel'
@@ -211,8 +213,15 @@ export function CrownPanel(p: CrownPanelProps) {
         </p>
       )}
       {p.fundNote && !t.fundNoteHidden && <p className="text-13 text-lume-300">{p.fundNote}</p>}
-      {t.ageNeeded && <AgeCheckbox checked={ticked} onChange={setTicked} />}
-      {t.ready === 'no-wallet' ? (
+      {t.loaded && t.ageNeeded && <AgeCheckbox checked={ticked} onChange={setTicked} />}
+      {!t.loaded ? (
+        <p
+          className="flex min-h-11 items-center justify-center text-13 text-ash-400"
+          data-wallet-wait
+        >
+          {WALLET_LOADING}
+        </p>
+      ) : t.ready === 'no-wallet' ? (
         // Setting up a wallet trades nothing, so it takes one tap, not a hold.
         <>
           <button

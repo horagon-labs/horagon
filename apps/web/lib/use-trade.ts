@@ -97,6 +97,11 @@ export interface Trade {
   shownError: unknown
   /** The faucet note goes away once a trade starts; a new faucet request brings it back. */
   fundNoteHidden: boolean
+  /**
+   * The wallet's browser storage was opened (false on the server and in the first render): until
+   * then nothing is known of the wallet or the 18+ box, so the crown asks nothing.
+   */
+  loaded: boolean
   /** The 18+ box was never ticked on this device: the crown asks inline before it sends. */
   ageNeeded: boolean
   /**
@@ -109,7 +114,7 @@ export interface Trade {
 export function useTrade(game: GameDetail, market: MarketSummary, opts: TradeOptions = {}): Trade {
   const wallet = useWallet()
   const { address, portfolio, refreshPortfolio, withAge, requestFaucet, funding } = wallet
-  const { ageNeeded, fundError } = wallet
+  const { loaded, ageNeeded, fundError } = wallet
   const [side, setSide] = useState<Side>('home')
   const [action, setAction] = useState<TradeAction>('buy')
   const [amount, setAmount] = useState(BUY_AMOUNT)
@@ -156,12 +161,12 @@ export function useTrade(game: GameDetail, market: MarketSummary, opts: TradeOpt
     balance: portfolio?.usdcBalance,
     shares: held?.shares,
     marketStatus: market.status,
+    gameStatus: game.status,
     endTs: market.endTs,
     nowSecs: effectiveTime(Date.now() / 1000, market.priceTs ?? 0),
   })
   const quoted = useDebounced(check.quote ? amount.trim() : null, QUOTE_DEBOUNCE_MS)
   const key = quoteKey(market.pubkey, side, action, quoted)
-    gameStatus: game.status,
   const poll = usePoll(
     key,
     async () => ({
@@ -279,6 +284,7 @@ export function useTrade(game: GameDetail, market: MarketSummary, opts: TradeOpt
     // A quote that fails on the network shows only after three polls in a row (spec 4.4).
     shownError: error ?? fundError ?? (check.quote ? quoteError(quote) : undefined),
     fundNoteHidden,
+    loaded,
     ageNeeded,
     send: (affirmedHere) => {
       const ticked = affirmedHere === true
