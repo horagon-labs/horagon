@@ -270,8 +270,8 @@ They are summarized in [`docs/spikes.md`](docs/spikes.md):
 ## Tested, in numbers
 
 Counted on 2026-11-21: the tests and coverage with `pnpm check` on branch `tier1`, at commit
-`6f9e89e` plus the commit that adds this text (whose only new tests are the 5 of the runbook
-check). The devnet figures and the recorded night are from commit `b513e65` on `main`, and the
+`4b25f36` plus the commit that adds this text (whose only new tests are the 5 of the runbook
+check). The devnet figures and the recorded night are from commit `a42801b` on `main`, and the
 `end_ts` row from the end-ts measurement.
 
 | What                                       | Figure                                                                                                                                                                                                                                                                                                                                                     | Source                                                                                                                                                                                             |
@@ -464,6 +464,18 @@ interfaces it uses are tested.
 - **Not audited.** No third party has reviewed this code. The reviews so far were done by AI
   agents (see [AI-assisted code](#libraries-templates-and-ai-assisted-code)).
 
+## Legal perimeter
+
+Horagon is play money on Solana devnet. Horagon never does any of the following:
+
+- **No real-money markets.** Horagon does not create, seed, resolve or take fees on any market
+  that trades real money.
+- **No custody.** Horagon never holds a user's funds. Players sign with their own wallets; the
+  sponsor pays only devnet transaction fees and token-account rent.
+- **No prizes.** Nothing on Horagon can be exchanged for money or anything of value.
+- **No project token.** Horagon issues no token of its own without a lawyer's opinion first. The
+  YES and NO outcome tokens that pm-AMM mints for each market are devnet play money.
+
 ## The case against Horagon
 
 Here is the argument against building it:
@@ -524,11 +536,15 @@ against a local Surfpool, and S4 sends no transactions. Commits follow Conventio
 ## Prior work
 
 Design and code started on 2026-11-18. The first commit is
-[`2b45e81`](https://github.com/horagon-labs/horagon/commit/2b45e81), at 04:48 UTC. At that time
+[`e8ff40d`](https://github.com/horagon-labs/horagon/commit/e8ff40d), at 04:48 UTC. At that time
 the hackathon page still listed the event as scheduled, with no launch date or rules published.
-Everything since is in the git history. Tier 0 landed as
-[pull request #1](https://github.com/horagon-labs/horagon/pull/1), whose 23 commits were reviewed
-task by task.
+Everything since is in the git history. Tier 0 landed as pull request #1, merged in
+[`a42801b`](https://github.com/horagon-labs/horagon/commit/a42801b); its 23 commits were reviewed
+task by task. The reviewed pull request is in the original repository, which is private.
+
+Before this repository was made public, its history was rewritten: commit identities became the
+project identity and references to the original repository now name this one. Commit dates and
+times were kept.
 
 ## Libraries, templates and AI-assisted code
 
