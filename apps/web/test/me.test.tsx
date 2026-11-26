@@ -396,10 +396,7 @@ describe('My Game-day, rendered', () => {
 
 describe('the followed teams sent to /me', () => {
   it('sends only team codes the API takes, at most 30, so one odd follow never breaks the page', () => {
-    expect(meTeams(['MEM', 'lac', 'TOO-LONG', 'X', 'ABCDEF', 'LAC', 'MEM'])).toEqual([
-      'MEM',
-      'LAC',
-    ])
+    expect(meTeams(['MEM', 'lac', 'TOO-LONG', 'X', 'ABCDEF', 'LAC', 'MEM'])).toEqual(['MEM', 'LAC'])
     const many = Array.from(
       { length: 40 },
       (_, i) =>
