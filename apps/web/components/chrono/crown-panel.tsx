@@ -134,7 +134,9 @@ export function CrownPanel(p: CrownPanelProps) {
           <dd className="text-right text-amber-400">{(q.priceImpactBps / 100).toFixed(2)}%</dd>
           <dt className="font-sans text-ash-400">Fee (2%)</dt>
           <dd className="text-right">{usdc(q.feeUsdc)} mUSDC</dd>
-          <dt className="font-sans text-ash-400">Max slippage {DEFAULT_SLIPPAGE_BPS / 100}%</dt>
+          <dt className="font-sans text-ash-400">
+            Worst case (price moves {DEFAULT_SLIPPAGE_BPS / 100}%)
+          </dt>
           <dd className="text-right">at least {usdc(q.minOut)}</dd>
         </dl>
       )}
