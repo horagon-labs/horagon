@@ -40,6 +40,14 @@ describe('Dial (spec 3.2, 4.3)', () => {
     expect(html).not.toContain('wins')
   })
 
+  it('shows only the caption once resolved: no number beside "Resolved: MEM won"', () => {
+    const html = dial({ state: 'resolved', price: 0, caption: 'Resolved: MEM won' })
+    expect(html).not.toContain('data-value')
+    expect(html).not.toContain('<span class="text-19">%</span>')
+    expect(html).toMatch(/data-caption="true">Resolved: MEM won<\/span>/)
+    expect(needle(html)).toBe('rotate(-135 100 100)')
+  })
+
   it('draws no needle and an em dash for a null price, never NaN (Review Focus 1)', () => {
     const html = dial({ price: null, ghostPrice: 0.8 })
     expect(needle(html)).toBeUndefined()

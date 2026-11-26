@@ -51,7 +51,8 @@ describe('tape (spec 3.2)', () => {
     const html = renderToStaticMarkup(
       <Tape history={history()} market={MKT} home="CLE" away="MEM" />,
     )
-    expect(html).toContain('━ Market (CLE wins)')
+    expect(html).toContain('━ Market (CLE to win)')
+    expect(html).not.toContain('wins')
     expect(html).toContain('┅ Model')
     expect(html).toContain('Times in ET')
   })

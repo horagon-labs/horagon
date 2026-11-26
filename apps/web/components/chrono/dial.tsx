@@ -237,10 +237,14 @@ export function Dial(p: DialProps) {
         {p.loading ? (
           <span className="block h-10 w-20 rounded-card bg-line/60" data-skeleton />
         ) : (
-          <span className={`flex items-baseline font-mono tabular-nums ${tone}`}>
-            <RollingNumber text={priceDigits(price)} className="font-mono text-40 tabular-nums" />
-            {shown && <span className="text-19">%</span>}
-          </span>
+          // Resolved: the caption says who won; a locked 100 or 0 beside it would read as the
+          // home side's number next to an away win.
+          p.state !== 'resolved' && (
+            <span className={`flex items-baseline font-mono tabular-nums ${tone}`}>
+              <RollingNumber text={priceDigits(price)} className="font-mono text-40 tabular-nums" />
+              {shown && <span className="text-19">%</span>}
+            </span>
+          )
         )}
         {p.caption && (
           <span

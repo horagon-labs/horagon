@@ -193,7 +193,7 @@ export function Tape(props: {
     <figure>
       <div ref={box} className="h-56 w-full" />
       <figcaption className="mt-1 flex flex-wrap gap-x-4 font-mono text-12 text-ash-400">
-        <span className="text-lume-300">━ Market ({props.home} wins)</span>
+        <span className="text-lume-300">━ Market ({props.home} to win)</span>
         <span className="text-brass-500">┅ Model</span>
         <span>Times in ET</span>
       </figcaption>
