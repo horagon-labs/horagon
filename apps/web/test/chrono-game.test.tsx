@@ -8,7 +8,7 @@ import { Gallery } from '../components/chrono/gallery'
 import { GameLoading, GameScreen, NoGame } from '../components/chrono/game-screen'
 import { MarketBlock } from '../components/chrono/market-block'
 import { WalletProvider } from '../components/wallet'
-import { detail, game, history, market, NOW } from '../lib/chrono/fixtures'
+import { activity, detail, game, history, market, NOW } from '../lib/chrono/fixtures'
 import { canTrade, gameDial } from '../lib/chrono/game'
 import { findRuns, latestRun } from '../lib/chrono/runs'
 import { DIAL_STATES } from '../lib/chrono/state'
@@ -99,6 +99,47 @@ describe('GameScreen (spec 4.2)', () => {
     ].map((s) => html.indexOf(s))
     expect(order.every((i) => i >= 0)).toBe(true)
     expect([...order].sort((a, b) => a - b)).toEqual(order)
+  })
+
+  it('says who traded right under the dial, before the Tape, and links /agent (R2b)', () => {
+    const traded = activity({
+      agent: { swaps: 12, wallets: 1, volumeUsdc: '840', wallet: activity().agent.wallet },
+      fans: { swaps: 3, wallets: 2, volumeUsdc: '45' },
+    })
+    const html = renderToStaticMarkup(
+      <GameScreen
+        game={detail({ activity: traded })}
+        history={history()}
+        dial={gameDial(game(), market(), NOW - 3_730, null, NOW)}
+        now={NOW}
+        stale={false}
+        right={null}
+      />,
+    )
+    const order = [
+      'role="img"',
+      'data-agent-line',
+      'Reference agent: 12 swaps, 840.00 mUSDC · Fans: 3 swaps, 45.00 mUSDC',
+      'href="/agent"',
+      'Times in ET',
+    ].map((s) => html.indexOf(s))
+    expect(order.every((i) => i >= 0)).toBe(true)
+    expect([...order].sort((a, b) => a - b)).toEqual(order)
+  })
+
+  it('has no agent line without a winner market', () => {
+    const html = renderToStaticMarkup(
+      <GameScreen
+        game={detail({ markets: [] })}
+        history={undefined}
+        dial={gameDial(game(), undefined, null, null, NOW)}
+        now={NOW}
+        stale={false}
+        right={null}
+      />,
+    )
+    expect(html).not.toContain('data-agent-line')
+    expect(html).not.toContain('Reference agent')
   })
 
   it('puts the two halves side by side from 1024 px', () => {

@@ -1,7 +1,8 @@
 'use client'
-// The game screen (spec 4.2). One column on mobile: Scorebug, the big Dial, Tape, then the
-// Pusher, PositionCard and ResolutionCard. From 1024 px the same two halves sit side by side:
-// Scorebug, Dial and Tape on the left, the crown, PositionCard and ResolutionCard on the right.
+// The game screen (spec 4.2). One column on mobile: Scorebug, the big Dial, who traded (R2b),
+// Tape, then the Pusher, PositionCard and ResolutionCard. From 1024 px the same two halves sit
+// side by side: Scorebug, Dial, who traded and Tape on the left, the crown, PositionCard and
+// ResolutionCard on the right.
 import type { GameDetail, GameHistory } from '@horagon/sdk'
 import Link from 'next/link'
 import type { ReactNode } from 'react'
@@ -9,6 +10,7 @@ import { winnerOf } from '../../lib/chrono/board'
 import { dialCaption } from '../../lib/chrono/copy'
 import type { GameDial } from '../../lib/chrono/game'
 import { findRuns, latestRun } from '../../lib/chrono/runs'
+import { AgentLine } from './agent-line'
 import { Dial } from './dial'
 import { runKeyOf, stateLine } from './dial-look'
 import { ResolutionCard } from './resolution-card'
@@ -59,6 +61,7 @@ export function GameScreen(p: GameScreenProps) {
             runKey={runKeyOf(p.history, run)}
             className="mx-auto max-w-md"
           />
+          {winner && <AgentLine activity={game.activity} />}
           {winner && (
             <Tape history={p.history} market={winner.pubkey} home={game.home} away={game.away} />
           )}
