@@ -153,12 +153,14 @@ function GameCard(p: { entry: MeGame; now: number }) {
 function ClaimAll(p: MeScreenProps & { me: MeResponse }) {
   const tonight = p.me.games.some((e) => e.positions.some((x) => x.claimable))
   const earlier = p.me.earlierClaimable
+  // "more" only when cards sit above the line; under "No calls tonight yet." it is just "N to claim".
+  const more = p.me.games.some((e) => !e.practice) ? 'more ' : ''
   if (!tonight && earlier === 0 && !p.claiming) return null
   return (
     <div className="space-y-2">
       {earlier > 0 && (
         <p className="text-13 text-ash-400">
-          {earlier} more {earlier === 1 ? 'position' : 'positions'} to claim.
+          {`${earlier} ${more}${earlier === 1 ? 'position' : 'positions'} to claim.`}
         </p>
       )}
       <button

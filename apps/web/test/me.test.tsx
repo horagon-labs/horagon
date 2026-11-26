@@ -339,6 +339,13 @@ describe('My Game-day, rendered', () => {
     )
     expect(page({ me: meResponse({ earlierClaimable: 1 }) })).toContain('1 more position to claim.')
     expect(page({ me: meResponse({ earlierClaimable: 2 }) })).not.toContain('earlier')
+    // With no card above it ("No calls tonight yet."), the line does not say "more".
+    const bare = page({ me: meResponse({ games: [], earlierClaimable: 2 }) })
+    expect(bare).toContain('2 positions to claim.')
+    expect(bare).not.toContain('more')
+    expect(page({ me: meResponse({ games: [], earlierClaimable: 1 }) })).toContain(
+      '1 position to claim.',
+    )
     expect(page()).not.toContain('Claim all')
     expect(page({ me: meResponse({ earlierClaimable: 1 }), preparing: true })).toContain(
       'Preparing…',
@@ -389,7 +396,7 @@ describe('My Game-day, rendered', () => {
 
 describe('the followed teams sent to /me', () => {
   it('sends only team codes the API takes, at most 30, so one odd follow never breaks the page', () => {
-    expect(meTeams(['MEM', 'lac', 'TOO-LONG', 'X', 'TORONTO', 'LAC', 'MEM'])).toEqual([
+    expect(meTeams(['MEM', 'lac', 'TOO-LONG', 'X', 'ABCDEF', 'LAC', 'MEM'])).toEqual([
       'MEM',
       'LAC',
     ])
