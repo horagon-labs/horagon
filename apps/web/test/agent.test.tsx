@@ -131,7 +131,9 @@ describe('AgentLine: who traded, under the dial (R2b)', () => {
     expect(html).toContain(`<p>${AGENT_DISCLOSURE} <a `)
     expect(html).toMatch(/<a [^>]*href="\/agent"[^>]*>How the agent works<\/a>/)
     expect(html).toContain(`href="${explorerAddress(other).replace(/&/g, '&amp;')}"`)
-    expect(html).toContain('9v2Z…bcHN')
+    // The link's name is its visible text (WCAG 2.5.3).
+    expect(html).toMatch(/<a [^>]*rel="noreferrer"[^>]*>Wallet 9v2Z…bcHN<\/a>/)
+    expect(html).not.toContain('aria-label')
     expect(html).not.toContain(REFERENCE_AGENT_WALLET.slice(0, 4))
     // R5's 12 px floor, in the ash of a secondary line.
     expect(html).toMatch(/^<div[^>]*class="[^"]*text-12 font-mono text-ash-400/)

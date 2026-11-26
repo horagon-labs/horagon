@@ -27,14 +27,8 @@ export function AgentLine({ activity }: { activity: GameActivity }) {
       <p>{activityLine(activity)}</p>
       <p>
         {AGENT_DISCLOSURE} <HowLink /> ·{' '}
-        <a
-          href={explorerAddress(wallet)}
-          target="_blank"
-          rel="noreferrer"
-          aria-label={`Agent wallet ${wallet} on Solana Explorer`}
-          className={LINK}
-        >
-          {shortKey(wallet)}
+        <a href={explorerAddress(wallet)} target="_blank" rel="noreferrer" className={LINK}>
+          Wallet {shortKey(wallet)}
         </a>
       </p>
     </div>
