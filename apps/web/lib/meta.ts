@@ -17,13 +17,21 @@ export const SITE_DESCRIPTION =
 
 const LOCAL = 'http://localhost:3000'
 
-/** The site's origin for absolute share links: HORAGON_PUBLIC_URL, or localhost without it. */
-export function siteUrl(raw: string | undefined): URL {
+/**
+ * The site's origin for absolute share links (the layout's metadataBase): HORAGON_PUBLIC_URL.
+ * Without a valid one, a local build uses localhost, and a production build gets undefined, so
+ * Next falls back to its own default (the deployment's URL): never localhost in production.
+ */
+export function siteUrl(
+  raw: string | undefined,
+  nodeEnv: string | undefined = process.env.NODE_ENV,
+): URL | undefined {
   try {
-    return new URL(raw || LOCAL)
+    if (raw) return new URL(raw)
   } catch {
-    return new URL(LOCAL)
+    // Not a URL: treated as unset.
   }
+  return nodeEnv === 'production' ? undefined : new URL(LOCAL)
 }
 
 /** The share card's words and needle for one game. */

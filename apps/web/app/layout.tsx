@@ -15,7 +15,8 @@ const grotesk = Space_Grotesk({ subsets: ['latin'], variable: '--font-grotesk', 
 const mono = JetBrains_Mono({ subsets: ['latin'], variable: '--font-jetbrains', display: 'swap' })
 
 export const metadata: Metadata = {
-  // Absolute share links (og:image, og:url) on the public site; localhost in a local build.
+  // Absolute share links (og:image, og:url) on the public site; localhost in a local build, and
+  // Next's own default in a production build without HORAGON_PUBLIC_URL.
   metadataBase: siteUrl(process.env.HORAGON_PUBLIC_URL),
   title: { default: SITE_TITLE, template: `%s · ${SITE_NAME}` },
   description: SITE_DESCRIPTION,

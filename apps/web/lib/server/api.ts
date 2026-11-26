@@ -1,8 +1,9 @@
 // API v1 on the server (R5): the Hono app from @horagon/api, built once per server instance and
 // shared by the route handler (app/api/v1) and the pages' first frames. A page asks it in
 // process, through the same SDK client the browser uses, so the first HTML holds the same data
-// the browser's poll would load, with no network hop. Server only: never import this from a
-// client component.
+// the browser's poll would load, with no network hop. Server only: `server-only` (Next's own
+// copy, next/dist/compiled/server-only) fails the build if a client component imports this.
+import 'server-only'
 import { createApp, depsFromEnv } from '@horagon/api'
 import { HoragonClient } from '@horagon/sdk/client'
 import {

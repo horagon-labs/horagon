@@ -42,8 +42,8 @@ export interface InitialBoard {
 }
 
 /**
- * The board's first frame. With no game on the board and none later in the list, it asks the
- * next ET days one by one, up to LOOKAHEAD_DAYS, for the next games.
+ * The board's first frame. With no game on the board and none later in the list, it looks for
+ * the next games over the next LOOKAHEAD_DAYS ET days (`lookAhead`).
  */
 export async function loadBoard(
   client: BoardClient,
@@ -54,18 +54,39 @@ export async function loadBoard(
   if (!games) return { games: undefined, upcoming: null, now: nowSecs }
   const tonight = games.some((g) => isTonight(g, nowSecs * 1000))
   let upcoming = upcomingOf(games, nowSecs)
-  if (!tonight && upcoming === null) {
-    // Days 0 and 1 are the default list's; look from the day after.
-    for (let d = 2; d <= LOOKAHEAD_DAYS + 1 && upcoming === null; d++) {
-      const more = await within(
-        client.games.list({ date: etDay(nowSecs + d * DAY_SECS) }),
-        timeoutMs,
-      )
-      if (!more) break
-      upcoming = upcomingOf(more, nowSecs)
-    }
-  }
+  if (!tonight && upcoming === null) upcoming = await lookAhead(client, nowSecs, timeoutMs)
   return { games, upcoming, now: nowSecs }
+}
+
+/**
+ * The next games past the default list's days (0 and 1): days 2 to LOOKAHEAD_DAYS + 1 are asked
+ * all at once, under one `timeoutMs` cap for the lot (R5 review finding 8), and the first day
+ * that has games answers. A day that fails or is still out when the cap ends stops the search
+ * there, so a later day never passes for the next one. Never throws.
+ */
+export async function lookAhead(
+  client: BoardClient,
+  nowSecs: number,
+  timeoutMs = INITIAL_TIMEOUT_MS,
+): Promise<Upcoming | null> {
+  const days = Array.from({ length: LOOKAHEAD_DAYS }, (_, i) =>
+    client.games.list({ date: etDay(nowSecs + (i + 2) * DAY_SECS) }).catch(() => undefined),
+  )
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const late = new Promise<'late'>((resolve) => {
+    timer = setTimeout(() => resolve('late'), timeoutMs)
+  })
+  try {
+    for (const day of days) {
+      const more = await Promise.race([day, late])
+      if (more === 'late' || more === undefined) return null
+      const next = upcomingOf(more, nowSecs)
+      if (next) return next
+    }
+    return null
+  } finally {
+    clearTimeout(timer)
+  }
 }
 
 export interface InitialGame {

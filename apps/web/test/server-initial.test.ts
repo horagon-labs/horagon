@@ -7,6 +7,7 @@ import {
   LOOKAHEAD_DAYS,
   loadBoard,
   loadGame,
+  lookAhead,
   ttlCache,
   within,
 } from '../lib/server/initial'
@@ -76,12 +77,21 @@ describe('loadBoard (R5)', () => {
     expect(list).toHaveBeenCalledTimes(1)
   })
 
-  it('looks ahead day by day on an empty night, from the day after the default list', async () => {
+  it('looks ahead on an empty night, from the day after the default list', async () => {
     const { c, list } = client({ default: [], '2026-11-27': [fri7] })
     const b = await loadBoard(c, NOW)
     expect(b.games).toEqual([])
     expect(b.upcoming).toEqual({ tip: secs(fri7), count: 1 })
-    expect(list.mock.calls.map((a) => a[0]?.date)).toEqual([undefined, '2026-11-26', '2026-11-27'])
+    // Days 2 to 7 are all asked at once (R5 review finding 8).
+    expect(list.mock.calls.map((a) => a[0]?.date)).toEqual([
+      undefined,
+      '2026-11-26',
+      '2026-11-27',
+      '2026-11-28',
+      '2026-11-29',
+      '2026-11-30',
+      '2026-12-01',
+    ])
   })
 
   it('stops after LOOKAHEAD_DAYS, and leaves the games out when the API is late', async () => {
@@ -90,6 +100,75 @@ describe('loadBoard (R5)', () => {
     expect(list).toHaveBeenCalledTimes(1 + LOOKAHEAD_DAYS)
     const slow = { games: { list: () => new Promise<Game[]>(() => {}) } } as unknown as BoardClient
     expect(await loadBoard(slow, NOW, 5)).toEqual({ games: undefined, upcoming: null, now: NOW })
+  })
+})
+
+describe('lookAhead (R5 review finding 8)', () => {
+  /** A client whose day lists answer after `ms[date]` milliseconds (never without one). */
+  function slowClient(byDate: Record<string, Game[]>, ms: Record<string, number>) {
+    const list = vi.fn(
+      (q?: { date?: string }) =>
+        new Promise<Game[]>((resolve) => {
+          const wait = ms[q?.date ?? '']
+          if (wait !== undefined) setTimeout(() => resolve(byDate[q?.date ?? ''] ?? []), wait)
+        }),
+    )
+    return { list, c: { games: { list, get: vi.fn() } } as unknown as BoardClient }
+  }
+  const days = ['2026-11-26', '2026-11-27', '2026-11-28', '2026-11-29', '2026-11-30', '2026-12-01']
+  const all = (wait: number) => Object.fromEntries(days.map((d) => [d, wait]))
+
+  it('asks every day at once and waits one cap in all, not one per day', async () => {
+    vi.useFakeTimers()
+    try {
+      // Each day takes 1 s: one at a time that was 6 s; at once it is 1 s, under the 1.5 s cap.
+      const { c, list } = slowClient({ '2026-11-30': [fri7] }, all(1_000))
+      const out = lookAhead(c, NOW, 1_500)
+      expect(list).toHaveBeenCalledTimes(LOOKAHEAD_DAYS)
+      await vi.advanceTimersByTimeAsync(1_000)
+      expect(await out).toEqual({ tip: secs(fri7), count: 1 })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('takes the first day with games, even when a later day answers first', async () => {
+    vi.useFakeTimers()
+    try {
+      const thu = later('2026-11-28T00:00:00.000Z', { id: 'nba-t' })
+      const sat = later('2026-11-30T00:00:00.000Z', { id: 'nba-s' })
+      const { c } = slowClient(
+        { '2026-11-27': [thu], '2026-11-29': [sat] },
+        { ...all(100), '2026-11-27': 900, '2026-11-29': 10 },
+      )
+      const out = lookAhead(c, NOW, 1_500)
+      await vi.advanceTimersByTimeAsync(900)
+      expect(await out).toEqual({ tip: secs(thu), count: 1 })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('gives up at the cap, or at a day that failed, instead of skipping past it', async () => {
+    vi.useFakeTimers()
+    try {
+      // 2026-11-27 never answers: the later day with games must not pass for the next one.
+      const slow = slowClient(
+        { '2026-11-29': [fri7] },
+        { ...all(10), '2026-11-27': undefined as unknown as number },
+      )
+      const out = lookAhead(slow.c, NOW, 1_500)
+      await vi.advanceTimersByTimeAsync(1_500)
+      expect(await out).toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
+    const down = vi.fn(async (q?: { date?: string }) => {
+      if (q?.date === '2026-11-26') throw new Error('down')
+      return [fri7]
+    })
+    const failing = { games: { list: down, get: vi.fn() } } as unknown as BoardClient
+    expect(await lookAhead(failing, NOW, 1_500)).toBeNull()
   })
 })
 

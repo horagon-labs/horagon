@@ -59,10 +59,17 @@ describe('gameMeta (R5)', () => {
 
 describe('siteUrl (R5)', () => {
   it('takes HORAGON_PUBLIC_URL, and localhost when it is unset or not a URL', () => {
-    expect(siteUrl('https://horagon.test').origin).toBe('https://horagon.test')
-    expect(siteUrl(undefined).origin).toBe('http://localhost:3000')
-    expect(siteUrl('').origin).toBe('http://localhost:3000')
-    expect(siteUrl('not a url').origin).toBe('http://localhost:3000')
+    expect(siteUrl('https://horagon.test')?.origin).toBe('https://horagon.test')
+    expect(siteUrl(undefined, 'development')?.origin).toBe('http://localhost:3000')
+    expect(siteUrl('', 'test')?.origin).toBe('http://localhost:3000')
+    expect(siteUrl('not a url', undefined)?.origin).toBe('http://localhost:3000')
+  })
+
+  it('never falls back to localhost in production: Next picks its own default (finding 7)', () => {
+    expect(siteUrl(undefined, 'production')).toBeUndefined()
+    expect(siteUrl('', 'production')).toBeUndefined()
+    expect(siteUrl('not a url', 'production')).toBeUndefined()
+    expect(siteUrl('https://horagon.test', 'production')?.origin).toBe('https://horagon.test')
   })
 })
 
