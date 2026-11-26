@@ -1,5 +1,7 @@
-// Resolution evidence (spec 7) from a draft plus the guardian's box-score check, the second
-// source that replaces the NBA CDN (403 everywhere, Tier 0 S4). The JSON is validated with
+// Resolution evidence (spec 7) from a draft plus a confirming source: the guardian's box-score
+// check, or the keeper's second source (balldontlie, R6), which replace the NBA CDN (403
+// everywhere, Tier 0 S4). An auto-proposal no second source checked carries the ESPN source
+// alone, and the guardian is paged to check it inside the window. The JSON is validated with
 // the SDK's own parser before it is hashed, so the API never publishes evidence that
 // `horagon verify` would reject.
 import type { DraftRow, GameRow } from '@horagon/db'
@@ -60,21 +62,26 @@ export function checkBoxScoreUrl(raw: string): BoxScoreCheck {
 /** ISO 8601 UTC with second precision, as `EvidenceSourceSchema` requires. */
 export const isoSeconds = (d: Date) => d.toISOString().replace(/\.\d{3}Z$/, 'Z')
 
-export interface EvidenceInput {
+interface EvidenceBase {
   game: Pick<GameRow, 'league' | 'externalId' | 'home' | 'away'>
   draft: Pick<
     DraftRow,
     'status' | 'homeScore' | 'awayScore' | 'periods' | 'sourceUrl' | 'fetchedAt'
   >
   kind: 0
-  /**
-   * The guardian's box score (final) or postponement notice (postponed). Pass the `url` that
-   * `checkBoxScoreUrl` returned, not the raw input.
-   */
-  confirmUrl: string
-  confirmSource: string
-  confirmedAt: Date
 }
+
+/**
+ * The confirming source, `sources[1]`, all three fields or none: the guardian's box score (final)
+ * or postponement notice (postponed), or the keeper's second source. Pass the `url` that
+ * `checkBoxScoreUrl` returned, not the raw input. Without one (a proposal no second source
+ * checked), `sources` holds the ESPN entry only, which the schema allows (1 to 4 sources).
+ */
+export type EvidenceInput = EvidenceBase &
+  (
+    | { confirmUrl: string; confirmSource: string; confirmedAt: Date }
+    | { confirmUrl?: undefined; confirmSource?: undefined; confirmedAt?: undefined }
+  )
 
 export function buildEvidence(p: EvidenceInput): ResolutionEvidence {
   if (p.draft.status !== 'final' && p.draft.status !== 'postponed')
@@ -96,11 +103,15 @@ export function buildEvidence(p: EvidenceInput): ResolutionEvidence {
     outcome: postponed ? 'no' : outcomeFor(p.kind, p.draft.homeScore, p.draft.awayScore, periods),
     sources: [
       { name: 'espn', url: p.draft.sourceUrl, fetchedAt: isoSeconds(p.draft.fetchedAt) },
-      {
-        name: p.confirmSource,
-        url: new URL(p.confirmUrl).href,
-        fetchedAt: isoSeconds(p.confirmedAt),
-      },
+      ...(p.confirmUrl === undefined
+        ? []
+        : [
+            {
+              name: p.confirmSource,
+              url: new URL(p.confirmUrl).href,
+              fetchedAt: isoSeconds(p.confirmedAt),
+            },
+          ]),
     ],
   }
   return parseResolutionEvidence(evidence)

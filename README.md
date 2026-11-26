@@ -58,9 +58,10 @@ Horagon builds a game-day product on that model. This is the design (see
   like anyone else. They are labelled by a memo, and the pre-registered metric counts them
   apart from human wallets.
 - **For resolution.** A program-derived address (PDA) of the Horagon program is the authority
-  and sole LP of every market. The keeper drafts each result and its evidence JSON. A guardian
-  checks the draft against the public box score and proposes it on-chain with the evidence hash.
-  A guardian can then challenge it for 15 minutes before anyone can finalize it.
+  and sole LP of every market. The keeper drafts each result and its evidence JSON, checks the
+  score against a second source (balldontlie), and proposes it on-chain with the evidence hash.
+  A guardian is paged when the sources disagree or no second source answered, and can challenge
+  a proposal for 15 minutes before anyone can finalize it.
 
 It answers the "Game-day mode for prediction markets" entry in Solana's
 [Requests for Startups 2026](https://solana.com/request-for-startups): "Build a live game-day
@@ -320,8 +321,9 @@ sequenceDiagram
     K->>H: halt on the first Final read, at the final buzzer
     H->>P: withdraw_liquidity (the PDA signs), trading stops
     Note over P: end_ts = S + 3 h, the latest close, then results can be proposed
-    K->>G: draft result and evidence, after the final
-    G->>H: propose_result with the evidence hash, after checking the box score
+    K->>K: draft result and evidence, check the score against balldontlie
+    K->>H: propose_result with the evidence hash, from end_ts
+    K->>G: page on a mismatch, or when no second source answered
     G-->>H: challenge within 15 min if wrong
     K->>H: finalize once the window has closed
     H->>P: resolve_market (the PDA signs)
@@ -352,10 +354,16 @@ sequenceDiagram
    - the rule and the outcome;
    - the sources, each with a fetch time.
 
-   Proposing opens at `end_ts`, S + 3 h. Until auto-propose ships (R6, due about 2026-11-30), the
-   guardian checks the draft against the public box score and, from `end_ts` on, runs
-   `horagon-ops propose <gameId> --box-score <url> --score <home>-<away>`, which publishes the
-   JSON and calls `propose_result` with its sha256. Anyone can recompute the hash.
+   Proposing opens at `end_ts`, S + 3 h. The keeper asks balldontlie, a second score source, for
+   the same game. From the later of Final held 60 seconds and `end_ts`, the attestor proposes the
+   draft: it publishes the JSON and calls `propose_result` with its sha256, citing balldontlie
+   when its final matches. When balldontlie disagrees, nothing is proposed and a guardian is
+   paged to check the box score and run
+   `horagon-ops propose <gameId> --box-score <url> --score <home>-<away>`. When balldontlie has
+   no final 10 minutes after proposing opened, or no key is set, the keeper proposes on ESPN alone
+   and pages a guardian to check the box score inside the window. `KEEPER_AUTO_PROPOSE` turns this
+   to a dry run (it pages what it would propose and sends nothing) or off, and then a guardian
+   proposes every result by hand. Anyone can recompute the hash.
 5. **15 minutes later.** If no guardian has challenged, `finalize` resolves the pm-AMM market
    through the PDA. `recycle` then claims the LP residuals and the PDA's winning shares back into
    the treasury. The 1% creator fee needs no step of its own: pm-AMM pays it into the treasury on
@@ -396,15 +404,18 @@ metrics.
 The keys, as deployed. None of these keys holds anything of real value: this is
 devnet.
 
-| Key             | Held by                                                                                               | Can                                                                          | Cannot                                                |
-| --------------- | ----------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- | ----------------------------------------------------- |
-| Admin           | The builder's wallet                                                                                  | Change the config, withdraw the treasury, upgrade the program                | —                                                     |
-| Attestor        | The keeper                                                                                            | Create markets, halt, propose results                                        | Finalize early, withdraw the treasury                 |
-| Guardian 1      | The builder's wallet                                                                                  | Propose, challenge, halt                                                     | Withdraw the treasury                                 |
-| Guardian 2      | Not set: the config's second guardian slot is empty                                                   | Nothing                                                                      | —                                                     |
-| Sponsor         | The API server                                                                                        | Pay fees and rent for allowlisted transactions only                          | Sign anything else; it holds only a small SOL balance |
-| Reference agent | The agent process on the VPS (`~/horagon/.keys/agent.json`), its only signer; listed as `team-burner` | Sign and pay for its own swaps (each with the `horagon:bot` memo) and claims | Use the sponsor; do anything a player's wallet cannot |
-| Authority PDA   | The `horagon` program                                                                                 | Act as each market's authority and sole LP, and own the treasury             | Sign outside the program's instructions               |
+| Key             | Held by                                                                                               | Can                                                                                                             | Cannot                                                |
+| --------------- | ----------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------- |
+| Admin           | The builder's wallet                                                                                  | Change the config, withdraw the treasury, upgrade the program                                                   | —                                                     |
+| Attestor        | The keeper                                                                                            | Create markets, halt, propose each result automatically once ESPN's Final has held 60 s and `end_ts` has passed | Finalize early, withdraw the treasury                 |
+| Guardian 1      | The builder's wallet                                                                                  | Challenge within 15 min when paged, propose by hand after a challenge or a held result, halt                    | Withdraw the treasury                                 |
+| Guardian 2      | Not set: the config's second guardian slot is empty                                                   | Nothing                                                                                                         | —                                                     |
+| Sponsor         | The API server                                                                                        | Pay fees and rent for allowlisted transactions only                                                             | Sign anything else; it holds only a small SOL balance |
+| Reference agent | The agent process on the VPS (`~/horagon/.keys/agent.json`), its only signer; listed as `team-burner` | Sign and pay for its own swaps (each with the `horagon:bot` memo) and claims                                    | Use the sponsor; do anything a player's wallet cannot |
+| Authority PDA   | The `horagon` program                                                                                 | Act as each market's authority and sole LP, and own the treasury                                                | Sign outside the program's instructions               |
+
+Proposer: the automated attestor. Challenger: a human guardian, paged on any second-source
+mismatch, or when no second source answered. One admin key holds config, treasury and upgrades.
 
 If the attestor key leaks, the attacker can propose a wrong result, halt open markets and create
 markets. A guardian challenges a wrong result within the 15-minute window, and the admin pauses
@@ -485,7 +496,9 @@ planned before submission.
     close until 2026-11-26, all but 1.
   - A result can be proposed only from `end_ts` on. A game of median length ends at
     S + 2 h 32 min, 28 minutes before `end_ts`, and a result becomes final 15 minutes after it
-    is proposed. Until auto-propose ships (R6), the guardian proposes by hand.
+    is proposed. The attestor proposes it once ESPN's Final has held 60 seconds and `end_ts`
+    has come; a guardian proposes by hand only a held result, a postponed game, or a game after
+    a challenge.
   - The halt waits for the feed. ESPN showed Final 25 to 148 seconds after the buzzer on
     2026-11-18, and the keeper reads it every 15 seconds; until the halt lands the market can
     be sniped. Depth follows √(time left), so at a median buzzer, 28 of the market's 240
@@ -495,11 +508,12 @@ planned before submission.
 - **Sniping between the score and the halt.** A trader who sees the score before the feed does,
   for example at the arena, can trade against the pool until the market closes or is halted.
   The shrinking liquidity limits the loss, and in play money Horagon accepts it.
-- **One score feed.** The NBA CDN refused every host tried with 403. Horagon does not spoof
-  browser headers to get past it. ESPN's JSON API is undocumented, with no published API terms
-  and no SLA. The second source is the guardian, who confirms every proposal against a public box score
-  URL. ESPN scores can also go down within a game (stat corrections): three of the 12 recorded
-  games have such a frame.
+- **No official score feed.** The NBA CDN refused every host tried with 403. Horagon does not
+  spoof browser headers to get past it. ESPN's JSON API is undocumented, with no published API
+  terms and no SLA. The second source is balldontlie's free API: the keeper proposes when its
+  final matches ESPN's, holds the result and pages a guardian when it differs, and asks a
+  guardian to check a public box score when it has not answered. ESPN scores can also go down
+  within a game (stat corrections): three of the 12 recorded games have such a frame.
 - **Sponsor rent can be farmed.** A user owns the token accounts the sponsor paid for, and can
   close them to their own wallet. A claim always does: pm-AMM's `claim_winnings` closes the YES
   and NO accounts and pays their rent to the player. The validator ties outcome-token accounts
@@ -542,8 +556,9 @@ Here is the argument against building it:
 - **Results come slowly.** Markets trade to the final buzzer, but a result can be proposed only
   from `end_ts` = S + 3 h, so a result waits for `end_ts` and then for the 15-minute dispute
   window, and a game still being played at S + 3 h closes early.
-- **The integrity of the result rests on one feed and one person.** It depends on an unofficial
-  ESPN feed and one guardian; the second guardian slot is not set.
+- **The integrity of the result rests on two free feeds and one person.** It depends on an
+  unofficial ESPN feed, checked against balldontlie's free tier, and on one guardian to challenge
+  a wrong proposal; the second guardian slot is not set.
 - **There is no proof yet that anyone wants it.** The core loop has not run in front of a user.
 
 Of these, the design answers some in part:
@@ -610,7 +625,7 @@ times were kept.
 | Solana        | `@solana/web3.js` 1.98, `@anchor-lang/core` (through the vendored SDK), Anchor 1.2.2 for the `horagon` program and the S2 program                                                                                                |
 | API and web   | Hono 4 (API v1), Drizzle ORM 0.45 on Postgres, Next.js 16 with React 19 (web), zod 4 (input checks), pino (logs)                                                                                                                 |
 | Tooling       | pnpm 10, Turborepo, TypeScript 5.9, Biome 2, Vitest with V8 coverage, tsup, Changesets, GitHub Actions                                                                                                                           |
-| Data          | ESPN's public scoreboard and summary JSON, read for display and replay; resolution evidence cites the public box score page                                                                                                      |
+| Data          | ESPN's public scoreboard and summary JSON, read for display and replay; balldontlie's free games API, the second score source; evidence cites ESPN and, when it matched, balldontlie, or the box score a guardian checked        |
 | Models        | NBA-style Elo (K 20, home advantage 100, 75% carryover toward 1505 between seasons); in-game probability after Stern (1994), "A Brownian motion model for the progress of sports scores"                                         |
 
 **AI-assisted code.** Horagon is built with Claude Code, Anthropic's AI coding agent, which wrote

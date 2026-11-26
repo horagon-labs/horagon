@@ -3,8 +3,13 @@
 import type { Logger } from 'pino'
 
 export interface Alerter {
-  /** Sends unless the same key was sent within the dedupe window. */
-  send(key: string, text: string): Promise<void>
+  /**
+   * Sends unless the same key was sent within the dedupe window. False when the message did not
+   * reach the chat (yet): the caller may call again, and the alerter retries after a pause. An
+   * alerter that cannot tell returns nothing, which counts as delivered.
+   */
+  // biome-ignore lint/suspicious/noConfusingVoidType: an alerter written as `async () => {}` stays one
+  send(key: string, text: string): Promise<boolean | void>
 }
 
 export interface TelegramOptions {
@@ -47,6 +52,8 @@ const PERSON_ALERT_KEYS = [
   'tick-failing',
   'index-failing',
   'evidence-mismatch',
+  'source-held',
+  'second-source-refused',
 ] as const
 
 /** `dedupeFor` for the keeper and ops: 3 h for the keys that need a person, else the default. */
@@ -57,6 +64,8 @@ export function personAlertWindow(key: string): number | undefined {
 
 export function telegramAlerter(opts: TelegramOptions): Alerter {
   const sent = new Map<string, number>()
+  /** Keys whose last message did not reach Telegram. */
+  const failed = new Set<string>()
   const fetchImpl = opts.fetchImpl ?? fetch
   const now = opts.now ?? (() => Date.now() / 1000)
   const defaultWindow = opts.dedupeSecs ?? 600
@@ -66,7 +75,7 @@ export function telegramAlerter(opts: TelegramOptions): Alerter {
       const t = now()
       const window = opts.dedupeFor?.(key) ?? defaultWindow
       const last = sent.get(key)
-      if (last !== undefined && t - last < window) return
+      if (last !== undefined && t - last < window) return !failed.has(key)
       sent.set(key, t)
       let delivered = false
       const body = { chat_id: opts.chatId, text: opts.prefix ? `${opts.prefix} ${text}` : text }
@@ -85,7 +94,10 @@ export function telegramAlerter(opts: TelegramOptions): Alerter {
       }
       // A failed delivery must not silence the key for the whole window, nor retry on every call.
       if (!delivered) sent.set(key, t - window + Math.min(RETRY_AFTER_FAILURE_SECS, window))
+      if (delivered) failed.delete(key)
+      else failed.add(key)
       opts.log.info({ key, alert: text }, 'alert')
+      return delivered
     },
   }
 }
@@ -95,6 +107,7 @@ export function logAlerter(log: Logger): Alerter {
   return {
     async send(key, text) {
       log.warn({ key, alert: text }, 'alert')
+      return true
     },
   }
 }

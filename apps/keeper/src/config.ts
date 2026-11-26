@@ -13,7 +13,14 @@ import {
 import { Connection, Keypair, PublicKey } from '@solana/web3.js'
 import pino, { type DestinationStream, type LogFn, type Logger } from 'pino'
 import { type ZodError, z } from 'zod'
-import { DEFAULT_SEEDS, DEFAULT_TIMINGS, type SeedPolicy, type Timings } from './planner'
+import {
+  type AutoProposeMode,
+  DEFAULT_SEEDS,
+  DEFAULT_TIMINGS,
+  type SeedPolicy,
+  type Timings,
+} from './planner'
+import { evidenceUri, publicBaseUrl } from './propose'
 import { DEFAULT_STALL_SECS, MIN_STALL_SECS } from './stall'
 
 export { MAINNET_GENESIS_HASH } from '@horagon/sdk'
@@ -39,8 +46,12 @@ const TimingsSchema = z
     notStartedSecs: z.number().int().min(60),
     postponedResolveSecs: z.number().int().min(60),
     missingSourceSecs: z.number().int().min(60),
+    secondSourceWaitSecs: z.number().int().min(0),
   })
   .partial()
+
+/** An empty value counts as unset, so a blank line in the env file keeps the default. */
+const blank = (v: unknown) => (v === '' ? undefined : v)
 
 const EnvSchema = z.object({
   HORAGON_RPC_URL: z.url({ protocol: /^https?$/ }),
@@ -78,7 +89,46 @@ const EnvSchema = z.object({
   /** Seconds without any activity before the keeper exits so systemd restarts it. */
   KEEPER_STALL_SECS: z.coerce.number().int().min(MIN_STALL_SECS).default(DEFAULT_STALL_SECS),
   LOG_LEVEL: z.enum(['trace', 'debug', 'info', 'warn', 'error']).default('info'),
+  /** The API's public base URL: the evidence link of an auto-proposal (R6). */
+  HORAGON_PUBLIC_URL: z.preprocess(blank, z.string().optional()),
+  /** Auto-propose (R6): on, dry (pages "would propose", sends nothing) or off. */
+  KEEPER_AUTO_PROPOSE: z.preprocess(blank, z.enum(['on', 'dry', 'off']).default('on')),
+  /** balldontlie, the second source (free tier). Sent in a header only, never logged. */
+  BALLDONTLIE_API_KEY: z.preprocess(blank, z.string().min(8).optional()),
 })
+
+/** Auto-propose as the keeper runs it: the mode asked for, unless something turns it off. */
+export interface AutoProposeConfig {
+  mode: AutoProposeMode
+  /** HORAGON_PUBLIC_URL, checked (https, no trailing slash); null with the mode off. */
+  publicUrl: string | null
+  /** Why the mode is off (KEEPER_AUTO_PROPOSE=off, or no usable URL); null when on or dry. */
+  off: string | null
+}
+
+/** The longest game id `GameIdSchema` allows: a URL that fits it fits every game. */
+const LONGEST_GAME_ID = `abcdefgh-${'0'.repeat(16)}`
+
+/**
+ * KEEPER_AUTO_PROPOSE (default on) with HORAGON_PUBLIC_URL. Without a usable URL the mode is off,
+ * with the reason: the keeper still starts, and `main.ts` alerts `auto-propose-off`.
+ */
+export function autoProposeFrom(
+  e: { KEEPER_AUTO_PROPOSE: AutoProposeMode; HORAGON_PUBLIC_URL?: string | undefined },
+  cluster: Cluster,
+): AutoProposeConfig {
+  if (e.KEEPER_AUTO_PROPOSE === 'off')
+    return { mode: 'off', publicUrl: null, off: 'KEEPER_AUTO_PROPOSE=off' }
+  if (!e.HORAGON_PUBLIC_URL)
+    return { mode: 'off', publicUrl: null, off: 'HORAGON_PUBLIC_URL is not set' }
+  try {
+    const publicUrl = publicBaseUrl(e.HORAGON_PUBLIC_URL, cluster)
+    evidenceUri(publicUrl, cluster, LONGEST_GAME_ID)
+    return { mode: e.KEEPER_AUTO_PROPOSE, publicUrl, off: null }
+  } catch (err) {
+    return { mode: 'off', publicUrl: null, off: (err as Error).message }
+  }
+}
 
 export interface RpcEndpoint {
   url: string
@@ -105,6 +155,9 @@ export interface KeeperConfig {
   sponsor: PublicKey | null
   stallSecs: number
   logLevel: string
+  autoPropose: AutoProposeConfig
+  /** BALLDONTLIE_API_KEY, or null: no second source. Never log it. */
+  balldontlieKey: string | null
 }
 
 /** A path from the environment or the command line: relative ones resolve from the repo root. */
@@ -372,6 +425,8 @@ export function loadConfig(
     sponsor: e.SPONSOR_PUBKEY ? publicKey('SPONSOR_PUBKEY', e.SPONSOR_PUBKEY) : null,
     stallSecs: e.KEEPER_STALL_SECS,
     logLevel: e.LOG_LEVEL,
+    autoPropose: autoProposeFrom(e, e.HORAGON_CLUSTER),
+    balldontlieKey: e.BALLDONTLIE_API_KEY ?? null,
   }
 }
 

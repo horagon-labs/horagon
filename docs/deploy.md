@@ -67,7 +67,7 @@ variables it needs exported (`docs/runbook.md`, "Before you start").
    `~/horagon/.env.keeper` from the "Shared" and "Keeper" parts of `.env.example`
    (`chmod 600`). Leave an optional variable commented out rather than empty: the keeper
    refuses an empty `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `HORAGON_RPC_BACKUP_URL`,
-   `REPLAY_TAG`, `REPLAY_TIPOFF` or `SEED_*_USDC`.
+   `REPLAY_TAG`, `REPLAY_TIPOFF` or `SEED_*_USDC`. Auto-propose reads three more (below).
 6. **Elo ratings:** `pnpm --filter @horagon/keeper elo:build` on your machine, then copy the
    file; the keeper does not start without it:
 
@@ -75,6 +75,23 @@ variables it needs exported (`docs/runbook.md`, "Before you start").
    ssh "$HORAGON_VPS" 'mkdir -p ~/horagon/apps/keeper/data'
    scp apps/keeper/data/elo.json "$HORAGON_VPS":horagon/apps/keeper/data/elo.json
    ```
+
+## Auto-propose (the keeper's variables)
+
+The keeper's attestor proposes each checked Final itself (`docs/runbook.md`, procedure K). It
+reads these from `~/horagon/.env.keeper`; check them by name only, never by printing the file:
+
+| Variable              | Default        | What it does                                                                                                                                           |
+| --------------------- | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `HORAGON_PUBLIC_URL`  | unset          | The "Shared" variable: the https site of the evidence URI on chain, the same origin `horagon-ops propose` uses. Unset or unusable, auto-propose is off |
+| `KEEPER_AUTO_PROPOSE` | `on`           | `on`, `dry` (pages what it would propose, sends and writes nothing) or `off`. A blank line keeps the default                                           |
+| `BALLDONTLIE_API_KEY` | unset          | The second source's free-tier key, at least 8 characters, sent in a header only. Unset or blank: no second source, every proposal pages `CHECK`        |
+| `TELEGRAM_BOT_TOKEN`  | unset          | With `TELEGRAM_CHAT_ID`, where the pages go. Without both, the keeper logs at start that auto-propose pages reach the journal only                     |
+| `KEEPER_TIMINGS`      | (the defaults) | `secondSourceWaitSecs` (600): how long a silent second source is waited for before an unchecked proposal                                               |
+
+Run the first night after the deploy that brings auto-propose with `KEEPER_AUTO_PROPOSE=dry`,
+then `on`. Write the balldontlie key into `.env.keeper` on the VPS yourself, never in a chat, the
+repository or a command line.
 
 ## Reference agent (once, before its first swap)
 
@@ -88,7 +105,9 @@ The agent is optional and off by default (`AGENT_ENABLED` unset). Before it ever
    solana-keygen pubkey ~/horagon/.keys/agent.json
    ```
 
-   Send that public key about 0.5 devnet SOL; it claims its mUSDC from the faucet every hour.
+   Send that public key about 0.5 devnet SOL; it claims its mUSDC from the faucet every hour
+   once it trades. A dry run claims nothing and plans against a notional balance (its spend cap),
+   so an empty mUSDC wallet is fine for its first night.
 2. **Disclosure:** add its public key to `docs/metrics-wallets.json` as a `team-burner` entry in a
    public commit (the pre-registered metric reads that file), and mark it a team wallet in the
    database: `horagon-ops team <agent pubkey>`. The agent checks the shipped copy of that file
@@ -121,8 +140,9 @@ and its dependencies, builds the SDK, copies the four units of `ops/systemd` to
 `horagon-agent`. A running agent keeps the previous revision, and the script says so: restart it
 by hand (`systemctl --user restart horagon-agent`, procedure J of `docs/runbook.md`) to run the
 new one, which also clears the markets its anomaly check stopped. A stopped agent stays stopped.
-A keeper restart is safe during a night, but avoid one from S + 1h40m until a game's market is
-halted at the buzzer or its `end_ts` has passed (`docs/runbook.md`, procedure G). Logs:
+Before it ships anything, the script runs `horagon-ops deploy-check` on the VPS and refuses
+while a game is between tip-off - 60 min and its market's close, listing those games (a restart
+there holds back buzzer halts); `--force` deploys anyway (`docs/runbook.md`, procedure G). Logs:
 `ssh "$HORAGON_VPS" journalctl --user -u horagon-keeper -f -o cat`.
 
 Then the web, from the same commit. The Git integration is off, so it ships only this way, and

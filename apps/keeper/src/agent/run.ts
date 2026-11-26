@@ -97,11 +97,12 @@ export async function connectAgent(
     cfg.cluster,
     {
       log,
-      onBackupDown: (rpc, error) =>
-        alerts.send(
+      onBackupDown: async (rpc, error) => {
+        await alerts.send(
           'rpc-backup-down',
           `Backup RPC ${rpc} failed the cluster check ${BACKUP_RPC_TRIES} times (${error}); the agent runs without it until it restarts.`,
-        ),
+        )
+      },
     },
   )
   const { db, close } = wiring.database(cfg.databaseUrl)

@@ -186,6 +186,14 @@ const NOT_ALERT_WORDS = new Set([
   'postponed',
   'final-before-end',
   'not-started',
+  // auto-propose (R6): its modes, its checks and the second source, and the ops line it writes
+  'on',
+  'dry',
+  'off',
+  'match',
+  'unchecked',
+  'balldontlie',
+  'second-source',
   // other words
   'devnet',
   'horagon',
@@ -259,6 +267,10 @@ describe('docs/runbook.md and the alert keys in the code', () => {
       'archive',
       'heartbeat',
       'watchdog',
+      'auto-proposed',
+      'source-mismatch',
+      'source-held',
+      'auto-propose-off',
     ]) {
       expect(keys).toContain(k)
     }
@@ -286,6 +298,17 @@ describe('docs/runbook.md and the alert keys in the code', () => {
   it('lists in NOT_ALERT_WORDS no key the code sends', () => {
     const code = codeKeys()
     expect([...NOT_ALERT_WORDS].filter((w) => code.has(w))).toEqual([])
+  })
+
+  it('gives every row of the alert table as many cells as its header', () => {
+    // GFM splits a row on every `|` not escaped as `\|`, inside a code span too: a stray one
+    // shifts the row's text into the wrong columns and drops its last cell.
+    const cells = (line: string) => line.split(/(?<!\\)\|/).length
+    const lines = alertsSection()
+      .split('\n')
+      .filter((l) => l.startsWith('|'))
+    const header = cells(lines[0] ?? '')
+    expect(lines.filter((l) => cells(l) !== header)).toEqual([])
   })
 
   it('says "3 h" for exactly the keys that wait on a person', () => {

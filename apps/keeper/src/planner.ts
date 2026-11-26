@@ -51,6 +51,11 @@ export interface Timings {
    * end_ts, and nobody can propose until end_ts.
    */
   missingSourceSecs: number
+  /**
+   * Auto-propose (R6) waits this long past the propose time for a second source that has not
+   * answered (no final from balldontlie, or balldontlie down), then proposes unchecked.
+   */
+  secondSourceWaitSecs: number
 }
 
 export const DEFAULT_TIMINGS: Timings = {
@@ -64,6 +69,7 @@ export const DEFAULT_TIMINGS: Timings = {
   notStartedSecs: 86_400,
   postponedResolveSecs: 7 * 86_400,
   missingSourceSecs: 1_800,
+  secondSourceWaitSecs: 600,
 }
 
 /** Must match the program's MIN_MARKET_SECS. */
@@ -92,6 +98,31 @@ export interface GameState {
   /** Unix seconds since the feed has reported Final with the current score, unbroken. */
   finalSince: number | null
   draft: DraftRow | null
+  /** The second source's verdict on the draft (R6); absent or null means none yet. */
+  secondSource?: SecondSourceState | null
+  /** Why the keeper's last auto-propose of this game did not land, if it failed. */
+  proposeError?: string | null
+  /**
+   * The proposal on chain is the keeper's own (its attestor proposed it) and its
+   * `auto-proposed:` page has not been delivered yet (R6). Absent means false.
+   */
+  pageOwed?: boolean
+}
+
+export type AutoProposeMode = 'on' | 'dry' | 'off'
+
+/**
+ * balldontlie's verdict on the draft, and since when (unix seconds): `match` and `mismatch`
+ * compare its final totals with the draft's, `pending` means no final from it yet, `off` that
+ * the keeper has no second source.
+ */
+export type SecondSourceState =
+  | { verdict: 'match' | 'pending' | 'off'; since: number }
+  | { verdict: 'mismatch'; since: number; score: Score }
+
+export interface Score {
+  home: number
+  away: number
 }
 
 export type HaltRule = 'final-before-end' | 'postponed' | 'not-started' | 'feed-silent'
@@ -120,6 +151,26 @@ export type Action =
   /** Copy the on-chain status into the DB row, so the API shows it. */
   | { type: 'sync'; gameId: string; marketId: bigint }
   | { type: 'alert'; gameId: string; key: string; text: string }
+  /**
+   * The attestor proposes the pending Final draft (R6): `match` when the second source agrees,
+   * `unchecked` when there is none (`off`) or it stayed silent (`pending`).
+   */
+  | {
+      type: 'propose'
+      gameId: string
+      marketId: bigint
+      check: 'match' | 'unchecked'
+      reason: 'match' | 'off' | 'pending'
+    }
+  /** The second source contradicts the draft: nothing is proposed, a guardian is paged. */
+  | { type: 'hold'; gameId: string; espn: Score; second: Score }
+  /** The second source contradicts a proposal still open to challenge. */
+  | { type: 'mismatch'; gameId: string; proposed: Score; second: Score; challengeBy: number }
+  /**
+   * The `auto-proposed:` page of the keeper's proposal, while it is open to challenge and not yet
+   * delivered: sent again when it was lost (a failed delivery, a failure after landing, a restart).
+   */
+  | { type: 'announce'; gameId: string; closesAt: number }
 
 export interface PlanInput {
   now: number
@@ -128,6 +179,8 @@ export interface PlanInput {
   seeds: SeedPolicy
   /** From the on-chain Config. */
   disputeWindowSecs: number
+  /** Auto-propose (R6); absent means off. */
+  autoPropose?: AutoProposeMode
 }
 
 const ORDER: Record<Action['type'], number> = {
@@ -135,9 +188,13 @@ const ORDER: Record<Action['type'], number> = {
   sync: 1,
   finalize: 2,
   recycle: 3,
-  create: 4,
-  draft: 5,
-  alert: 6,
+  propose: 4,
+  create: 5,
+  draft: 6,
+  announce: 7,
+  hold: 8,
+  mismatch: 9,
+  alert: 10,
 }
 
 export function priceBps(p0: number): number {
@@ -228,19 +285,52 @@ function planGame(s: GameState, input: PlanInput): Action[] {
         // to be confirmed unwarned.
         out.push(...draftBlocked(s, now, t, chainTip))
       }
-    } else if (
-      draft.state === 'pending' &&
-      !draft.alertedAt &&
-      now - Math.max(Math.floor(draft.fetchedAt.getTime() / 1000), chain.endTs) >=
-        t.missingSourceSecs
-    ) {
-      out.push({
-        type: 'alert',
-        gameId: g.id,
-        key: `unconfirmed:${g.id}`,
-        text: `${g.away}@${g.home}: ${draft.status} draft open to propose for 30 min, waiting for the guardian's box-score check`,
-      })
+    } else if (draft.state === 'pending') {
+      const auto = autoPropose(s, draft, chain, input)
+      if (auto) out.push(auto)
+      // The keeper proposing this tick is not reminded of, unless its last try failed (or the
+      // mode is dry, where nothing is sent).
+      const proposing = auto?.type === 'propose' && input.autoPropose === 'on' && !s.proposeError
+      if (
+        !proposing &&
+        !draft.alertedAt &&
+        now - Math.max(Math.floor(draft.fetchedAt.getTime() / 1000), chain.endTs) >=
+          t.missingSourceSecs
+      ) {
+        out.push({
+          type: 'alert',
+          gameId: g.id,
+          key: `unconfirmed:${g.id}`,
+          text: unconfirmedText(s, draft, chain, input),
+        })
+      }
     }
+  }
+
+  const inWindow = chain.status === 'proposed' && now < chain.proposedAt + input.disputeWindowSecs
+  if ((input.autoPropose ?? 'off') !== 'off' && inWindow && s.pageOwed) {
+    out.push({
+      type: 'announce',
+      gameId: g.id,
+      closesAt: chain.proposedAt + input.disputeWindowSecs,
+    })
+  }
+
+  const second = s.secondSource
+  if (
+    (input.autoPropose ?? 'off') !== 'off' &&
+    chain.status === 'proposed' &&
+    now < chain.proposedAt + input.disputeWindowSecs &&
+    s.draft?.state === 'proposed' &&
+    second?.verdict === 'mismatch'
+  ) {
+    out.push({
+      type: 'mismatch',
+      gameId: g.id,
+      proposed: { home: s.draft.homeScore, away: s.draft.awayScore },
+      second: second.score,
+      challengeBy: chain.proposedAt + input.disputeWindowSecs,
+    })
   }
 
   if (chain.status === 'proposed' && now >= chain.proposedAt + input.disputeWindowSecs) {
@@ -248,6 +338,93 @@ function planGame(s: GameState, input: PlanInput): Action[] {
   }
   if (chain.status === 'finalized') out.push({ type: 'recycle', gameId: g.id, marketId })
   return out
+}
+
+/**
+ * Why the keeper leaves this pending draft to a guardian, or null when it may propose it: a
+ * postponed result, a round after a challenge, another league, or a feed that no longer holds
+ * a consistent Final at the draft's score (spec 7 gives those to a person).
+ */
+function autoBlock(s: GameState, draft: DraftRow, chain: GameMarketAccount): string | null {
+  if (draft.status !== 'final') return 'a postponed result is proposed by hand'
+  if (chain.challengeCount > 0 || chain.status === 'challenged')
+    return 'after a challenge a guardian proposes'
+  if (s.game.league !== 'NBA') return 'auto-propose covers NBA games only'
+  const feed = s.feed
+  const atDraft =
+    feed?.status === 'final' &&
+    feed.homeScore === draft.homeScore &&
+    feed.awayScore === draft.awayScore &&
+    periodsConsistent(feed)
+  if (!atDraft || s.finalSince === null)
+    return 'ESPN no longer shows a consistent Final at the draft score'
+  return null
+}
+
+/**
+ * The propose (or the hold) for a pending Final draft, from the later of Final held
+ * finalStableSecs and end_ts; a silent second source gets secondSourceWaitSecs more.
+ */
+function autoPropose(
+  s: GameState,
+  draft: DraftRow,
+  chain: GameMarketAccount,
+  input: PlanInput,
+): Action | null {
+  if ((input.autoPropose ?? 'off') === 'off') return null
+  if (chain.status !== 'open' && chain.status !== 'halted') return null
+  if (autoBlock(s, draft, chain) !== null || s.finalSince === null) return null
+  const { now, timings: t } = input
+  const from = Math.max(s.finalSince + t.finalStableSecs, chain.endTs)
+  if (now < from) return null
+  const g = s.game
+  const marketId = chain.marketId
+  const second = s.secondSource ?? null
+  switch (second?.verdict) {
+    case 'match':
+      return { type: 'propose', gameId: g.id, marketId, check: 'match', reason: 'match' }
+    case 'off':
+      return { type: 'propose', gameId: g.id, marketId, check: 'unchecked', reason: 'off' }
+    case 'mismatch':
+      return {
+        type: 'hold',
+        gameId: g.id,
+        espn: { home: draft.homeScore, away: draft.awayScore },
+        second: second.score,
+      }
+    default:
+      if (now < from + t.secondSourceWaitSecs) return null
+      return { type: 'propose', gameId: g.id, marketId, check: 'unchecked', reason: 'pending' }
+  }
+}
+
+/** The 30-min reminder: with auto-propose on or dry, why nothing was proposed, and the command. */
+function unconfirmedText(
+  s: GameState,
+  draft: DraftRow,
+  chain: GameMarketAccount,
+  input: PlanInput,
+): string {
+  const g = s.game
+  const name = `${g.away}@${g.home}`
+  const mode = input.autoPropose ?? 'off'
+  if (mode === 'off')
+    return `${name}: ${draft.status} draft open to propose for 30 min, waiting for the guardian's box-score check`
+  const second = s.secondSource
+  const cause =
+    mode === 'dry'
+      ? 'auto-propose is a dry run'
+      : (autoBlock(s, draft, chain) ??
+        (second?.verdict === 'mismatch'
+          ? `held: ESPN ${draft.awayScore}-${draft.homeScore} vs balldontlie ${second.score.away}-${second.score.home}`
+          : s.proposeError
+            ? `auto-propose failing: ${s.proposeError}`
+            : 'cause unknown, see the keeper log'))
+  const args =
+    draft.status === 'final'
+      ? `--box-score <url> --score ${draft.homeScore}-${draft.awayScore}`
+      : '--postponed --notice <url>'
+  return `${name}: ${draft.status} draft not proposed 30 min after proposing opened: ${cause}. Propose by hand: horagon-ops propose ${g.id} ${args}`
 }
 
 function haltRule(
