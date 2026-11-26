@@ -37,18 +37,22 @@ export interface GameStats {
 }
 
 export interface OffsetStats {
-  /** The close, in minutes after S. */
+  /** The close (end_ts), in minutes after S. */
   offsetMin: number
-  /** Games whose End Game came at or before the close. */
+  /** Games whose End Game came at or before the close: the keeper halts these on the first Final read. */
   endedBeforeClose: number
+  /** Games still being played at the close: their market closes before the final buzzer. */
+  endedAfterClose: number
   /** Share of games that had reached Q4, overtime or the end at the close. */
   closeInQ4OrLaterPct: number
   /** Median minutes of Q4 game clock played before the close (12 once Q4 is over). */
   q4GameMinTradableMedian: number
+  /** The same at the 10th percentile: the 10% of games with the least Q4 tradable. */
+  q4GameMinTradableP10: number
   /** Median share of regulation game clock played before the close, in percent. */
   gameTradableMedianPct: number
-  /** Games within 5 points with 1:00 or less left in Q4, or in overtime, while still open. */
-  clutchOpen: number
+  /** Close games (see isCloseGame) whose last minute began at or before the close. */
+  closeGamesOpenLastMinute: number
   /** Median wall minutes from the start of Q4 to the close or the end, whichever comes first (0 if Q4 starts after the close). */
   q4WallMinBeforeCloseMedian: number
   /** P(end before close), pairing every tip delay with every tip-to-end length. */
@@ -124,12 +128,23 @@ export function quantile(values: readonly number[], q: number): number {
   return (sorted[lo] as number) + ((sorted[hi] as number) - (sorted[lo] as number)) * (pos - lo)
 }
 
-const isClutch = (p: Play) => ((p[1] === 4 && p[2] <= 60) || p[1] > 4) && Math.abs(p[3] - p[4]) <= 5
+/**
+ * A close game: within 5 points at some play with 2:00 or less left in Q4, or in overtime. Every
+ * overtime game is one (it was tied at the end of Q4).
+ */
+export const isCloseGame = (g: GameTimeline): boolean =>
+  g.plays.some((p) => ((p[1] === 4 && p[2] <= 120) || p[1] > 4) && Math.abs(p[3] - p[4]) <= 5)
+
+/** Wallclock of the first play with 1:00 or less left in the final period: the game's last minute. */
+export function lastMinuteMs(g: GameTimeline): number {
+  const end = endPlay(g)
+  return g.plays.find((p) => p[1] === end[1] && p[2] <= 60)?.[0] ?? end[0]
+}
 
 export function offsetStats(games: readonly GameTimeline[], offsetMin: number): OffsetStats {
   let ended = 0
   let inQ4 = 0
-  let clutch = 0
+  let closeOpen = 0
   const q4Minutes: number[] = []
   const tradable: number[] = []
   const q4Wall: number[] = []
@@ -138,7 +153,7 @@ export function offsetStats(games: readonly GameTimeline[], offsetMin: number): 
     const end = endPlay(g)[0]
     const q4Start = q4StartMs(g)
     q4Wall.push(q4Start === undefined ? 0 : Math.max(0, Math.min(close, end) - q4Start) / MIN)
-    if (g.plays.some((p) => p[0] <= close && p[0] < end && isClutch(p))) clutch++
+    if (isCloseGame(g) && lastMinuteMs(g) <= close) closeOpen++
     if (end <= close) {
       ended++
       inQ4++
@@ -168,10 +183,12 @@ export function offsetStats(games: readonly GameTimeline[], offsetMin: number): 
   return {
     offsetMin,
     endedBeforeClose: ended,
+    endedAfterClose: games.length - ended,
     closeInQ4OrLaterPct: (100 * inQ4) / games.length,
     q4GameMinTradableMedian: quantile(q4Minutes, 0.5),
+    q4GameMinTradableP10: quantile(q4Minutes, 0.1),
     gameTradableMedianPct: 100 * quantile(tradable, 0.5),
-    clutchOpen: clutch,
+    closeGamesOpenLastMinute: closeOpen,
     q4WallMinBeforeCloseMedian: quantile(q4Wall, 0.5),
     pairedEndBeforeClosePct: (100 * paired) / (stats.length * lengths.length),
   }
@@ -181,4 +198,39 @@ export function offsetStats(games: readonly GameTimeline[], offsetMin: number): 
 export function q4Mark(g: GameTimeline, clockSecs: number): [number, number] | null {
   const p = g.plays.find((x) => x[1] === 4 && x[2] <= clockSecs)
   return p ? [(p[0] - scheduledMs(g)) / MIN, p[3] - p[4]] : null
+}
+
+/** One file of `end-ts:fetch`. */
+export interface GameData {
+  from: string
+  to: string
+  fetchedAt: string
+  games: GameTimeline[]
+}
+
+/**
+ * Every game of the given data files, once each, by scheduled tip-off: a game found in two files
+ * is taken from the later fetch.
+ */
+export function mergeGames(inputs: readonly GameData[]): GameTimeline[] {
+  const byId = new Map<string, { at: string; game: GameTimeline }>()
+  for (const input of inputs) {
+    for (const game of input.games) {
+      const prev = byId.get(game.id)
+      if (!prev || input.fetchedAt > prev.at) byId.set(game.id, { at: input.fetchedAt, game })
+    }
+  }
+  return [...byId.values()]
+    .map((x) => x.game)
+    .sort((a, b) => a.scheduled.localeCompare(b.scheduled) || a.id.localeCompare(b.id))
+}
+
+/** The smallest close at which at most `maxLateShare` of the games are still being played. */
+export function smallestClose(
+  offsets: readonly OffsetStats[],
+  games: number,
+  maxLateShare: number,
+): number | null {
+  const ok = offsets.filter((o) => o.endedAfterClose <= maxLateShare * games)
+  return ok.length === 0 ? null : Math.min(...ok.map((o) => o.offsetMin))
 }

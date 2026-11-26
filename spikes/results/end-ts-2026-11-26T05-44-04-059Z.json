@@ -1,0 +1,270 @@
+{
+  "spike": "end-ts",
+  "cluster": "n/a",
+  "startedAt": "2026-11-26T05:44:04.059Z",
+  "finishedAt": "2026-11-26T05:44:04.204Z",
+  "pass": true,
+  "checks": [
+    {
+      "name": "S + 3h00m: at most 3% of games are still being played at end_ts",
+      "pass": true,
+      "detail": "5 of 268 (1.9%)"
+    },
+    {
+      "name": "S + 2h55m: over 3% are, so S + 3h00m is the smallest close that meets the bar",
+      "pass": true,
+      "detail": "16 of 268 (6%)"
+    },
+    {
+      "name": "S + 1h40m: no game has reached Q4 when the feed-silent watch starts",
+      "pass": true,
+      "detail": "268 of 268 games reach Q4, the first at S + 102.7 min"
+    }
+  ],
+  "data": {
+    "input": [
+      {
+        "file": "espn-games-2026-10-20-2026-11-18.json.gz",
+        "from": "2026-10-20",
+        "to": "2026-11-18",
+        "fetchedAt": "2026-11-19T18:33:30.775Z",
+        "games": 222
+      },
+      {
+        "file": "espn-games-2026-11-19-2026-11-25.json.gz",
+        "from": "2026-11-19",
+        "to": "2026-11-25",
+        "fetchedAt": "2026-11-26T05:43:57.698Z",
+        "games": 48
+      }
+    ],
+    "excluded": [
+      "20261101 BOS @ ORL: first play 49.1 min before S (ESPN stamps some games of a DST change day an hour early)",
+      "20261101 BKN @ IND: first play 49.2 min before S (ESPN stamps some games of a DST change day an hour early)"
+    ],
+    "games": {
+      "used": 268,
+      "overtime": 14,
+      "close": 108
+    },
+    "tipMinutesAfterS": {
+      "min": 2.2,
+      "p1": 9.7,
+      "p5": 10.3,
+      "p25": 10.6,
+      "p50": 11,
+      "p75": 12.1,
+      "p95": 15.1,
+      "max": 24.1
+    },
+    "q4StartMinutesAfterS": {
+      "min": 102.7,
+      "p1": 105.5,
+      "p5": 108.7,
+      "p25": 113.6,
+      "p50": 118.1,
+      "p75": 123,
+      "p95": 134,
+      "max": 145.7
+    },
+    "endMinutesAfterS": {
+      "min": 128.2,
+      "p1": 135.7,
+      "p5": 138.3,
+      "p25": 145.5,
+      "p50": 151.6,
+      "p75": 158.9,
+      "p95": 176.1,
+      "max": 194.9
+    },
+    "endMinutesAfterSRegulation": {
+      "min": 128.2,
+      "p1": 135.7,
+      "p5": 138.1,
+      "p25": 145.1,
+      "p50": 151.1,
+      "p75": 157.4,
+      "p95": 171.8,
+      "max": 184.9
+    },
+    "endMinutesAfterSOvertime": {
+      "min": 156.1,
+      "p1": 156.3,
+      "p5": 156.9,
+      "p25": 166.5,
+      "p50": 176.4,
+      "p75": 180.1,
+      "p95": 187,
+      "max": 194.9
+    },
+    "offsets": [
+      {
+        "offsetMin": 130,
+        "endedBeforeClose": 1,
+        "endedAfterClose": 267,
+        "closeInQ4OrLaterPct": 89.9,
+        "q4GameMinTradableMedian": 4.8,
+        "q4GameMinTradableP10": 0,
+        "gameTradableMedianPct": 84.9,
+        "closeGamesOpenLastMinute": 0,
+        "q4WallMinBeforeCloseMedian": 11.9,
+        "pairedEndBeforeClosePct": 0.32,
+        "endedAfterClosePct": 99.6
+      },
+      {
+        "offsetMin": 150,
+        "endedBeforeClose": 116,
+        "endedAfterClose": 152,
+        "closeInQ4OrLaterPct": 100,
+        "q4GameMinTradableMedian": 11.8,
+        "q4GameMinTradableP10": 7.5,
+        "gameTradableMedianPct": 99.5,
+        "closeGamesOpenLastMinute": 54,
+        "q4WallMinBeforeCloseMedian": 29,
+        "pairedEndBeforeClosePct": 42.56,
+        "endedAfterClosePct": 56.7
+      },
+      {
+        "offsetMin": 155,
+        "endedBeforeClose": 168,
+        "endedAfterClose": 100,
+        "closeInQ4OrLaterPct": 100,
+        "q4GameMinTradableMedian": 12,
+        "q4GameMinTradableP10": 9.4,
+        "gameTradableMedianPct": 100,
+        "closeGamesOpenLastMinute": 76,
+        "q4WallMinBeforeCloseMedian": 30.5,
+        "pairedEndBeforeClosePct": 62.88,
+        "endedAfterClosePct": 37.3
+      },
+      {
+        "offsetMin": 160,
+        "endedBeforeClose": 210,
+        "endedAfterClose": 58,
+        "closeInQ4OrLaterPct": 100,
+        "q4GameMinTradableMedian": 12,
+        "q4GameMinTradableP10": 10.8,
+        "gameTradableMedianPct": 100,
+        "closeGamesOpenLastMinute": 84,
+        "q4WallMinBeforeCloseMedian": 31.4,
+        "pairedEndBeforeClosePct": 78.34,
+        "endedAfterClosePct": 21.6
+      },
+      {
+        "offsetMin": 165,
+        "endedBeforeClose": 232,
+        "endedAfterClose": 36,
+        "closeInQ4OrLaterPct": 100,
+        "q4GameMinTradableMedian": 12,
+        "q4GameMinTradableP10": 12,
+        "gameTradableMedianPct": 100,
+        "closeGamesOpenLastMinute": 91,
+        "q4WallMinBeforeCloseMedian": 31.8,
+        "pairedEndBeforeClosePct": 87.02,
+        "endedAfterClosePct": 13.4
+      },
+      {
+        "offsetMin": 170,
+        "endedBeforeClose": 243,
+        "endedAfterClose": 25,
+        "closeInQ4OrLaterPct": 100,
+        "q4GameMinTradableMedian": 12,
+        "q4GameMinTradableP10": 12,
+        "gameTradableMedianPct": 100,
+        "closeGamesOpenLastMinute": 101,
+        "q4WallMinBeforeCloseMedian": 32.3,
+        "pairedEndBeforeClosePct": 92.17,
+        "endedAfterClosePct": 9.3
+      },
+      {
+        "offsetMin": 175,
+        "endedBeforeClose": 252,
+        "endedAfterClose": 16,
+        "closeInQ4OrLaterPct": 100,
+        "q4GameMinTradableMedian": 12,
+        "q4GameMinTradableP10": 12,
+        "gameTradableMedianPct": 100,
+        "closeGamesOpenLastMinute": 106,
+        "q4WallMinBeforeCloseMedian": 32.5,
+        "pairedEndBeforeClosePct": 95.91,
+        "endedAfterClosePct": 6
+      },
+      {
+        "offsetMin": 180,
+        "endedBeforeClose": 263,
+        "endedAfterClose": 5,
+        "closeInQ4OrLaterPct": 100,
+        "q4GameMinTradableMedian": 12,
+        "q4GameMinTradableP10": 12,
+        "gameTradableMedianPct": 100,
+        "closeGamesOpenLastMinute": 107,
+        "q4WallMinBeforeCloseMedian": 32.5,
+        "pairedEndBeforeClosePct": 98.37,
+        "endedAfterClosePct": 1.9
+      }
+    ],
+    "smallestCloseMin": 180,
+    "gamesEndingAfterS+3h00m": [
+      {
+        "date": "20261026",
+        "name": "MIN @ CLE",
+        "endMin": 180.6,
+        "overtime": true,
+        "finalMargin": -1,
+        "atClose": {
+          "period": 5,
+          "clockSecs": 3.9,
+          "margin": -2
+        }
+      },
+      {
+        "date": "20261117",
+        "name": "CHA @ LAL",
+        "endMin": 181.9,
+        "overtime": true,
+        "finalMargin": 4,
+        "atClose": {
+          "period": 5,
+          "clockSecs": 11.5,
+          "margin": 3
+        }
+      },
+      {
+        "date": "20261104",
+        "name": "UTAH @ NO",
+        "endMin": 182.8,
+        "overtime": true,
+        "finalMargin": 7,
+        "atClose": {
+          "period": 5,
+          "clockSecs": 12.9,
+          "margin": 6
+        }
+      },
+      {
+        "date": "20261106",
+        "name": "POR @ LAL",
+        "endMin": 184.9,
+        "overtime": false,
+        "finalMargin": 6,
+        "atClose": {
+          "period": 4,
+          "clockSecs": 14.9,
+          "margin": 5
+        }
+      },
+      {
+        "date": "20261112",
+        "name": "DET @ WSH",
+        "endMin": 194.9,
+        "overtime": true,
+        "finalMargin": -4,
+        "atClose": {
+          "period": 6,
+          "clockSecs": 173,
+          "margin": -3
+        }
+      }
+    ]
+  }
+}
