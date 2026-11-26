@@ -23,7 +23,8 @@ The end-ts measurement needs no wallet, only ESPN's public JSON:
 
 ```bash
 pnpm --filter @horagon/spikes end-ts:fetch 2026-10-20 2026-11-18   # game timelines into spikes/data (about 8 min)
-pnpm --filter @horagon/spikes end-ts                                # the analysis, of the data file that reaches the latest date
+pnpm --filter @horagon/spikes end-ts:fetch 2026-11-19 2026-11-25   # newer games, into a second file
+pnpm --filter @horagon/spikes end-ts                                # the analysis, of every data file merged by game id
 ```
 
 `s5` funds mUSDC only: the faucet's SOL reserve paid 0. Devnet SOL for `.keys/creator.json` and
@@ -49,15 +50,15 @@ Note on solana: Anchor 1.2.2's avm shim switches the active Agave release from s
 
 ## Summary
 
-| Spike  | Question                                                                            | Result                                     | Result file                                                                                                                                               | Decision                                                                                                                                                   |
-| ------ | ----------------------------------------------------------------------------------- | ------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| S1     | Full pm-AMM lifecycle on devnet with the repo SDK?                                  | PASS                                       | `s1-devnet-2026-11-18T09-13-42-490Z.json`                                                                                                                 | No fallback needed (S1 has none). Keep `quoteSwap` and the swap fixture.                                                                                   |
-| S2     | Can another program's PDA be the market authority through CPI?                      | PASS (Surfpool; devnet unconfirmed)        | `s2-cpi-2026-11-18T18-29-55-177Z.json`                                                                                                                    | The program PDA is the market authority. Tier 1 opens with a devnet smoke (deploy, create, resolve; about 3 devnet SOL).                                   |
-| S3a    | Sponsored swap from a 0-SOL burner; disallowed transactions refused?                | PASS                                       | `s3a-sponsor-2026-11-18T09-30-55-777Z.json`                                                                                                               | Players are sponsored; no SOL drip.                                                                                                                        |
-| S3b    | Full lifecycle on a Surfpool fork of devnet, with a local mint and time travel?     | PASS                                       | `s3b-surfpool-2026-11-18T18-11-26-730Z.json`                                                                                                              | Surfpool is the local sandbox; `solana-test-validator` is not needed.                                                                                      |
-| S4     | NBA feeds reachable from a server; one real game recorded; reference odds usable?   | FAIL (NBA CDN blocked at every site tried) | `s4-probe-local-2026-11-18T09-40-20-758Z.json`<br>`s4-probe-github-actions-2026-11-18T10-13-07-656Z.json`<br>`s4-probe-vps-2026-11-19T05-21-29-979Z.json` | The second score source is ESPN plus guardian confirmation (see Decisions), and component C (reference prices) is dropped.                                 |
-| S5     | pm-AMM faucet callable from a server, 1,000 mUSDC per wallet per hour?              | PASS                                       | `s5-faucet-2026-11-18T06-02-18-766Z.json`                                                                                                                 | No fallback needed: the seed is not lowered to 300 mUSDC.                                                                                                  |
-| end-ts | When should a winner market close, given that pm-AMM cannot pause or resolve early? | PASS                                       | `end-ts-2026-11-19T23-52-58-477Z.json`                                                                                                                    | `end_ts = S + 2h10m` (was S + 1h55m). A feed silent in Q4 or overtime alerts after 2 min and halts after 10; from S + 1h40m any silence over 2 min alerts. |
+| Spike  | Question                                                                            | Result                                     | Result file                                                                                                                                               | Decision                                                                                                                                                  |
+| ------ | ----------------------------------------------------------------------------------- | ------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| S1     | Full pm-AMM lifecycle on devnet with the repo SDK?                                  | PASS                                       | `s1-devnet-2026-11-18T09-13-42-490Z.json`                                                                                                                 | No fallback needed (S1 has none). Keep `quoteSwap` and the swap fixture.                                                                                  |
+| S2     | Can another program's PDA be the market authority through CPI?                      | PASS (Surfpool; devnet unconfirmed)        | `s2-cpi-2026-11-18T18-29-55-177Z.json`                                                                                                                    | The program PDA is the market authority. Tier 1 opens with a devnet smoke (deploy, create, resolve; about 3 devnet SOL).                                  |
+| S3a    | Sponsored swap from a 0-SOL burner; disallowed transactions refused?                | PASS                                       | `s3a-sponsor-2026-11-18T09-30-55-777Z.json`                                                                                                               | Players are sponsored; no SOL drip.                                                                                                                       |
+| S3b    | Full lifecycle on a Surfpool fork of devnet, with a local mint and time travel?     | PASS                                       | `s3b-surfpool-2026-11-18T18-11-26-730Z.json`                                                                                                              | Surfpool is the local sandbox; `solana-test-validator` is not needed.                                                                                     |
+| S4     | NBA feeds reachable from a server; one real game recorded; reference odds usable?   | FAIL (NBA CDN blocked at every site tried) | `s4-probe-local-2026-11-18T09-40-20-758Z.json`<br>`s4-probe-github-actions-2026-11-18T10-13-07-656Z.json`<br>`s4-probe-vps-2026-11-19T05-21-29-979Z.json` | The second score source is ESPN plus guardian confirmation (see Decisions), and component C (reference prices) is dropped.                                |
+| S5     | pm-AMM faucet callable from a server, 1,000 mUSDC per wallet per hour?              | PASS                                       | `s5-faucet-2026-11-18T06-02-18-766Z.json`                                                                                                                 | No fallback needed: the seed is not lowered to 300 mUSDC.                                                                                                 |
+| end-ts | When should a winner market close, given that pm-AMM cannot pause or resolve early? | PASS                                       | `end-ts-2026-11-26T05-44-04-059Z.json`                                                                                                                    | Close at the final buzzer by the Final halt; `end_ts = S + 3h00m` is the latest close (was S + 2h10m). From S + 1h40m any feed silence over 2 min alerts. |
 
 ## S1: pm-AMM lifecycle on devnet
 
@@ -209,55 +210,73 @@ If S5 fails: seed every market with 300 mUSDC and ask the PREDICT team for mUSDC
 ## end-ts: when a market closes
 
 pm-AMM fixes `end_ts` when the market is created: swaps stop then, and there is no pause and no
-early resolution. A market still open after the final buzzer can be sniped, and one that closes
-early leaves the end of the game untradable. The design had `end_ts = S + 1h55m` (S is the
-scheduled tip-off), meant to come before the earliest time a game can end; on the one recorded
-night it closed every market in the third or early fourth quarter. This measurement replaces it.
+early resolution. The keeper's halt, which withdraws all of Horagon's liquidity, is the only way
+to stop a market sooner. A market still open after the final buzzer can be sniped, and one that
+closes early leaves the end of the game untradable.
 
-**Pass when**, over the measured games, at most 1% end before S + 2h10m, at least 80% have
-reached Q4 by then, no game within 5 points is still open in its last minute, no game has reached Q4 by S + 1h40m
-(when the feed-silent watch starts), over 5% would end before S + 2h20m, and at least 80% of those
-that do lead by 6 or more with 2:00 left in Q4.
+The first run (2026-11-19, `end-ts-2026-11-19T23-52-58-477Z.json`) set `end_ts = S + 2h10m`
+(S is the scheduled tip-off), before the final buzzer in 219 of 220 games: markets closed with a
+median 7.6 of Q4's 12 game minutes still to play, close games included. Since 2026-11-26 a market
+closes at the final buzzer instead: the keeper halts it on its first Final read, and `end_ts` is
+only the latest close. A game still being played at `end_ts` closes early; a later `end_ts`
+delays settlement, because a result can be proposed only from `end_ts` on. This run picks
+`end_ts` again on that basis.
 
-**Data.** `spikes/data/espn-games-2026-10-20-2026-11-18.json.gz` (440 KB) holds every completed
-regular-season game of 2026-10-20 to 2026-11-18 from ESPN's public scoreboard and summary JSON:
-222 games, each play's wallclock, period, clock and score. Two games of 2026-11-01, the day US
-clocks went back, are left out: ESPN stamps their plays an hour early, so they start 49 minutes
-before S. That leaves 220 games, 12 with overtime.
+**Pass when**, over the measured games, at most 3% are still being played at S + 3h00m, over 3%
+are at S + 2h55m (so no earlier close, in 5-minute steps, meets the bar), and no game has reached
+Q4 by S + 1h40m (when the feed-silent watch starts).
+
+**Data.** `spikes/data` holds every completed regular-season game of 2026-10-20 to 2026-11-25
+from ESPN's public scoreboard and summary JSON, each play's wallclock, period, clock and score:
+`espn-games-2026-10-20-2026-11-18.json.gz` (222 games, fetched 2026-11-19) and
+`espn-games-2026-11-19-2026-11-25.json.gz` (48 games, fetched 2026-11-26). The analysis merges
+every file by game id. Two games of 2026-11-01, the day US clocks went back, are left out: ESPN
+stamps their plays an hour early, so they start 49 minutes before S. That leaves 268 games, 14
+with overtime. 108 are close games: within 5 points with 2:00 or less left in Q4, or in overtime.
 
 | Measure (minutes after S) | min   | p1    | p5    | median | p95   | max   |
 | ------------------------- | ----- | ----- | ----- | ------ | ----- | ----- |
-| Opening tip               | 2.2   | 9.3   | 10.3  | 11.1   | 15.7  | 24.1  |
-| Start of Q4               | 102.7 | 105.4 | 108.8 | 119    | 135.1 | 145.7 |
-| End of game               | 128.2 | 135.9 | 139.1 | 152.7  | 176.7 | 194.9 |
-| End of game, overtime     | 156.1 | 156.2 | 156.8 | 176.9  | 188.2 | 194.9 |
+| Opening tip               | 2.2   | 9.7   | 10.3  | 11     | 15.1  | 24.1  |
+| Start of Q4               | 102.7 | 105.5 | 108.7 | 118.1  | 134   | 145.7 |
+| End of game               | 128.2 | 135.7 | 138.3 | 151.6  | 176.1 | 194.9 |
+| End of game, regulation   | 128.2 | 135.7 | 138.1 | 151.1  | 171.8 | 184.9 |
+| End of game, overtime     | 156.1 | 156.3 | 156.9 | 176.4  | 187   | 194.9 |
 
-| Close     | Games ended before it | Paired estimate | In Q4 or later | Q4 minutes played (median) | Wall minutes of Q4 open (median) | Within 5 points, last minute, still open |
-| --------- | --------------------- | --------------- | -------------- | -------------------------- | -------------------------------- | ---------------------------------------- |
-| S + 1h55m | 0                     | 0%              | 28.6%          | 0                          | 0                                | 0                                        |
-| S + 2h05m | 0                     | 0%              | 78.2%          | 2.7                        | 6                                | 0                                        |
-| S + 2h10m | 1                     | 0.37%           | 87.7%          | 4.4                        | 11                               | 0                                        |
-| S + 2h15m | 1                     | 0.66%           | 94.5%          | 6.1                        | 16                               | 3                                        |
-| S + 2h20m | 17                    | 5.93%           | 98.2%          | 7.7                        | 21                               | 12                                       |
-| S + 2h25m | 44                    | 19.21%          | 99.5%          | 9.7                        | 25.6                             | 26                                       |
-| S + 2h30m | 85                    | 38.17%          | 100%           | 11.5                       | 28.6                             | 45                                       |
+| `end_ts`  | Still in play at `end_ts` (closes early) | Ended before (halted at the Final) | Paired estimate, still in play | Q4 minutes tradable, median | Q4 minutes tradable, p10 | Close games open in their last minute (of 108) |
+| --------- | ---------------------------------------- | ---------------------------------- | ------------------------------ | --------------------------- | ------------------------ | ---------------------------------------------- |
+| S + 2h10m | 267 (99.6%)                              | 1                                  | 99.68%                         | 4.8                         | 0                        | 0                                              |
+| S + 2h30m | 152 (56.7%)                              | 116                                | 57.44%                         | 11.8                        | 7.5                      | 54                                             |
+| S + 2h35m | 100 (37.3%)                              | 168                                | 37.12%                         | 12                          | 9.4                      | 76                                             |
+| S + 2h40m | 58 (21.6%)                               | 210                                | 21.66%                         | 12                          | 10.8                     | 84                                             |
+| S + 2h45m | 36 (13.4%)                               | 232                                | 12.98%                         | 12                          | 12                       | 91                                             |
+| S + 2h50m | 25 (9.3%)                                | 243                                | 7.83%                          | 12                          | 12                       | 101                                            |
+| S + 2h55m | 16 (6%)                                  | 252                                | 4.09%                          | 12                          | 12                       | 106                                            |
+| S + 3h00m | 5 (1.9%)                                 | 263                                | 1.63%                          | 12                          | 12                       | 107                                            |
 
-The paired estimate pairs every game's tip delay with every game's length, so it does not
-depend on which games happened to tip late. Medians use linear interpolation.
+Q4 minutes tradable counts Q4 game clock played before the earlier of the Final and `end_ts` (12
+once Q4 is over). A close game is open in its last minute when the last minute of its final
+period began before `end_ts`. The paired estimate pairs every game's tip delay with every game's
+length, so it does not depend on which games happened to tip late. Medians and percentiles use
+linear interpolation.
 
-- The one game that ended before S + 2h10m, DAL @ BOS on 2026-11-15, ended at S + 128.2 in a
-  37-point win. Seven more ended between S + 135.6 and S + 137.0, just after S + 2h15m: that close has almost
-  no margin, and S + 2h20m is a cliff.
-- 16 of the 17 games that ended before S + 2h20m led by 6 or more with 2:00 left in Q4. The
-  median final margin is 21 for games that ended before S + 2h20m and 8 for those that ended at
-  S + 2h30m or later, so a game that ends early is usually decided well before it ends.
-- No game reached Q4 before S + 102.7 (DAL @ BOS again). The keeper halts on a feed silent in Q4
-  or overtime, but it knows the quarter only from the feed: an outage that starts in Q3 and runs
-  into Q4 leaves it reading Q3. So from S + 1h40m, 30 minutes before the close and before any
-  measured game reached Q4, a feed silent for 2 minutes alerts the guardian whatever quarter it
-  last showed. That alert never halts: the game may still be in Q3.
-- Q4 trades on thin liquidity: depth follows √(end_ts − t), so with 11 minutes to the close it is
-  √(11 / 190) ≈ 24% of the depth at the open (S − 60 min).
+- S + 3h00m is the smallest `end_ts` with at most 3% of games still in play: 5 of 268, 4 of them
+  in overtime (MIN @ CLE, CHA @ LAL, UTAH @ NO, DET @ WSH) and one regulation game, POR @ LAL on
+  2026-11-06, with 15 s left. S + 2h45m, the close first expected, leaves 36 (13.4%) closing
+  early, and 17 close games closing before their last minute: the median game ends at
+  S + 151.6, but the slowest tenth runs past S + 2h50m.
+- The cost is settlement time. A result can be proposed only from `end_ts`, so a game of median
+  length settles about 45 minutes after its buzzer: 28 minutes to `end_ts`, then the 15-minute
+  dispute window.
+- The close now rests on the feed's Final. In the S4 recording ESPN showed Final 25 to 148 s
+  after the End Game play, and the keeper reads ESPN every 15 s (spec 6.1); until the halt lands
+  the market can be sniped. Depth follows √(end_ts − t) over the market's life from S − 60 min,
+  so at a median buzzer (28 of 240 minutes left) it is √(28/240) ≈ 34% of the opening depth.
+- No game reached Q4 before S + 102.7 (DAL @ BOS on 2026-11-15). The keeper halts on a feed
+  silent in Q4 or overtime, but it knows the quarter only from the feed: an outage that starts in
+  Q3 and runs into Q4 leaves it reading Q3. So from S + 1h40m, before any measured game reached
+  Q4, a feed silent for 2 minutes alerts the guardian whatever quarter it last showed. That alert
+  never halts. With `end_ts` at S + 3h00m the watch is 80 minutes long (`feedSilentWatchSecs`
+  4,800).
 
 In the S4 recording of 2026-11-18, ESPN's scoreboard showed a score change 12/21/33 s (p10/p50/p90) after the play,
 showed Final 25 to 148 s after the End Game play, and had one 105 s stretch with no data.
@@ -268,6 +287,7 @@ showed Final 25 to 148 s after the End Game play, and had one 105 s stretch with
 - 2026-11-18: the second score source is option (c), ESPN plus guardian confirmation with a public box score URL: the keeper reads ESPN, and every propose needs the guardian to confirm it with such a URL. Option (b), a second box score API, may come later.
 - 2026-11-19: the Linux tools run on a rented Ubuntu host instead of WSL.
 - 2026-11-19: `end_ts = S + 2h10m` (was S + 1h55m), from end-ts. A game that ends before the close is halted on the first Final read; a feed silent in Q4 or overtime alerts the guardian after 2 min and halts the market after 10, because a halt cannot be undone. From S + 1h40m, 30 min before the close, a feed silent for 2 min alerts whatever quarter it last showed (or if it has not been read since the keeper started), so an outage that spans the start of Q4 is not missed; this alert never halts.
+- 2026-11-26: markets close at the final buzzer, and `end_ts = S + 3h00m` (was S + 2h10m) is only the latest close, from the end-ts re-run on 268 games. The halt on the first Final read before `end_ts` is the close for almost every game. S + 3h00m is the smallest `end_ts`, in 5-minute steps, with at most 3% of games still being played (5 of 268, 1.9%; S + 2h45m had 36, 13.4%). The feed-silent rules are unchanged, and the watch still starts at S + 1h40m (`feedSilentWatchSecs` 4,800, 80 min before `end_ts`). No program change: proposals still wait for `end_ts`, so a game of median length settles about 45 min after its buzzer.
 
 ## Input to the Tier 1 plan
 
@@ -307,9 +327,10 @@ Numbers and decisions the Tier 1 plan takes from here:
     `send.claimWinnings`, which the sponsor (cap 1,000,000) refuses with `COMPUTE_BUDGET`: Tier 1
     must not reuse them for sponsored transactions. S1's unsponsored swaps ran at 1.4M.
 - Market close and halt timings (end-ts).
-  - Answer: `endOffsetSecs` 7,800 (S + 2h10m), `feedSilentAlertSecs` 120, `feedSilentSecs` 600,
-    `feedSilentWatchSecs` 1,800 (the watch starts 30 min before the close), all in the keeper's
-    `DEFAULT_TIMINGS` and changeable through `KEEPER_TIMINGS`. Re-run
+  - Answer (2026-11-26): `endOffsetSecs` 10,800 (S + 3h00m, the latest close; the halt on the
+    first Final closes a market at the buzzer), `feedSilentAlertSecs` 120, `feedSilentSecs` 600,
+    `feedSilentWatchSecs` 4,800 (the watch starts at S + 1h40m, 80 min before `end_ts`), all in
+    the keeper's `DEFAULT_TIMINGS` and changeable through `KEEPER_TIMINGS`. Re-run
     `end-ts` on newer games before moving the close; a failed check means the premise changed.
 
 ## Notes for Tier 1

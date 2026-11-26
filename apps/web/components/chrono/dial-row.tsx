@@ -1,7 +1,7 @@
 'use client'
 // One game in the board's list (spec 3.2, L1 style): MiniDial, teams and score, whose chance the
-// number is and the number in percent (R5), the close in ET and a diamond for your position.
-// The whole row is one link to the game.
+// number is and the number in percent (R5), the latest close in ET while it trades (R1) and a
+// diamond for your position. The whole row is one link to the game.
 import Link from 'next/link'
 import { type BoardItem, itemLabel, rowWords } from '../../lib/chrono/board'
 import { liveNumber } from '../../lib/chrono/copy'

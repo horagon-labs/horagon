@@ -577,6 +577,42 @@ describe('a market on chain with no row', () => {
   })
 })
 
+describe('the close at the final buzzer', () => {
+  it('halts on the first tick that reads Final, once, and nothing reopens the market', async () => {
+    expect(types(await keeper.tick())).toEqual(['create'])
+    // A close Q4 at S + 2h40m, well before end_ts (S + 3h00m): the market trades on.
+    now = S + 9_600
+    current = {
+      ...current,
+      status: 'live',
+      period: 4,
+      clockSecs: 3,
+      homeScore: 109,
+      awayScore: 106,
+    }
+    expect(await keeper.tick()).toEqual([])
+    // The buzzer: the first read of Final halts, before end_ts.
+    now += 5
+    current = finalGame()
+    expect(types(await keeper.tick())).toEqual(['halt'])
+    expect(now).toBeLessThan(END)
+    expect(sends).toEqual(['create nba-401910007', 'halt nba-401910007 (final-before-end)'])
+    // ESPN shows the game live again for a read, then Final: nothing is sent, the row stays halted.
+    now += 5
+    current = { ...finalGame(), status: 'live', clockSecs: 0 }
+    expect(await keeper.tick()).toEqual([])
+    now += 5
+    current = finalGame()
+    expect(await keeper.tick()).toEqual([])
+    // 60 s of the same Final: the draft, still no second halt.
+    now += 60
+    expect(types(await keeper.tick())).toEqual(['draft'])
+    expect(sends).toHaveLength(2)
+    expect((await getGame(h.db, 'nba-401910007'))?.markets[0]?.status).toBe('halted')
+    expect(logs).toEqual([])
+  })
+})
+
 describe('isDone', () => {
   it('does not count a GameMarket the RPC cannot see as done', async () => {
     await keeper.tick() // create

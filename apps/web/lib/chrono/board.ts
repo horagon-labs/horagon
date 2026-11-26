@@ -99,10 +99,15 @@ export function yourHour(
   return { count: open.length, value: usdc(formatAmount(value)) }
 }
 
+/** A market in these states still trades: it closes at the final buzzer, at the latest at end_ts (R1). */
+const TRADING: readonly DialState[] = ['pre', 'live', 'closing']
+
 /**
  * A row's three right-hand lines (R5, audit section 13): whose chance the number is, the number
- * in percent, and the close. "MEM to win · 62% · closes 10:40 PM ET"; once the final buzzer went,
- * "CHA lost · 74% · result pending"; after the result, "Resolved: MEM won" with no number.
+ * in percent, and the close. "MEM to win · 62% · latest 10:40 PM ET" while it trades (it closes
+ * at the final buzzer, end_ts at the latest, R1); once the final buzzer went, "CHA lost · 74% ·
+ * result pending"; after the result, "Resolved: MEM won" with no number. A market that stopped
+ * names no time.
  */
 export function rowWords(i: BoardItem): { subject: string; value: string; note: string } {
   const subject = rowSubject(i.state, i.game, i.market?.outcome ?? null)
@@ -111,9 +116,10 @@ export function rowWords(i: BoardItem): { subject: string; value: string; note: 
   const value = i.price === null ? '—' : percent(i.price)
   const pending = i.game.status === 'final' || i.state === 'proposed' || i.state === 'challenged'
   if (pending) return { subject, value, note: 'result pending' }
-  if (i.state === 'closed') return { subject, value, note: 'trading closed' }
-  const note = i.market ? `closes ${etClock(i.interval.end)}` : `opens ${etClock(i.interval.start)}`
-  return { subject, value, note }
+  if (!i.market) return { subject, value, note: `opens ${etClock(i.interval.start)}` }
+  const latest = `latest ${etClock(i.interval.end)}`
+  if (TRADING.includes(i.state)) return { subject, value, note: latest }
+  return { subject, value, note: i.state === 'halted' ? 'trading halted' : 'trading closed' }
 }
 
 /** What a screen reader hears for one game, on its row link and in the Night dial's list. */

@@ -71,11 +71,11 @@ describe('what the number means (R5, audit section 13)', () => {
 })
 
 describe('rowWords (R5)', () => {
-  it('reads subject, percent and close for a live game', () => {
+  it('reads subject, percent and the latest close for a live game (R1: it closes at the buzzer)', () => {
     expect(rowWords(boardItem(game(), undefined, NOW))).toEqual({
       subject: 'CLE to win',
       value: '77%',
-      note: 'closes 10:10 PM ET',
+      note: 'latest 10:10 PM ET',
     })
   })
 

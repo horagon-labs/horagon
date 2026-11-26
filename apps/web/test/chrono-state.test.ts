@@ -164,7 +164,17 @@ describe('dialLabel (spec 2.6, R5)', () => {
     sample({ status: 'final', homeScore, awayScore })
 
   it('reads the whole dial in one sentence, subject first', () => {
-    expect(dialLabel(base)).toBe('CLE to win, 77%, model 74%, closes in 1 hour 2 minutes')
+    expect(dialLabel(base)).toBe('CLE to win, 77%, model 74%, open until the final buzzer')
+    const scheduled = sample({ status: 'scheduled' })
+    expect(dialLabel({ ...base, state: 'pre', game: scheduled })).toMatch(
+      /open until the final buzzer$/,
+    )
+  })
+
+  it('counts down only in the last 5 min before end_ts, when the market closes then', () => {
+    expect(dialLabel({ ...base, state: 'closing', secsLeft: 252 })).toBe(
+      'CLE to win, 77%, model 74%, closes in 4 minutes',
+    )
   })
 
   it('says when there is no price, model or market yet', () => {

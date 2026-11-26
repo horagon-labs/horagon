@@ -132,7 +132,8 @@ function run(now: number, ...states: GameState[]) {
 const types = (actions: ReturnType<typeof run>) => actions.map((a) => a.type)
 
 describe('create', () => {
-  it('creates the winner market from S - 60 min, priced at p0, ending at S + 2h10m', () => {
+  it('creates the winner market from S - 60 min, priced at p0, ending at S + 3h00m', () => {
+    expect(END).toBe(S + 10_800)
     expect(run(S - 3_601, state())).toEqual([])
     expect(run(S - 3_600, state())).toEqual([
       {
@@ -181,6 +182,24 @@ describe('halt (spec 6.2)', () => {
     })
   })
 
+  it('halts on the first Final read, without waiting for a stable score', () => {
+    // finalSince is now: this tick is the first to read Final. A game that ends at S + 2h30m.
+    const now = S + 9_000
+    expect(run(now, open({ feed: finalFeed, feedSeenAt: now, finalSince: now }))).toEqual([
+      { type: 'halt', gameId: 'nba-401910007', marketId: 7n, rule: 'final-before-end' },
+    ])
+    // One second before end_ts still halts: the buzzer, not end_ts, is the close.
+    expect(types(run(END - 1, open({ feed: finalFeed, finalSince: END - 1 })))).toEqual(['halt'])
+  })
+
+  it('never reopens, re-creates or halts again a halted market, whatever the feed shows next', () => {
+    const halted = (f: FeedGame) =>
+      state({ market: market('halted'), onchain: chain('halted'), feed: f, feedSeenAt: END - 600 })
+    // ESPN flips the Final back to live (a glitch), shows the pre-game listing, or Final again.
+    const live = feed({ status: 'live', period: 4, clockSecs: 0, homeScore: 111, awayScore: 106 })
+    for (const f of [live, feed(), finalFeed]) expect(run(END - 600, halted(f))).toEqual([])
+  })
+
   it('does not halt for Final after end_ts', () => {
     expect(types(run(END + 10, open({ feed: finalFeed })))).not.toContain('halt')
   })
@@ -217,9 +236,11 @@ describe('halt (spec 6.2)', () => {
     expect(run(END, open({ feed: live, feedSeenAt: END - 900 }))).toEqual([])
   })
 
-  it('alerts, never halts, on a feed silent > 2 min in the last 30 min, whatever it last showed', () => {
+  it('alerts, never halts, on a feed silent > 2 min from S + 1h40m, whatever it last showed', () => {
     const q3 = feed({ status: 'live', period: 3, clockSecs: 40, homeScore: 70, awayScore: 66 })
     const watch = END - DEFAULT_TIMINGS.feedSilentWatchSecs
+    // The watch starts before the earliest Q4 measured (S + 102.7 min, spikes end-ts).
+    expect(watch).toBe(S + 6_000)
     // Before the watch, a game last seen in Q3 cannot be about to end: nothing.
     expect(run(watch - 1, open({ feed: q3, feedSeenAt: watch - 900 }))).toEqual([])
     expect(run(watch, open({ feed: q3, feedSeenAt: watch - 120 }))).toEqual([])

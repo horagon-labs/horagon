@@ -106,20 +106,23 @@ the alert table; the key itself is in the keeper's `alert` log line (the last co
 
 ## During the night
 
-Markets trade through the game until the on-chain `end_ts = S + 2h10m`; nothing halts them at
-tip-off. Over the 220 games measured, the close came before the final buzzer in 219. The
-keeper halts a market that is still open (a halt withdraws all of Horagon's liquidity and cannot
-be undone) on the first of:
+Markets trade through the game and close at the final buzzer: the keeper halts a market on its
+first Final read. The on-chain `end_ts = S + 3h00m` is only the latest close; over the 268 games
+measured, 5 were still being played then and closed early. Nothing halts a market at tip-off.
+The keeper halts a market that is still open (a halt withdraws all of Horagon's liquidity and
+cannot be undone) on the first of:
 
-- a Final read before the close (`final-before-end`);
+- a Final read before `end_ts` (`final-before-end`), the normal close: ESPN showed Final 25 to
+  148 s after the buzzer on the recorded night, and the keeper reads it every 15 s;
 - the feed showing the game postponed or canceled (`postponed`);
 - the game not started 24 h after S (`not-started`);
 - no feed read for 10 min while the feed last showed Q4 or overtime (`feed-silent`).
 
-After 2 min without a feed in Q4 or overtime it only alerts (`feed-silent-q4:`). From 30 min
-before the close (S + 1h40m) it also alerts on 2 min without a feed whatever quarter the feed
-last showed, and at once for a game it has not read since it started (`feed-silent:`): an outage
-that begins in Q3 would otherwise hide Q4. That alert never halts.
+After 2 min without a feed in Q4 or overtime it only alerts (`feed-silent-q4:`). From S + 1h40m
+(80 min before `end_ts`, and before any measured game reached Q4) it also alerts on 2 min without
+a feed whatever quarter the feed last showed, and at once for a game it has not read since it
+started (`feed-silent:`): an outage that begins in Q3 would otherwise hide Q4. That alert never
+halts.
 
 Once ESPN has shown Final with the same score for 60 s, the keeper drafts the result and sends
 `draft:`. You confirm it against a public box score and propose it (procedure A). The keeper
@@ -137,8 +140,9 @@ recycles. `status` then shows `market:finalized`, then `market:recycled`.
    copy the command line the `draft:` alert prints.
 2. Run it:
    `horagon-ops propose <gameId> --box-score <url> --score <home>-<away>`.
-   - It refuses before the close: `proposing opens at end_ts <time>`. Run it again after that
-     time (this happens only for a game that ended before S + 2h10m; its market is halted).
+   - It refuses before `end_ts`: `proposing opens at end_ts <time>`. Run it again after that
+     time. This is the usual case: markets close at the buzzer, and a game of median length ends
+     about 28 min before `end_ts` (S + 3h00m). Its market stays halted meanwhile.
    - It refuses a score that differs from the draft (`box score <h>-<a> differs from the draft
      ...`). When the box score is right and ESPN is wrong, add
      `--periods <home>-<away>,<home>-<away>,...` (each period, overtime included, 4 to 12; they
@@ -242,9 +246,10 @@ silence is not proof that it is fixed.
 ### F. Halt by hand
 
 When a feed shows something wrong while the market is open, or a `feed-silent` alert comes
-and the game may end before the close: `horagon-ops halt <gameId>`. It withdraws all of
-Horagon's liquidity; it cannot be undone, and the market stays halted until its result is
-proposed. A market that is not open prints `<gameId> is already <status>; nothing to halt`.
+and the game may end before `end_ts` (the keeper cannot halt at the buzzer without a feed):
+`horagon-ops halt <gameId>`. It withdraws all of Horagon's liquidity; it cannot be undone, and
+the market stays halted until its result is proposed. A market that is not open prints
+`<gameId> is already <status>; nothing to halt`.
 
 ### G. Stop and restart the keeper
 
@@ -261,8 +266,9 @@ ssh "$HORAGON_VPS" systemctl --user restart horagon-keeper
 - A stop (SIGTERM) ends the round after the step in progress. The unit waits up to 120 s
   (`TimeoutStopSec`): one transaction wait (90 s) plus an RPC timeout. A step that holds
   several sends can take longer and is then killed. A second SIGTERM exits at once.
-- Avoid the last 30 min before any game's close: a stop holds back halts until the new process
-  runs, and the new process alerts `feed-silent:` until its first feed read (below).
+- Avoid restarting from S + 1h40m until a game's market is halted at the buzzer (or its
+  `end_ts`, S + 3h00m, has passed): a stop holds back halts until the new process runs, and the
+  new process alerts `feed-silent:` until its first feed read (below).
 - The next start checks every RPC's cluster, then re-plans every action from chain state: work
   that landed is seen on chain and not repeated. (`isDone` is asked only between the retries of
   one send, not across a restart.) A transaction in flight when the keeper stopped may land
@@ -273,8 +279,8 @@ ssh "$HORAGON_VPS" systemctl --user restart horagon-keeper
   keeper keeps no attempt records of its own sends; only `horagon-ops propose` does.
 - The first round after a start also runs the hourly steps (schedule, treasury, archive
   retention), and the alerter has forgotten what it sent, so open alerts come again.
-- In the last 30 min before a close, a game the keeper has not read since the start (ESPN not
-  answering) alerts `feed-silent:` at once, until a feed read includes it. The feed is read
+- From S + 1h40m until its market closes, a game the keeper has not read since the start (ESPN
+  not answering) alerts `feed-silent:` at once, until a feed read includes it. The feed is read
   every 15 s.
 - `fund-authority` is the one command with no `isDone` check. After it ends with exit status 3,
   look the printed signature up before running it again, or it sends the SOL twice. (`status`
@@ -289,7 +295,7 @@ come too late, so:
 1. Put mUSDC in the attestor wallet: claim the faucet for a wallet you control and transfer it
    there (the keeper already claims for the attestor every hour, and the faucet pays a wallet
    once an hour).
-2. Before S, restart the keeper (G), unless another game is in its last 30 min before a close.
+2. Before S, restart the keeper (G), unless another game is past S + 1h40m and still open.
    The first round after a start runs the treasury step, which moves the attestor's mUSDC into
    the treasury up to the seeds of the next 36 h's games without a market, + 20 %; the round
    after it creates the market. That step counts only games whose tip-off is still ahead, so

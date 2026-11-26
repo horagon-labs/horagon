@@ -5,10 +5,14 @@ import {
   endPlay,
   type GameTimeline,
   gameStats,
+  isCloseGame,
+  lastMinuteMs,
+  mergeGames,
   offsetStats,
   type Play,
   q4Mark,
   quantile,
+  smallestClose,
   startsBeforeSchedule,
   stateAt,
 } from '../src/lib/end-ts'
@@ -92,28 +96,70 @@ describe('game state', () => {
   })
 })
 
+describe('close games', () => {
+  it('is a close game within 5 points with 2:00 or less left in Q4, or in overtime', () => {
+    expect(isCloseGame(game())).toBe(true)
+    const blowout = plays.map((p): Play => [p[0], p[1], p[2], p[3] + 20, p[4], p[5]])
+    expect(isCloseGame(game({ plays: blowout }))).toBe(false)
+    // Within 5 at 2:30 left only: not yet the last 2:00.
+    const early: Play[] = [
+      ...blowout.slice(0, 5),
+      [at(138), 4, 150, 100, 96, 0],
+      ...blowout.slice(5),
+    ]
+    expect(isCloseGame(game({ plays: early }))).toBe(false)
+    const ot: Play[] = [...blowout, [at(160), 5, 200, 122, 120, 0]]
+    expect(isCloseGame(game({ plays: ot }))).toBe(true)
+  })
+
+  it("finds the game's last minute in its final period, else its end", () => {
+    expect(lastMinuteMs(game())).toBe(at(140))
+    const ot: Play[] = [
+      ...plays.slice(0, 6),
+      [at(150), 4, 0, 110, 110, 0],
+      [at(160), 5, 50, 118, 116, 0],
+      [at(162), 5, 0, 120, 116, 1],
+    ]
+    expect(lastMinuteMs(game({ plays: ot, periods: 5 }))).toBe(at(160))
+    expect(lastMinuteMs(game({ plays: plays.slice(0, 4) }))).toBe(at(115))
+  })
+})
+
 describe('offsetStats', () => {
   it('measures a close in Q4 before the end', () => {
     expect(offsetStats([game()], 130)).toEqual({
       offsetMin: 130,
       endedBeforeClose: 0,
+      endedAfterClose: 1,
       closeInQ4OrLaterPct: 100,
       q4GameMinTradableMedian: 400 / 60,
+      q4GameMinTradableP10: 400 / 60,
       gameTradableMedianPct: 100 * (1 - 320 / 2880),
-      clutchOpen: 0,
+      closeGamesOpenLastMinute: 0,
       q4WallMinBeforeCloseMedian: 15,
       pairedEndBeforeClosePct: 0,
     })
   })
 
-  it('counts a close game still open in its last minute', () => {
-    expect(offsetStats([game()], 145).clutchOpen).toBe(1)
+  it('counts a close game whose last minute began before the close', () => {
+    expect(offsetStats([game()], 139).closeGamesOpenLastMinute).toBe(0)
+    expect(offsetStats([game()], 140).closeGamesOpenLastMinute).toBe(1)
+  })
+
+  it('takes the 10th percentile of Q4 minutes tradable across games', () => {
+    const late = game({ id: 'late', scheduled: '2026-11-18T23:50Z' })
+    const s = offsetStats([game(), late], 130)
+    // At the close the first game is at 5:20 left (6.67 min played), the second still at the start of Q4 (0).
+    expect(s.q4GameMinTradableMedian).toBeCloseTo(200 / 60, 9)
+    expect(s.q4GameMinTradableP10).toBeCloseTo(40 / 60, 9)
   })
 
   it('counts a game that ended before the close as all of Q4 tradable', () => {
     const s = offsetStats([game()], 150)
     expect(s.endedBeforeClose).toBe(1)
+    expect(s.endedAfterClose).toBe(0)
     expect(s.q4GameMinTradableMedian).toBe(12)
+    expect(s.closeGamesOpenLastMinute).toBe(1)
     expect(s.q4WallMinBeforeCloseMedian).toBe(35)
     expect(s.pairedEndBeforeClosePct).toBe(100)
   })
@@ -127,6 +173,38 @@ describe('offsetStats', () => {
 
   it('counts a close before the tip as nothing tradable', () => {
     expect(offsetStats([game()], 5).gameTradableMedianPct).toBe(0)
+  })
+})
+
+describe('mergeGames', () => {
+  const file = (fetchedAt: string, games: GameTimeline[]) => ({
+    from: '2026-11-18',
+    to: '2026-11-18',
+    fetchedAt,
+    games,
+  })
+
+  it('keeps each game once, from the later fetch, in tip-off order', () => {
+    const early = game({ id: 'a', scheduled: '2026-11-18T23:00Z' })
+    const old = game({ name: 'old' })
+    const fresh = game({ name: 'fresh' })
+    const merged = mergeGames([
+      file('2026-11-20T00:00:00.000Z', [fresh]),
+      file('2026-11-19T00:00:00.000Z', [old, early]),
+    ])
+    expect(merged.map((g) => [g.id, g.name])).toEqual([
+      ['a', 'MEM @ CLE'],
+      ['401910007', 'fresh'],
+    ])
+  })
+})
+
+describe('smallestClose', () => {
+  it('takes the smallest close with at most the given share of games still in play', () => {
+    const offsets = [150, 155, 160].map((x) => offsetStats([game()], x))
+    expect(smallestClose(offsets, 1, 0.03)).toBe(150)
+    expect(smallestClose(offsets.slice(0, 0), 1, 0.03)).toBeNull()
+    expect(smallestClose([offsetStats([game()], 130)], 1, 0.03)).toBeNull()
   })
 })
 
