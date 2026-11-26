@@ -65,20 +65,21 @@ export function WalletButton() {
 
   const balance = portfolio?.usdcBalance
   const own = portfolio?.wallet === address ? portfolio : undefined
-  // The night chip (R7) only while the API sends the nights (FLAG_ME on); hidden at 375 px so
-  // the header never overflows: My Game-day shows it, and the sheet links the page.
+  // The night chip (R7) only while the API sends the nights (FLAG_ME on). Below sm the night
+  // chip, YourHour and the address are hidden so the header never wraps: My Game-day shows the
+  // nights, and the sheet the positions and the address.
   const nights = own?.nights
   return (
     <div className="flex items-center gap-2">
       {nights !== undefined && <NightChip nights={nights} className="hidden sm:inline-flex" />}
-      <YourHour portfolio={own} onOpen={() => open(true)} />
+      <YourHour portfolio={own} onOpen={() => open(true)} className="hidden sm:inline-flex" />
       <button
         type="button"
         onClick={() => open(false)}
-        className="min-h-11 rounded-full border border-line px-3 font-mono text-13 text-ivory-100 tabular-nums"
+        className="min-h-11 shrink-0 whitespace-nowrap rounded-full border border-line px-3 font-mono text-13 text-ivory-100 tabular-nums"
       >
-        {balance === undefined || balance === null ? '–' : usdc(balance)} mUSDC ·{' '}
-        {shortKey(address)}
+        {balance === undefined || balance === null ? '–' : usdc(balance)} mUSDC
+        <span className="hidden sm:inline"> · {shortKey(address)}</span>
       </button>
       <dialog
         ref={dialog}
