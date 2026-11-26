@@ -619,7 +619,7 @@ times were kept.
 | Solana        | `@solana/web3.js` 1.98, `@anchor-lang/core` (through the vendored SDK), Anchor 1.2.2 for the `horagon` program and the S2 program                                                                                                |
 | API and web   | Hono 4 (API v1), Drizzle ORM 0.45 on Postgres, Next.js 16 with React 19 (web), zod 4 (input checks), pino (logs)                                                                                                                 |
 | Tooling       | pnpm 10, Turborepo, TypeScript 5.9, Biome 2, Vitest with V8 coverage, tsup, Changesets, GitHub Actions                                                                                                                           |
-| Data          | ESPN's public scoreboard and summary JSON, read for display and replay; balldontlie's free games API, the second score source; evidence cites both, or the box score a guardian checked                                          |
+| Data          | ESPN's public scoreboard and summary JSON, read for display and replay; balldontlie's free games API, the second score source; evidence cites ESPN and, when it matched, balldontlie, or the box score a guardian checked        |
 | Models        | NBA-style Elo (K 20, home advantage 100, 75% carryover toward 1505 between seasons); in-game probability after Stern (1994), "A Brownian motion model for the progress of sports scores"                                         |
 
 **AI-assisted code.** Horagon is built with Claude Code, Anthropic's AI coding agent, which wrote
