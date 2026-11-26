@@ -50,12 +50,45 @@ const payout = (amount: string): string => (Number(amount) === 0 ? '0' : `${usdc
 const net = (amount: string): string =>
   amount.startsWith('-') ? usdc(amount) : Number(amount) === 0 ? '0.00' : `+${usdc(amount)}`
 
+/** One side of the if-wins line: "If MEM wins: 38.72 mUSDC", its net "+18.72", and a loss flag. */
+export interface IfWinsPart {
+  lead: string
+  net: string
+  /** The net is below zero: the P&L role's red (components/positions.tsx). */
+  loss: boolean
+}
+
+/** The if-wins line in parts, so the page colours each net by the P&L role; null once settled. */
+export function ifWinsParts(e: MeGame): IfWinsPart[] | null {
+  if (!e.ifHomeWins || !e.ifAwayWins) return null
+  const side = (team: string, w: NonNullable<MeGame['ifHomeWins']>): IfWinsPart => ({
+    lead: `If ${team} wins: ${payout(w.payoutUsdc)}`,
+    net: net(w.netUsdc),
+    loss: w.netUsdc.startsWith('-'),
+  })
+  return [side(e.game.home, e.ifHomeWins), side(e.game.away, e.ifAwayWins)]
+}
+
 /** "If MEM wins: 38.72 mUSDC (+18.72) · If LAC wins: 0 (-20.00)"; null once settled. */
 export function ifWinsLine(e: MeGame): string | null {
-  if (!e.ifHomeWins || !e.ifAwayWins) return null
-  const side = (team: string, w: NonNullable<MeGame['ifHomeWins']>) =>
-    `If ${team} wins: ${payout(w.payoutUsdc)} (${net(w.netUsdc)})`
-  return `${side(e.game.home, e.ifHomeWins)} · ${side(e.game.away, e.ifAwayWins)}`
+  const parts = ifWinsParts(e)
+  return parts ? parts.map((x) => `${x.lead} (${x.net})`).join(' · ') : null
+}
+
+/** Money's colour, the P&L role of components/positions.tsx: lume, or red below zero. */
+export const pnlClass = (loss: boolean): string => (loss ? 'text-red-400' : 'text-lume-300')
+
+/** A team code `GET /me` takes (packages/api/src/me.ts `MeQuerySchema`). */
+const TEAM_CODE = /^[A-Z]{2,5}$/
+/** The most team codes `GET /me` takes. */
+export const ME_TEAMS_MAX = 30
+
+/**
+ * The followed teams sent to `GET /me`: only codes it takes, each once, at most 30, so one odd
+ * stored follow (a Practice code, say) never turns the page into a 400.
+ */
+export function meTeams(follows: readonly string[]): string[] {
+  return [...new Set(follows.filter((t) => TEAM_CODE.test(t)))].slice(0, ME_TEAMS_MAX)
 }
 
 /** "Called MEM at model 62% · won · +38", "· pending", or "· not scored" for a game not played. */
@@ -96,6 +129,8 @@ export interface StatusWords {
   line: string
   /** After a result: "You won · 38.72 mUSDC to claim", "You won · claimed" or "Lost". */
   result: string | null
+  /** The money in "You won · 38.72 mUSDC to claim", drawn in the P&L role; null otherwise. */
+  claimUsdc: string | null
   state: DialState
 }
 
@@ -106,20 +141,19 @@ export interface StatusWords {
 export function statusOf(p: MePosition, g: Game, now: number): StatusWords {
   const m = g.markets.find((x) => x.pubkey === p.market)
   const state = deriveDialState(g, m, now)
-  const words = (line: string, result: string | null = null): StatusWords => ({
-    line,
-    result,
-    state,
-  })
+  const words = (
+    line: string,
+    result: string | null = null,
+    claimUsdc: string | null = null,
+  ): StatusWords => ({ line, result, claimUsdc, state })
   switch (state) {
     case 'resolved': {
       const won = (m?.outcome === 'yes') === (p.side === 'home')
-      const result = !won
-        ? 'Lost'
-        : p.claimable
-          ? `You won · ${usdc(p.valueUsdc)} mUSDC to claim`
-          : 'You won · claimed'
-      return words(resolutionStatus(state, g, m?.outcome ?? null), result)
+      const line = resolutionStatus(state, g, m?.outcome ?? null)
+      if (!won) return words(line, 'Lost')
+      if (!p.claimable) return words(line, 'You won · claimed')
+      const claim = `${usdc(p.valueUsdc)} mUSDC`
+      return words(line, `You won · ${claim} to claim`, claim)
     }
     case 'challenged':
       return words('Result under review')

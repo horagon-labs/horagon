@@ -25,6 +25,8 @@ import {
   chipLabel,
   headline,
   ifWinsLine,
+  ifWinsParts,
+  meTeams,
   NIGHTS_TARGET,
   nextRow,
   nightLabel,
@@ -101,6 +103,14 @@ describe('a position card’s lines', () => {
   it('shows what each side pays and the net', () => {
     expect(ifWinsLine(meGame())).toBe('If MEM wins: 38.72 mUSDC (+18.72) · If LAC wins: 0 (-20.00)')
     expect(ifWinsLine(meGame({ ifHomeWins: null, ifAwayWins: null }))).toBeNull()
+  })
+
+  it('splits each side into its payout and its net, flagging a loss (the P&L role)', () => {
+    expect(ifWinsParts(meGame())).toEqual([
+      { lead: 'If MEM wins: 38.72 mUSDC', net: '+18.72', loss: false },
+      { lead: 'If LAC wins: 0', net: '-20.00', loss: true },
+    ])
+    expect(ifWinsParts(meGame({ ifHomeWins: null, ifAwayWins: null }))).toBeNull()
   })
 
   it('shows the call: at the model, then won, lost, pending or not scored', () => {
@@ -188,7 +198,9 @@ describe('each status line, from the dial state', () => {
     expect(final({ claimable: true, valueUsdc: '38.72' })).toMatchObject({
       line: 'Resolved: MEM won',
       result: 'You won · 38.72 mUSDC to claim',
+      claimUsdc: '38.72 mUSDC',
     })
+    expect(final({ claimable: false, shares: '0', valueUsdc: '0' }).claimUsdc).toBeNull()
     expect(final({ claimable: false, shares: '0', valueUsdc: '0' }).result).toBe(
       'You won · claimed',
     )
@@ -234,7 +246,9 @@ describe('My Game-day, rendered', () => {
     expect(html).toContain('MEM to win · 62%')
     expect(html).toContain('Model: live win chance from score and clock')
     expect(html).toContain('MEM · 38.72 shares · in at 55% · now 62%')
-    expect(html).toContain('If MEM wins: 38.72 mUSDC (+18.72) · If LAC wins: 0 (-20.00)')
+    expect(html).toMatch(
+      /If MEM wins: 38\.72 mUSDC \(<span[^>]*>\+18\.72<\/span>\) · If LAC wins: 0 \(<span[^>]*>-20\.00<\/span>\)/,
+    )
     expect(html).toContain('Called MEM at model 62% · pending')
     expect(html).toContain('Open until the final buzzer · latest 10:40 PM ET')
     // The key block is always open on this page: never inside a <details>.
@@ -243,6 +257,35 @@ describe('My Game-day, rendered', () => {
     )
     expect(html).toContain('Show secret key')
     expect(html).not.toContain('<details')
+  })
+
+  it('colours money by the P&L role: lume when up, red when down (preflight 4.3)', () => {
+    const html = page()
+    expect(html).toMatch(/<span class="[^"]*text-lume-300[^"]*">\+18\.72<\/span>/)
+    expect(html).toMatch(/<span class="[^"]*text-red-400[^"]*">-20\.00<\/span>/)
+    const won = game({
+      home: 'MEM',
+      away: 'LAC',
+      status: 'final',
+      homeScore: 101,
+      awayScore: 99,
+      markets: [market({ status: 'finalized', outcome: 'yes', endTs: at('2026-11-25T03:40:00Z') })],
+    })
+    const claim = page({
+      me: meResponse({
+        games: [
+          meGame({
+            game: won,
+            positions: [mePosition({ status: 'final', claimable: true, valueUsdc: '38.72' })],
+            ifHomeWins: null,
+            ifAwayWins: null,
+          }),
+        ],
+      }),
+    })
+    expect(claim).toMatch(
+      /You won · <span class="[^"]*text-lume-300[^"]*">38\.72 mUSDC<\/span> to claim/,
+    )
   })
 
   it('folds the key block in the wallet sheet, unchanged', () => {
@@ -290,6 +333,12 @@ describe('My Game-day, rendered', () => {
     })
     expect(claim.match(/Claim all/g)).toHaveLength(1)
     expect(page({ me: meResponse({ earlierClaimable: 2 }) })).toContain('Claim all')
+    // Not on a card is not always earlier: a second-half market of tonight's game counts too.
+    expect(page({ me: meResponse({ earlierClaimable: 2 }) })).toContain(
+      '2 more positions to claim.',
+    )
+    expect(page({ me: meResponse({ earlierClaimable: 1 }) })).toContain('1 more position to claim.')
+    expect(page({ me: meResponse({ earlierClaimable: 2 }) })).not.toContain('earlier')
     expect(page()).not.toContain('Claim all')
     expect(page({ me: meResponse({ earlierClaimable: 1 }), preparing: true })).toContain(
       'Preparing…',
@@ -335,6 +384,27 @@ describe('My Game-day, rendered', () => {
     })
     expect(html).toContain('My Game-day is switched off right now.')
     expect(html).not.toContain('No calls tonight yet.')
+  })
+})
+
+describe('the followed teams sent to /me', () => {
+  it('sends only team codes the API takes, at most 30, so one odd follow never breaks the page', () => {
+    expect(meTeams(['MEM', 'lac', 'TOO-LONG', 'X', 'TORONTO', 'LAC', 'MEM'])).toEqual([
+      'MEM',
+      'LAC',
+    ])
+    const many = Array.from(
+      { length: 40 },
+      (_, i) =>
+        `T${String.fromCharCode(65 + (i % 26))}${String.fromCharCode(65 + Math.floor(i / 26))}`,
+    )
+    expect(meTeams(many)).toHaveLength(30)
+    expect(meTeams(many)).toEqual(many.slice(0, 30))
+  })
+
+  it('is what the page polls with', () => {
+    const src = readFileSync(join(WEB, 'components', 'me-view.tsx'), 'utf8')
+    expect(src).toMatch(/meTeams\(loadFollows\(/)
   })
 })
 

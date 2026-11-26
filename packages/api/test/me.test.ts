@@ -436,6 +436,17 @@ describe('GET /api/v1/me/{wallet}', () => {
     expect(body.games[0]?.positions[0]?.call?.model).toBe(0.62)
   })
 
+  it('scores a kind 2 call against the snapshots, like a kind 0 one (R7 review adv-1, minor 4)', async () => {
+    await flagOn()
+    // p0 is 55%; the snapshot at the buy says 62%.
+    const g = await addGame('nba-1')
+    const m = await addMarket(g, { kind: 2 })
+    await snapshot(g, '2026-11-29T01:00:00Z', 0.62)
+    await swap(m, '2026-11-29T01:05:00Z', { usdc: -10n * U, yes: 16n * U })
+    const body = await me()
+    expect(body.games[0]?.positions[0]?.call?.model).toBe(0.62)
+  })
+
   it('counts the nights: distinct tip-off dates from 11-27, never Practice or a kind 1 market', async () => {
     await flagOn()
     // ET 11-25: before the counted window.

@@ -32,6 +32,7 @@ import {
   type MePosition,
   type MeResponse,
   type MeStatus,
+  marketKindName,
   type Position,
   parseAmount,
   type Side,
@@ -275,10 +276,15 @@ export async function meFor(db: Db, input: MeInput): Promise<MeResponse> {
   )
   const shown = [...tonight, ...practice]
   const shownIds = new Set(shown.map((g) => g.id))
+  // The same markets the calls are built from: every kind the API names 'winner' (0 and 2).
   const buyers = shown.filter((g) =>
     trades.some((t) => {
       const m = marketOf.get(t.market)
-      return m?.gameId === g.id && m.kind === 0 && (t.yesDelta > 0n || t.noDelta > 0n)
+      return (
+        m?.gameId === g.id &&
+        marketKindName(m.kind) === 'winner' &&
+        (t.yesDelta > 0n || t.noDelta > 0n)
+      )
     }),
   )
   const proposed = shown.some((g) => g.markets.some((m) => m.status === 'proposed'))

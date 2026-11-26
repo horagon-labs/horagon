@@ -5,7 +5,7 @@
 import type { MeGame, MeResponse } from '@horagon/sdk'
 import { isHoragonError } from '@horagon/sdk/errors'
 import Link from 'next/link'
-import { type ReactNode, useEffect, useRef, useState } from 'react'
+import { Fragment, type ReactNode, useEffect, useRef, useState } from 'react'
 import { api } from '../lib/api'
 import { MODEL_HINT } from '../lib/chrono/copy'
 import { useNow } from '../lib/chrono/now'
@@ -15,11 +15,13 @@ import { gameClock, percent } from '../lib/format'
 import {
   callLine,
   headline,
-  ifWinsLine,
+  ifWinsParts,
   KEYS_NOTE,
+  meTeams,
   nextRow,
   nightLabel,
   PRACTICE_NOTE,
+  pnlClass,
   pointsText,
   positionLine,
   priceLine,
@@ -88,7 +90,7 @@ function Score(p: { game: MeGame['game'] }) {
 function GameCard(p: { entry: MeGame; now: number }) {
   const { game: g, positions, practice } = p.entry
   const winner = g.markets.find((m) => m.kind === 'winner')
-  const ifWins = ifWinsLine(p.entry)
+  const ifWins = ifWinsParts(p.entry)
   return (
     <li className="space-y-2 rounded-card border border-brass-500/15 bg-enamel-900 p-4">
       {practice && <p className={HEADING}>Practice</p>}
@@ -117,12 +119,32 @@ function GameCard(p: { entry: MeGame; now: number }) {
               <p className="font-mono text-ivory-100 tabular-nums">{positionLine(pos)}</p>
               {call && <p className="text-ivory-100">{call}</p>}
               <p className={STATUS_TEXT[status.state]}>{status.line}</p>
-              {status.result && <p className="font-semibold text-ivory-100">{status.result}</p>}
+              {status.result && (
+                <p className="font-semibold text-ivory-100">
+                  {status.claimUsdc ? (
+                    <>
+                      You won · <span className={pnlClass(false)}>{status.claimUsdc}</span> to claim
+                    </>
+                  ) : (
+                    status.result
+                  )}
+                </p>
+              )}
             </li>
           )
         })}
       </ul>
-      {ifWins && <p className="font-mono text-12 text-ash-400 tabular-nums">{ifWins}</p>}
+      {ifWins && (
+        // Each net in the P&L role (preflight 4.3): lume when up, red when down.
+        <p className="font-mono text-12 text-ash-400 tabular-nums">
+          {ifWins.map((x, i) => (
+            <Fragment key={x.lead}>
+              {i > 0 && ' · '}
+              {x.lead} (<span className={pnlClass(x.loss)}>{x.net}</span>)
+            </Fragment>
+          ))}
+        </p>
+      )}
     </li>
   )
 }
@@ -136,7 +158,7 @@ function ClaimAll(p: MeScreenProps & { me: MeResponse }) {
     <div className="space-y-2">
       {earlier > 0 && (
         <p className="text-13 text-ash-400">
-          {earlier} earlier {earlier === 1 ? 'position' : 'positions'} to claim.
+          {earlier} more {earlier === 1 ? 'position' : 'positions'} to claim.
         </p>
       )}
       <button
@@ -282,7 +304,8 @@ export function MeView() {
   // already carries them.
   const [follows, setFollows] = useState<string[] | null>(null)
   const [setUpFailed, setSetUpFailed] = useState(false)
-  useEffect(() => setFollows(loadFollows(storage())), [])
+  // Only codes the API takes, at most 30 (meTeams): one odd follow never breaks the page.
+  useEffect(() => setFollows(meTeams(loadFollows(storage()))), [])
 
   const address = w.address
   const key = address && follows ? `me:${address}:${follows.join(',')}` : null

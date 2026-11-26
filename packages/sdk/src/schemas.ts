@@ -334,7 +334,10 @@ export const MeResponseSchema = z.object({
     /** The same sum over the Practice calls, apart; null with none settled. */
     practicePoints: z.number().int().nullable(),
   }),
-  /** Claimable positions outside the games above (earlier nights). */
+  /**
+   * Claimable positions on no card above: earlier nights, and the markets the cards leave out
+   * (a second-half market of tonight's game). The field keeps its name; the page says "more".
+   */
   earlierClaimable: z.number().int().nonnegative(),
   /** The next scheduled NBA game of each followed or held team, at most 5, by tip-off. */
   nextGames: z.array(GameSchema),
