@@ -16,10 +16,19 @@ export function iconSize(file: string): IconSize | null {
   return ICON_SIZES.find((px) => iconFile(px) === file) ?? null
 }
 
-/** The brand palette of every home-screen icon: the page, its face, the brass bezel, a live needle. */
-export const ICON_COLORS = {
-  bg: COLORS['enamel-950'],
-  face: COLORS['enamel-800'],
-  ring: COLORS['brass-500'],
+/**
+ * The dial mark's colours (light branding review §4.10), as app/icon.svg: a white face, the brass
+ * case, a live needle and an ink hub. The wordmark and the share card draw it so.
+ */
+export const MARK_COLORS = {
+  face: COLORS['enamel-900'],
+  ring: COLORS['brass-700'],
   needle: COLORS.live,
+  hub: COLORS['ivory-100'],
 }
+
+/** The mark of a page with nothing open on it (404, error): the needle stopped, in ink-muted. */
+export const STOPPED_MARK = { ...MARK_COLORS, needle: COLORS['ash-400'] }
+
+/** The brand palette of every home-screen icon: the mark on the paper. */
+export const ICON_COLORS = { bg: COLORS['enamel-950'], ...MARK_COLORS }

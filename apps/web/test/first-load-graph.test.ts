@@ -26,9 +26,15 @@ const SDK_ENTRIES: Record<string, string> = Object.fromEntries(
   ]),
 )
 
-const ENTRIES = ['app/layout.tsx', 'app/page.tsx', 'app/game/[id]/page.tsx'].map((f) =>
-  join(WEB, f),
-)
+const ENTRIES = [
+  'app/layout.tsx',
+  'app/page.tsx',
+  'app/game/[id]/page.tsx',
+  // Every route's tree also holds the error boundary and the 404 (light branding review §4.12).
+  'app/error.tsx',
+  'app/not-found.tsx',
+  'app/global-error.tsx',
+].map((f) => join(WEB, f))
 
 interface Parsed {
   useClient: boolean

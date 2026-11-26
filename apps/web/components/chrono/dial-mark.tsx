@@ -1,5 +1,6 @@
-// The dial mark (app/icon.svg): a brass bezel, a lume needle at two thirds of the scale and a
-// brass hub. The wordmark, the apple touch icon and the share card all draw this one shape.
+// The dial mark (app/icon.svg): a white face in a brass case, a live needle at two thirds of the
+// scale and an ink hub (light branding review §4.10). The wordmark, the apple touch icon, the
+// manifest PNGs and the share card all draw this one shape.
 export const MARK_NEEDLE = 'M16 16 L22.5 9.5'
 
 export function DialMark(p: {
@@ -7,6 +8,7 @@ export function DialMark(p: {
   face: string
   ring: string
   needle: string
+  hub: string
   className?: string
 }) {
   return (
@@ -18,20 +20,20 @@ export function DialMark(p: {
       className={p.className}
       data-mark
     >
-      <circle cx={16} cy={16} r={14.5} fill={p.face} stroke={p.ring} strokeWidth={2} />
+      <circle cx={16} cy={16} r={14.5} fill={p.face} stroke={p.ring} strokeWidth={2.5} />
       <path d={MARK_NEEDLE} stroke={p.needle} strokeWidth={2.5} strokeLinecap="round" />
-      <circle cx={16} cy={16} r={2.5} fill={p.ring} />
+      <circle cx={16} cy={16} r={2.5} fill={p.hub} />
     </svg>
   )
 }
 
 /**
- * A home-screen icon (R5): the dial mark on the enamel, filling 82% of a `px` square. Drawn by
+ * A home-screen icon (R5): the dial mark on the paper, filling 82% of a `px` square. Drawn by
  * next/og (Satori: inline styles, a flex box) for the apple touch icon and the manifest's PNGs.
  */
 export function HomeIcon(p: {
   px: number
-  colors: Record<'bg' | 'face' | 'ring' | 'needle', string>
+  colors: Record<'bg' | 'face' | 'ring' | 'needle' | 'hub', string>
 }) {
   return (
     <div
@@ -50,6 +52,7 @@ export function HomeIcon(p: {
         face={p.colors.face}
         ring={p.colors.ring}
         needle={p.colors.needle}
+        hub={p.colors.hub}
       />
     </div>
   )
