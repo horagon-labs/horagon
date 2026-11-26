@@ -42,7 +42,7 @@ export function BoardView(p: BoardViewProps) {
       <div className="space-y-3" data-board-list>
         <div className="flex flex-wrap items-center justify-between gap-x-3">
           <h2 className="text-13 font-medium uppercase tracking-[0.2em] text-brass-500">
-            Tonight's games
+            {model.label}
           </h2>
           {chips.length > 0 && (
             <details className="group open:basis-full" data-follow>
@@ -70,10 +70,25 @@ export function BoardView(p: BoardViewProps) {
           )}
         </div>
         <ErrorText error={p.health.error} />
+        {model.stopped && (
+          <p className="text-13 text-ivory-100" data-stopped>
+            {model.stopped}
+          </p>
+        )}
         {model.next && (
           <p className="text-13 text-ivory-100" data-next>
             {model.next}
           </p>
+        )}
+        {model.calendar && (
+          // A file, not a page: a plain link, so the router never fetches it as one.
+          <a
+            href={model.calendar.href}
+            className="inline-flex min-h-11 items-center text-13 text-lume-300 underline-offset-4 hover:underline"
+            data-calendar
+          >
+            {model.calendar.label}
+          </a>
         )}
         {/* The dial's own words are hidden from screen readers; the empty line is said here. */}
         {empty && (
@@ -101,13 +116,14 @@ export function BoardView(p: BoardViewProps) {
       </div>
       <div className="mx-auto w-full max-w-sm lg:sticky lg:top-20 lg:order-first lg:max-w-none">
         <NightDial
-          items={model.items}
+          items={model.dial}
           now={model.chainNow}
           selectedId={p.selectedId}
           onSelect={p.onSelect}
           hoverId={p.hoverId}
           onHover={p.onHover}
-          emptyText={empty}
+          emptyText={model.rest ?? model.stopped ?? empty}
+          rest={model.rest !== null}
           stale={p.health.stale}
         />
         {p.health.stale && (

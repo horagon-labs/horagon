@@ -122,6 +122,16 @@
         "types": "./dist/notice.d.cts",
         "default": "./dist/notice.cjs"
       }
+    },
+    "./et": {
+      "import": {
+        "types": "./dist/et.d.ts",
+        "default": "./dist/et.js"
+      },
+      "require": {
+        "types": "./dist/et.d.cts",
+        "default": "./dist/et.cjs"
+      }
     }
   },
   "files": [

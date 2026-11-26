@@ -4,7 +4,7 @@
 // value out, and the page's own poll loads it in the browser as before.
 import type { Game, GameDetail, HoragonClient } from '@horagon/sdk'
 import { etNextDay, etNight, isHoragonError } from '@horagon/sdk'
-import { type Upcoming, upcomingOf } from '../chrono/board'
+import { nightOver, type Upcoming, upcomingOf } from '../chrono/board'
 import { isTonight } from '../format'
 
 /** How long a first frame waits for the API before it renders without the data. */
@@ -39,8 +39,9 @@ export interface InitialBoard {
 }
 
 /**
- * The board's first frame. With no game on the board and none later in the list, it looks for
- * the next games over the next LOOKAHEAD_DAYS ET days (`lookAhead`).
+ * The board's first frame. With no game on the board, or every game of the night stopped, and
+ * none later in the list, it looks for the next games over the next LOOKAHEAD_DAYS ET days
+ * (`lookAhead`).
  */
 export async function loadBoard(
   client: BoardClient,
@@ -51,7 +52,9 @@ export async function loadBoard(
   if (!games) return { games: undefined, upcoming: null, now: nowSecs }
   const tonight = games.some((g) => isTonight(g, nowSecs * 1000))
   let upcoming = upcomingOf(games, nowSecs)
-  if (!tonight && upcoming === null) upcoming = await lookAhead(client, nowSecs, timeoutMs)
+  // Also once every game of the night stopped, so "All stopped" can name the next tip-off.
+  const ended = !tonight || nightOver(games, nowSecs)
+  if (ended && upcoming === null) upcoming = await lookAhead(client, nowSecs, timeoutMs)
   return { games, upcoming, now: nowSecs }
 }
 

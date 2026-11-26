@@ -5,14 +5,17 @@
 // copy, next/dist/compiled/server-only) fails the build if a client component imports this.
 import 'server-only'
 import { createApp, depsFromEnv } from '@horagon/api'
+import type { Game } from '@horagon/sdk'
 import { HoragonClient } from '@horagon/sdk/client'
 import {
+  INITIAL_TIMEOUT_MS,
   INITIAL_TTL_MS,
   type InitialBoard,
   type InitialGame,
   loadBoard,
   loadGame,
   ttlCache,
+  within,
 } from './initial'
 
 let app: ReturnType<typeof createApp> | undefined
@@ -75,4 +78,13 @@ export function initialGame(id: string): Promise<InitialGame> {
     },
     (g) => g.game !== undefined || g.missing,
   )
+}
+
+/** One ET game day's games, for its calendar file. Undefined when the API failed or was slow. */
+export async function gamesOn(date: string): Promise<Game[] | undefined> {
+  try {
+    return await within(serverClient().games.list({ date }), INITIAL_TIMEOUT_MS)
+  } catch {
+    return undefined
+  }
 }

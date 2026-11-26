@@ -14,6 +14,8 @@ export default defineConfig({
     // Browser pages read amounts and the play-money line without web3.js (R5c).
     amount: 'src/amount.ts',
     notice: 'src/notice.ts',
+    // The night's ET date for a browser page, without web3.js (R7).
+    et: 'src/et.ts',
   },
   format: ['esm', 'cjs'],
   dts: true,

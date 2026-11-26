@@ -8,6 +8,7 @@ import dynamic from 'next/dynamic'
 import { useEffect, useRef, useState } from 'react'
 import { shortKey, usdc } from '../lib/format'
 import { SOMETHING_WRONG, WALLET_PREPARING } from '../lib/wallet-copy'
+import { NightChip } from './chrono/night-chip'
 import { YourHour } from './chrono/your-hour'
 import { useWallet } from './wallet'
 
@@ -63,12 +64,14 @@ export function WalletButton() {
   }
 
   const balance = portfolio?.usdcBalance
+  const own = portfolio?.wallet === address ? portfolio : undefined
+  // The night chip (R7) only while the API sends the nights (FLAG_ME on); hidden at 375 px so
+  // the header never overflows: My Game-day shows it, and the sheet links the page.
+  const nights = own?.nights
   return (
     <div className="flex items-center gap-2">
-      <YourHour
-        portfolio={portfolio?.wallet === address ? portfolio : undefined}
-        onOpen={() => open(true)}
-      />
+      {nights !== undefined && <NightChip nights={nights} className="hidden sm:inline-flex" />}
+      <YourHour portfolio={own} onOpen={() => open(true)} />
       <button
         type="button"
         onClick={() => open(false)}

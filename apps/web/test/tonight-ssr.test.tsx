@@ -52,7 +52,7 @@ describe('the first frame of / (R5)', () => {
     expect(html).toMatch(/<div class="[^"]*lg:order-first[^"]*"><div role="listbox"/)
     expect(html).not.toMatch(/\border-[12]\b/)
     expect(html).toMatch(/<details[^>]*data-follow[^>]*><summary[^>]*>☆ Follow teams/)
-    expect(html).toContain('Tonight&#x27;s games')
+    expect(html).toContain('>Tonight · Tue Nov 24</h2>')
   })
 
   it('says when the next games are on a night without any', () => {

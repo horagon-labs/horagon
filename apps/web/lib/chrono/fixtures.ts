@@ -6,6 +6,9 @@ import type {
   GameDetail,
   GameHistory,
   MarketSummary,
+  MeGame,
+  MePosition,
+  MeResponse,
   Position,
   PositionsResponse,
   Quote,
@@ -215,6 +218,58 @@ export function quote(over: Partial<Quote> = {}): Quote {
     priceAfter: 0.79,
     priceImpactBps: 120,
     now: NOW,
+    ...over,
+  }
+}
+
+/**
+ * My Game-day (R7): MEM (home, live against LAC) backed at 55%, now 62% with a 62% model at the
+ * call; its market closes at 10:40 PM ET at the latest.
+ */
+export function mePosition(over: Partial<MePosition> = {}): MePosition {
+  return {
+    ...position({
+      shares: '38.72',
+      costUsdc: '20',
+      valueUsdc: '24.0064',
+      pnlUsdc: '4.0064',
+      price: 0.62,
+    }),
+    team: 'MEM',
+    avgPrice: 0.55,
+    status: 'open',
+    challengeEndsAt: null,
+    call: { model: 0.62, result: null, points: null },
+    ...over,
+  }
+}
+
+export function meGame(over: Partial<MeGame> = {}): MeGame {
+  return {
+    game: game({
+      home: 'MEM',
+      away: 'LAC',
+      modelProb: 0.62,
+      markets: [market({ price: 0.62, endTs: at('2026-11-25T03:40:00Z') })],
+    }),
+    practice: false,
+    positions: [mePosition()],
+    ifHomeWins: { payoutUsdc: '38.72', netUsdc: '18.72' },
+    ifAwayWins: { payoutUsdc: '0', netUsdc: '-20' },
+    ...over,
+  }
+}
+
+export function meResponse(over: Partial<MeResponse> = {}): MeResponse {
+  return {
+    wallet: WALLET,
+    night: '2026-11-24',
+    now: NOW,
+    nights: 1,
+    games: [meGame()],
+    vsModel: { points: null, settled: 0, pending: 1, practicePoints: null },
+    earlierClaimable: 0,
+    nextGames: [],
     ...over,
   }
 }
