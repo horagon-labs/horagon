@@ -46,6 +46,16 @@ export const rimClass = (state: DialState): string =>
 /** The case's width: 1.5 for brass, 2 for the error rim that replaces it (review §4.2). */
 export const rimWidth = (state: DialState): number => (state === 'challenged' ? 2 : 1.5)
 
+/** Polls failing (spec 4.4): a 2 px error arc over the top of the case, -40° to 40°. */
+export const STALE_ARC = [-40, 40] as const
+
+/**
+ * The brass case while that arc shows: cut 6° clear of it each side. Brass and error part by
+ * ΔE00 10.9 for a deutan eye but only 1.50:1 in light, so they never touch: the red takes the
+ * case's place, as the challenged rim does (light branding review §3.5).
+ */
+export const STALE_CASE = [46, 314] as const
+
 /**
  * The ring's color on a face: `open` is "this face has a price", and a market opens 60 min before
  * tip-off (the keeper creates it then), so `pre` with a price is an open market and reads live;

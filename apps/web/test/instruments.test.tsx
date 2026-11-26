@@ -17,7 +17,7 @@ import { priceToAngle } from '../lib/chrono/geometry'
 import { findRuns } from '../lib/chrono/runs'
 import { DIAL_STATES } from '../lib/chrono/state'
 import { runMarkers, TAPE_FRAME } from '../lib/chrono/tape'
-import { COLORS } from '../lib/chrono/tokens'
+import { COLORS, contrast } from '../lib/chrono/tokens'
 
 const BASE: DialProps = {
   price: 0.77,
@@ -301,5 +301,98 @@ describe('Tape and scorebug in light (review §4.6, §4.7)', () => {
     const html = renderToStaticMarkup(<Scorebug game={game()} run={run ?? null} />)
     expect(html).toMatch(/font-mono text-12 text-ash-400" data-run/)
     expect(html).not.toContain('text-amber-400')
+  })
+})
+
+describe('refix 1 of the visual review (phase1-review-visual-1.md)', () => {
+  /** The ends of an `M ax ay A r r 0 l 1 bx by` arc: [radius, from°, to°] around (100, 100). */
+  const arcEnds = (t: string | undefined) => {
+    const n = (t?.match(/ d="M ([^"]+)"/)?.[1] ?? '').split(/[ A]+/).map(Number)
+    const [ax, ay, r, , , , , bx, by] = n as number[]
+    return [r, angleOf(ax as number, ay as number), angleOf(bx as number, by as number)] as const
+  }
+  const night = (stale: boolean) =>
+    renderToStaticMarkup(
+      <NightDial
+        items={evening().map((g) => boardItem(g, undefined, NOW))}
+        now={NOW}
+        selectedId={null}
+        onSelect={() => {}}
+        emptyText=""
+        stale={stale}
+      />,
+    )
+
+  it('#2 cuts the brass case clear of the stale arc on the dial: error never touches brass', () => {
+    const html = dial({ stale: true })
+    const stale = tag(html, 'data-stale')
+    expect(stale).toMatch(/stroke-width="2" class="stroke-red-400"/)
+    const [sr, s0, s1] = arcEnds(stale)
+    expect(sr).toBe(97)
+    expect([s0, s1].map(Math.round)).toEqual([-40, 40])
+    // The case is an arc now, not the full circle, and leaves 6° of bare paper each side.
+    const rim = tag(html, 'data-rim')
+    expect(rim).toMatch(/^<path /)
+    expect(rim).toMatch(/stroke-width="1.5" class="stroke-brass-700"/)
+    const [cr, c0, c1] = arcEnds(rim)
+    expect(cr).toBe(97)
+    expect(Math.round(c0)).toBe(46)
+    expect(Math.round(c1)).toBe(-46)
+    // Not stale: the whole case, as before; under review the red rim takes the case whole.
+    expect(tag(dial(), 'data-rim')).toMatch(/^<circle /)
+    expect(tag(dial({ stale: true, state: 'challenged' }), 'data-rim')).toMatch(
+      /^<circle [^>]*class="stroke-red-400"/,
+    )
+  })
+
+  it('#2 does the same on the Night dial, instead of drawing red over the case', () => {
+    const html = night(true)
+    const [sr, s0, s1] = arcEnds(tag(html, 'data-stale'))
+    expect(tag(html, 'data-stale')).toMatch(/stroke-width="2" class="stroke-red-400"/)
+    expect(sr).toBe(97)
+    expect([s0, s1].map(Math.round)).toEqual([-40, 40])
+    expect(html).not.toMatch(/r="97" stroke-width="1.5" class="fill-enamel-900 stroke-brass-700"/)
+    const [cr, c0, c1] = arcEnds(tag(html, 'data-case'))
+    expect(tag(html, 'data-case')).toMatch(/class="stroke-brass"/)
+    expect(cr).toBe(97)
+    expect([Math.round(c0), Math.round(c1)]).toEqual([46, -46])
+    expect(night(false)).not.toContain('data-case')
+  })
+
+  it('#3 haloes the Night labels in paper and sets them over the arcs and the now hand', () => {
+    const html = night(false)
+    const label = html.match(/<text [^>]*>(?:<tspan[^>]*>[^<]*<\/tspan>)?MIL<\/text>/)?.[0] ?? ''
+    expect(label).toContain('paint-order="stroke"')
+    expect(label).toMatch(/class="[^"]*fill-ivory-100[^"]*stroke-surface-raised/)
+    expect(num(label, 'stroke-width')).toBeGreaterThanOrEqual(2.5)
+    // Drawn after the arcs and after the hand, so neither runs over the words.
+    expect(html.indexOf(label)).toBeGreaterThan(html.indexOf('data-now'))
+    expect(html.indexOf(label)).toBeGreaterThan(html.lastIndexOf('pointer-events="none"'))
+    // Ink on paper under the halo, whatever runs below: 17.60.
+    expect(contrast(COLORS['ivory-100'], COLORS['enamel-900'])).toBeCloseTo(17.6, 1)
+  })
+
+  it('#4 sets 0 and 100 over the needle on a paper halo, and the words on paper', () => {
+    const html = dial({ state: 'resolved', price: 1, caption: 'Resolved: CLE won' })
+    const hundred = html.match(/<text [^>]*>100<\/text>/)?.[0] ?? ''
+    expect(hundred).toContain('paint-order="stroke"')
+    expect(hundred).toMatch(/class="[^"]*fill-ash-400[^"]*stroke-surface-raised/)
+    expect(html.indexOf(hundred)).toBeGreaterThan(html.indexOf('data-needle="price"'))
+    // The caption and the number are HTML over the face: a paper box hides the needle under them.
+    expect(classAt(html, 'data-caption')).toContain('bg-surface-raised')
+    const live = dial({ price: 0.97 })
+    expect(live).toMatch(/<span class="flex items-baseline [^"]*bg-surface-raised/)
+  })
+
+  it('minor 1: butt caps on a dashed ring, so the hatch and the dots keep their gaps', () => {
+    expect(tag(dial({ state: 'halted' }), 'data-ring')).toContain('stroke-linecap="butt"')
+    expect(tag(dial({ state: 'proposed' }), 'data-ring')).toContain('stroke-linecap="butt"')
+    expect(tag(dial(), 'data-ring')).toContain('stroke-linecap="round"')
+  })
+
+  it('minor 3 and 6: no ring on the loading frame, and no ▲ on a postponed game', () => {
+    expect(dial({ loading: true, price: null, caption: undefined })).not.toContain('data-ring')
+    expect(dial({ state: 'void' })).not.toContain('data-model')
+    expect(dial({ state: 'closed' })).toContain('data-model')
   })
 })

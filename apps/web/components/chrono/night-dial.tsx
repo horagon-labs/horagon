@@ -15,7 +15,7 @@ import {
   segmentAngles,
   segments,
 } from '../../lib/chrono/tracks'
-import { stateLine } from './dial-look'
+import { STALE_ARC, STALE_CASE, stateLine } from './dial-look'
 
 const C = 100
 // The readout's hub, inside ring 7 (r = 37, whose lit stroke edge is 34.5).
@@ -114,20 +114,32 @@ export function NightDial(p: {
     >
       <svg viewBox="0 0 200 200" aria-hidden="true" className="absolute inset-0 size-full">
         {/* A white face in a brass case (light branding review §4.4). */}
-        <circle
-          cx={C}
-          cy={C}
-          r={97}
-          strokeWidth={1.5}
-          className="fill-enamel-900 stroke-brass-700"
-        />
-        {p.stale && (
-          <path
-            d={arcPath(C, C, 97, -40, 40)}
-            fill="none"
+        {p.stale ? (
+          // Stale: the red arc takes the case's place, which stops 6° short of it (review §3.5).
+          <>
+            <circle cx={C} cy={C} r={97} className="fill-surface-raised" />
+            <path
+              d={arcPath(C, C, 97, ...STALE_CASE)}
+              fill="none"
+              strokeWidth={1.5}
+              className="stroke-brass"
+              data-case
+            />
+            <path
+              d={arcPath(C, C, 97, ...STALE_ARC)}
+              fill="none"
+              strokeWidth={2}
+              className="stroke-red-400"
+              data-stale
+            />
+          </>
+        ) : (
+          <circle
+            cx={C}
+            cy={C}
+            r={97}
             strokeWidth={1.5}
-            className="stroke-red-400"
-            data-stale
+            className="fill-enamel-900 stroke-brass-700"
           />
         )}
         {HOURS.map((h) => {
@@ -177,22 +189,6 @@ export function NightDial(p: {
             )
           }),
         )}
-        {spots.map((s) => {
-          const item = tracks.find((t) => t.item.id === s.id)?.item
-          return (
-            <text
-              key={s.id}
-              x={s.x}
-              y={s.y}
-              textAnchor={s.anchor}
-              dominantBaseline="middle"
-              className="fill-ivory-100 font-mono text-[8px]"
-            >
-              {item?.held && <tspan className="fill-live">◆ </tspan>}
-              {item?.game.home}
-            </text>
-          )
-        })}
         <circle
           cx={C}
           cy={C}
@@ -212,6 +208,29 @@ export function NightDial(p: {
           className="stroke-ivory-100"
           data-now
         />
+        {/*
+          The labels last, on a paper halo: the next game to close ends near the hand, so its label
+          sat on live arcs (2.68:1) and under the hand; on paper it is ink on white, 17.60.
+        */}
+        {spots.map((s) => {
+          const item = tracks.find((t) => t.item.id === s.id)?.item
+          return (
+            <text
+              key={s.id}
+              x={s.x}
+              y={s.y}
+              textAnchor={s.anchor}
+              dominantBaseline="middle"
+              strokeWidth={2.5}
+              strokeLinejoin="round"
+              paintOrder="stroke"
+              className="fill-ivory-100 stroke-surface-raised font-mono text-[8px]"
+            >
+              {item?.held && <tspan className="fill-live">◆ </tspan>}
+              {item?.game.home}
+            </text>
+          )
+        })}
         {overflow.length > 0 && (
           <text
             x={C}
