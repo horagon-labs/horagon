@@ -41,7 +41,7 @@ client.
 | Sponsor rent farming  | ATA rent counted as spend at creation; 26 new ATAs a day per wallet, 78 per IP hash; none for a wallet that closed one away outside a claim                                                     |
 | Malicious API input   | zod on every input, unknown fields refused, 64 KB body limit (4 KB for `POST /api/v1/tx/submit`), problem+json errors without RPC URLs or stacks                                                |
 | Wrong result          | Two-step resolution (propose, a challenge window, finalize); the keeper never proposes: a guardian confirms every result against a public box score                                             |
-| Feed failure          | No proposal without a guardian; a feed silent 2 min in Q4/OT, or in the last 30 min before the close, alerts the guardian; 10 min in Q4/OT halts the market                                     |
+| Feed failure          | No proposal without a guardian; a feed silent 2 min in Q4/OT, or from S + 1h40m (80 min before `end_ts`), alerts the guardian; 10 min in Q4/OT halts the market                                 |
 | Key leak through logs | Keeper and `horagon-ops` logs redact `token` and `secretKey` fields (pino); errors are logged as `errorSummary` everywhere (no stack, URLs cut to the host, 300 characters); keys never in URLs |
 | Supply chain          | Lockfile, pinned versions, actions pinned by commit SHA, `pnpm audit`, osv-scanner, gitleaks and `cargo audit` in CI                                                                            |
 

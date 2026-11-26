@@ -19,6 +19,7 @@ import {
   MEMO_PROGRAM_ID,
   PM_AMM_IX_DISCRIMINATORS,
   PM_AMM_PROGRAM_ID,
+  PROTOCOL_DAO,
   SWAP_COMPUTE_UNITS,
 } from '@horagon/sdk'
 import { Keypair, type PublicKey } from '@solana/web3.js'
@@ -28,6 +29,8 @@ import { type AgentDeps, ReferenceAgent } from '../src/agent/agent'
 import { type AgentParams, defaultAgentParams } from '../src/agent/config'
 import type { Decision } from '../src/agent/decide'
 import { UnresolvedAttempt } from '../src/executor'
+import { runStep } from '../src/loop'
+import { StallGuard } from '../src/stall'
 import { FakeChain, FakeSender, type MarketFields, poolAt, tokenInfo } from './agent-fixtures'
 
 const NOW = 1_795_003_600
@@ -164,6 +167,7 @@ function movePrice(fields: MarketFields, price: number): void {
 }
 
 const reasons = (ds: Decision[]) => ds.map((d) => (d.action === 'skip' ? d.reason : 'swap'))
+const sizesOf = (ds: Decision[]) => ds.map((d) => (d.action === 'swap' ? d.amountIn : 0n))
 const keys = () => alerts.map(([k]) => k)
 
 describe('a dry run', () => {
@@ -230,7 +234,7 @@ describe('a live round', () => {
     for (const mint of [DEVNET_MUSDC_MINT, deriveYesMint(key), deriveNoMint(key)]) {
       chain.set(ataAddress({ owner: agent.publicKey, mint }), tokenInfo(mint, agent.publicKey, 1n))
     }
-    for (const owner of [program.authority, (await import('@horagon/sdk')).PROTOCOL_DAO]) {
+    for (const owner of [program.authority, PROTOCOL_DAO]) {
       chain.set(
         ataAddress({ owner, mint: DEVNET_MUSDC_MINT }),
         tokenInfo(DEVNET_MUSDC_MINT, owner, 1n),
@@ -251,9 +255,28 @@ describe('a live round', () => {
     chain.musdc = 120n * M
     const report = await agentWith().round()
     // The first market of the round (by end_ts, then address) takes the per-swap cap.
-    const sizes = report.decisions.map((d) => (d.action === 'swap' ? d.amountIn : 0n))
-    expect(sizes).toEqual([100n * M, 20n * M])
+    expect(sizesOf(report.decisions)).toEqual([100n * M, 20n * M])
     expect(sender.specs.map((s) => s.label).sort()).toEqual(['swap nba-1', 'swap nba-2'])
+  })
+
+  it('never plans more than the balance in one round: dry runs and unknown sends count too', async () => {
+    for (const n of [1, 2, 3]) await liveMarket(n, { seed: 1_000, price: 0.4, model: 0.95 })
+    chain.musdc = 150n * M
+    // A dry run sends nothing, yet plans as if each swap had gone out.
+    const dry = await agentWith({ dryRun: true }).round()
+    expect(sizesOf(dry.decisions)).toEqual([100n * M, 50n * M, 0n])
+    expect(reasons(dry.decisions)).toEqual(['swap', 'swap', 'balance'])
+    expect(sender.specs).toEqual([])
+    // A send whose result is unknown may still land: its amount is gone for the round.
+    sender.fail = new UnresolvedAttempt('swap nba-1: unresolved after 90 s')
+    const live = await agentWith().round()
+    expect(sizesOf(live.decisions)).toEqual([100n * M, 50n * M, 0n])
+    expect(reasons(live.decisions)).toEqual(['swap', 'swap', 'balance'])
+    const planned = live.decisions.reduce(
+      (sum, d) => sum + (d.action === 'swap' ? d.amountIn : 0n),
+      0n,
+    )
+    expect(planned <= 150n * M).toBe(true)
   })
 
   it('steps aside while a fan has traded in the last 90 s', async () => {
@@ -334,7 +357,14 @@ describe('a live round', () => {
     await liveMarket(1)
     await agentWith({ dryRun: true }).round()
     const hb = await getHeartbeat(h.db, 'agent')
-    expect(hb?.info).toMatchObject({ round: 1, dryRun: true, markets: 1, sent: 0, disabled: [] })
+    expect(hb?.info).toEqual({
+      round: 1,
+      dryRun: true,
+      paused: false,
+      markets: 1,
+      sent: 0,
+      disabled: [],
+    })
   })
 })
 
@@ -401,6 +431,52 @@ describe('failures', () => {
     const after = await a.round()
     expect(after.paused).toBe(false)
     expect(after.sent).toBe(1)
+  })
+
+  it('keeps its heartbeat and the stall guard going through a 10 min pause', async () => {
+    await liveMarket(1)
+    chain.fail.accounts = new Error('rpc down')
+    const a = agentWith()
+    // The loop of run.ts: each round is a step of the stall guard, then a 20 s sleep.
+    const guard = new StallGuard(120, () => clock * 1000)
+    const log = pino({ level: 'silent' })
+    const loop = async () => {
+      const res = await runStep(log, 'agent', () => a.round(), guard)
+      expect(res.ok).toBe(true)
+      guard.touch()
+      clock += 20
+      // Just before the next round: the longest the guard ever sees without activity.
+      expect(guard.check()).toBeNull()
+      return res.ok ? res.value : null
+    }
+    for (let i = 0; i < 5; i++) await loop()
+    expect(keys()).toEqual(['agent-paused'])
+    const pausedAt = clock - 20
+    expect((await getHeartbeat(h.db, 'agent'))?.info).toMatchObject({
+      round: 5,
+      paused: true,
+      pausedUntil: pausedAt + 600,
+    })
+    // The rest of the 600 s pause, a round every 20 s: each writes the heartbeat, none reads.
+    const reads = chain.reads
+    let round = 5
+    while (clock < pausedAt + 600) {
+      const before = (await getHeartbeat(h.db, 'agent'))?.ts.getTime() ?? 0
+      const report = await loop()
+      round++
+      expect(report?.paused).toBe(true)
+      const hb = await getHeartbeat(h.db, 'agent')
+      expect(hb?.info).toMatchObject({ round, paused: true, pausedUntil: pausedAt + 600 })
+      expect(hb?.ts.getTime()).toBeGreaterThanOrEqual(before)
+    }
+    expect(round).toBe(5 + 29)
+    expect(chain.reads).toBe(reads)
+    // The pause ends: the next round reads again, and the heartbeat says so.
+    chain.fail.accounts = undefined
+    const after = await loop()
+    expect(after?.paused).toBe(false)
+    expect((await getHeartbeat(h.db, 'agent'))?.info).toMatchObject({ paused: false })
+    expect((await getHeartbeat(h.db, 'agent'))?.info).not.toHaveProperty('pausedUntil')
   })
 
   it('counts failed reads, and a clean round ends the streak', async () => {

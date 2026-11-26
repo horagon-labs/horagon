@@ -2,6 +2,7 @@
 // keeper (`.env.keeper` on the VPS): the shared RPC, database, mint, Telegram and faucet
 // variables, plus the AGENT_* ones. Every value is validated at start-up, a mainnet RPC is
 // refused like the keeper refuses it, and errors never quote a value.
+import { join } from 'node:path'
 import { DEVNET_MUSDC_MINT } from '@horagon/sdk'
 import { type Keypair, PublicKey } from '@solana/web3.js'
 import { type ZodError, z } from 'zod'
@@ -15,6 +16,7 @@ import {
   telegramSettings,
 } from '../config'
 import { DEFAULT_STALL_SECS, MIN_STALL_SECS } from '../stall'
+import { WALLETS_FILE } from './listing'
 
 /** The decision rules, in the units the agent computes in (seconds, probabilities, raw mUSDC). */
 export interface AgentParams {
@@ -51,6 +53,11 @@ export interface AgentConfig {
   /** Logs every decision and sends nothing. */
   dryRun: boolean
   agent: Keypair
+  /**
+   * docs/metrics-wallets.json at the repo root AGENT_KEYPAIR resolves against: the agent starts
+   * only when it lists the agent's wallet as team-burner (listing.ts).
+   */
+  walletsFile: string
   /** Primary first, then the backup. */
   rpcs: RpcEndpoint[]
   cluster: Cluster
@@ -209,13 +216,15 @@ export function loadAgentConfig(
     e.RPC_WS_URLS,
   )
   const telegram = telegramSettings(e)
-  const agent = loadKeypair(resolveKeyPath(e.AGENT_KEYPAIR, opts.repoDir ?? REPO_DIR))
+  const repoDir = opts.repoDir ?? REPO_DIR
+  const agent = loadKeypair(resolveKeyPath(e.AGENT_KEYPAIR, repoDir))
   if (e.SPONSOR_PUBKEY && agent.publicKey.equals(publicKey('SPONSOR_PUBKEY', e.SPONSOR_PUBKEY))) {
     throw new Error('AGENT_KEYPAIR is the sponsor: the agent needs a wallet of its own')
   }
   return {
     dryRun: e.AGENT_DRY_RUN === '1',
     agent,
+    walletsFile: join(repoDir, WALLETS_FILE),
     rpcs,
     cluster: e.HORAGON_CLUSTER,
     databaseUrl: e.DATABASE_URL,

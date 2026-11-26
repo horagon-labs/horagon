@@ -500,7 +500,10 @@ describe('a challenge', () => {
 
   it('reminds about a redraft under a key of its own round', async () => {
     await firstChallenge()
-    now += DEFAULT_TIMINGS.missingSourceSecs
+    // The redraft came before end_ts: its 30 min count from end_ts, when proposing opens.
+    now = END + DEFAULT_TIMINGS.missingSourceSecs - 1
+    expect(await keeper.tick()).toEqual([])
+    now += 1
     expect(types(await keeper.tick())).toEqual(['alert'])
     expect(alerts.map(([k]) => k).filter((k) => k.startsWith('unconfirmed:'))).toEqual([
       `unconfirmed:${ID}:1`,
@@ -698,10 +701,14 @@ describe('the feed', () => {
 })
 
 describe('a pending draft', () => {
-  it('reminds the guardian once after 30 min unconfirmed', async () => {
+  it('reminds the guardian once, 30 min after end_ts for a draft made at the buzzer', async () => {
+    // toDraft halts on the Final read of END - 900 and drafts from it. Nobody can propose before
+    // end_ts, so the 30 min count from end_ts, not from the draft.
     await toDraft()
     const key = 'unconfirmed:nba-401910007:0'
-    now += DEFAULT_TIMINGS.missingSourceSecs - 61
+    now = END - 900 + DEFAULT_TIMINGS.missingSourceSecs
+    expect(await keeper.tick()).toEqual([])
+    now = END + DEFAULT_TIMINGS.missingSourceSecs - 1
     expect(await keeper.tick()).toEqual([])
     now += 1
     expect(types(await keeper.tick())).toEqual(['alert'])

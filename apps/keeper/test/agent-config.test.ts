@@ -10,6 +10,7 @@ import {
   defaultAgentParams,
   loadAgentConfig,
 } from '../src/agent/config'
+import { REPO_DIR } from '../src/config'
 
 let dir: string
 let keyFile: string
@@ -151,6 +152,14 @@ describe('loadAgentConfig', () => {
   it('resolves a relative AGENT_KEYPAIR from the repo root', () => {
     const c = loadAgentConfig(env({ AGENT_KEYPAIR: 'agent.json' }), { repoDir: dir })
     expect(c.agent.publicKey.equals(agent.publicKey)).toBe(true)
+  })
+
+  it('reads the wallets file at that same repo root', () => {
+    const c = loadAgentConfig(env({ AGENT_KEYPAIR: 'agent.json' }), { repoDir: dir })
+    expect(c.walletsFile).toBe(join(dir, 'docs', 'metrics-wallets.json'))
+    // By default, the repo this code runs from (the deploy ships the whole tree).
+    const shipped = loadAgentConfig(env())
+    expect(shipped.walletsFile).toBe(join(REPO_DIR, 'docs', 'metrics-wallets.json'))
   })
 
   it('refuses values out of range', () => {

@@ -15,11 +15,18 @@ import {
 } from '@horagon/sdk'
 import { lEffective, reservesFromPrice } from '@horagon/sdk/math'
 import { AccountLayout, TOKEN_PROGRAM_ID } from '@solana/spl-token'
-import { type AccountInfo, type Connection, PublicKey } from '@solana/web3.js'
+import {
+  type AccountInfo,
+  type Connection,
+  PublicKey,
+  type VersionedTransaction,
+  VersionedTransaction as VTx,
+} from '@solana/web3.js'
+import { DEVNET_GENESIS_HASH } from '../src/config'
 import type { SendSpec } from '../src/executor'
 
-/** Seconds between a market's creation and its end_ts (created 1 h before S, ends S + 2 h 10). */
-export const CREATED_SECS = 11_400
+/** Seconds between a market's creation and its end_ts (created 1 h before S, ends S + 3 h). */
+export const CREATED_SECS = 14_400
 
 /** L_0 of a market seeded with `seed` mUSDC at `price`, CREATED_SECS before its end. */
 export function lZeroFor(seed: number, price: number): number {
@@ -207,3 +214,38 @@ export class FakeSender {
 
 /** The decoded pool of a fake market, as the agent sees it. */
 export const poolOf = (info: AccountInfo<Buffer>) => decodeMarketAccount(info)
+
+const BLOCKHASH = 'EkSnNWid2cvwEVnVx9aBqawnmiCNiDgp3gUdkDPTKN1N'
+
+/**
+ * A devnet RPC, for the keeper's TxSender, that accepts every transaction and keeps the bytes
+ * it was sent.
+ */
+export function recordingConnection(): { conn: Connection; sent: VersionedTransaction[] } {
+  const sent: VersionedTransaction[] = []
+  const conn = {
+    async getGenesisHash() {
+      return DEVNET_GENESIS_HASH
+    },
+    async getLatestBlockhash() {
+      return { blockhash: BLOCKHASH, lastValidBlockHeight: 10 }
+    },
+    async simulateTransaction() {
+      return { context: { slot: 1 }, value: { err: null, logs: [] } }
+    },
+    async sendRawTransaction(raw: Uint8Array) {
+      sent.push(VTx.deserialize(raw))
+      return `sig${sent.length}`
+    },
+    async confirmTransaction() {
+      return { context: { slot: 1 }, value: { err: null } }
+    },
+    async getBlockHeight() {
+      return 1
+    },
+    async getSignatureStatuses(sigs: string[]) {
+      return { context: { slot: 1 }, value: sigs.map(() => null) }
+    },
+  }
+  return { conn: conn as unknown as Connection, sent }
+}

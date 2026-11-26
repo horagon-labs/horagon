@@ -1,7 +1,8 @@
 // The reference agent process: systemd user unit `horagon-agent` on the VPS, installed by
-// ops/deploy-keeper.sh and started by hand. It never runs inside the keeper process. Without
-// AGENT_ENABLED=1 it logs "agent disabled" and exits 0. SIGTERM ends the round in progress; a
-// second signal exits at once.
+// ops/deploy-keeper.sh, which never starts or restarts it: that is done by hand. It never runs
+// inside the keeper process. Without AGENT_ENABLED=1 it logs "agent disabled" and exits 0, and
+// it exits 0 as well when docs/metrics-wallets.json does not list its wallet as team-burner.
+// SIGTERM ends the round in progress; a second signal exits at once.
 import { errorSummary } from '@horagon/sdk'
 import { runAgent } from './agent/run'
 

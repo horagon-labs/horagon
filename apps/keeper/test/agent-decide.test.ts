@@ -255,7 +255,30 @@ describe('sizeSwap', () => {
     )
   })
 
-  it('returns 0 (null) when the target is unreachable within the cap', () => {
+  it('sends the cap as a partial move when the cap cannot reach the target (ruling 2026-11-26)', () => {
+    // The brief's case: a pool at 0.62 while the model says 0.99, and the reverse.
+    const cases: Array<[number, number, 'usdcToYes' | 'usdcToNo', number]> = [
+      [0.62, 0.97, 'usdcToYes', 1_000],
+      [0.62, 0.97, 'usdcToYes', 300],
+      [0.8, 0.12, 'usdcToNo', 1_000],
+    ]
+    for (const [price, target, direction, seed] of cases) {
+      const pool = poolAt(price, { now: NOW, lZero: lZeroFor(seed, 0.6) })
+      for (const cap of [1n * M, 25n * M, 100n * M]) {
+        const label = `${seed}: ${price} -> ${target}, cap ${cap}`
+        const size = sizeSwap({ pool, direction, target, cap, now: NOW, tolerance: 0.005 })
+        expect(size, label).not.toBeNull()
+        expect(size?.reachesTarget, label).toBe(false)
+        expect(size?.amountIn, label).toBe(cap)
+        // It moves the price toward the target, and stops short of it.
+        const moved = (size?.priceAfter ?? price) - price
+        expect(Math.sign(moved), label).toBe(direction === 'usdcToYes' ? 1 : -1)
+        expect(Math.abs((size?.priceAfter ?? 0) - target), label).toBeGreaterThan(0.005)
+      }
+    }
+  })
+
+  it('returns null when no amount moves the price toward the target', () => {
     const pool = poolAt(0.5, { now: NOW })
     const base = { pool, direction: 'usdcToYes' as const, now: NOW, tolerance: 0.005 }
     // No cap left.

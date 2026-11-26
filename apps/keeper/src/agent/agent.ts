@@ -109,8 +109,13 @@ export class ReferenceAgent {
   async round(): Promise<RoundReport> {
     const now = this.d.now()
     const report: RoundReport = { paused: false, decisions: [], sent: 0, failures: 0 }
-    if (this.failures.paused(now)) return { ...report, paused: true }
     this.rounds++
+    if (this.failures.paused(now)) {
+      // No read and no send while paused, but the heartbeat goes on: a pause is not a stall.
+      const paused = { ...report, paused: true }
+      await this.beat(paused, now)
+      return paused
+    }
     if (this.hourlyDue(now)) {
       await this.fund()
       report.failures += await this.claimAll(now)
@@ -121,27 +126,29 @@ export class ReferenceAgent {
     } catch (err) {
       await this.failed(now, 'read', err)
       report.failures++
+      await this.beat(report, now)
       return report
     }
     await this.balanceAlerts(snap)
+    // What the round may still spend. Every swap it plans comes off, sent or not: a dry run,
+    // a send whose result is unknown and one that failed alike, so one round never plans more
+    // than the wallet held when it was read.
     let balance = snap.musdc
     for (const view of snap.views) {
       if (this.failures.paused(now)) break
       const decision = decide(view, { now, balance, params: this.d.params })
       report.decisions.push(decision)
       this.logDecision(decision)
-      if (decision.action !== 'swap' || this.d.dryRun) continue
+      if (decision.action !== 'swap') continue
+      balance -= decision.amountIn
+      if (this.d.dryRun) continue
       const account = snap.accounts.get(view.market)
       if (!account) continue
-      if (await this.swap(decision, account, now)) {
-        balance -= decision.amountIn
-        report.sent++
-      } else {
-        report.failures++
-      }
+      if (await this.swap(decision, account, now)) report.sent++
+      else report.failures++
     }
     if (report.failures === 0) this.failures.clean()
-    await this.beat(report)
+    await this.beat(report, now)
     return report
   }
 
@@ -422,12 +429,18 @@ export class ReferenceAgent {
     }
   }
 
-  /** The `agent` row of keeper_heartbeats; a failed write is only logged. */
-  private async beat(report: RoundReport): Promise<void> {
+  /**
+   * The `agent` row of keeper_heartbeats, written after every round, a paused or failed one
+   * included; a failed write is only logged.
+   */
+  private async beat(report: RoundReport, now: number): Promise<void> {
+    const paused = this.failures.paused(now)
     try {
       await heartbeat(this.d.db, 'agent', {
         round: this.rounds,
         dryRun: this.d.dryRun,
+        paused,
+        ...(paused ? { pausedUntil: this.failures.pausedUntil } : {}),
         markets: report.decisions.length,
         sent: report.sent,
         disabled: this.watch.disabledMarkets,

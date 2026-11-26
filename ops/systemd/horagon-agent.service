@@ -1,8 +1,10 @@
 # User unit: ~/.config/systemd/user/horagon-agent.service on the VPS (user horagon).
 # The disclosed reference agent (README, "Reference agent"): a separate process from the keeper,
 # with its own wallet (AGENT_KEYPAIR), reading the same env file. ops/deploy-keeper.sh installs
-# this unit but never enables or starts it: start it by hand (docs/runbook.md, procedure J).
-# Without AGENT_ENABLED=1 in .env.keeper it logs "agent disabled" and exits 0, and stays down.
+# this unit but never enables, starts or restarts it: start and restart it by hand
+# (docs/runbook.md, procedure J). Without AGENT_ENABLED=1 in .env.keeper it logs "agent disabled"
+# and exits 0, and stays down; so does a wallet that docs/metrics-wallets.json does not list as
+# team-burner.
 [Unit]
 Description=Horagon reference agent (devnet, disclosed team wallet)
 After=network-online.target
@@ -20,7 +22,7 @@ Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
 Environment=NODE_ENV=production
 ExecStart=%h/horagon/apps/keeper/node_modules/.bin/tsx src/agent-main.ts
 # A crash or a stall exit (KEEPER_STALL_SECS of silence) restarts it; a clean exit (disabled,
-# or stopped by hand) does not.
+# not listed, or stopped by hand) does not.
 Restart=on-failure
 RestartSec=10
 # On SIGTERM the agent ends the round in progress: at most one swap wait (90 s) plus an RPC

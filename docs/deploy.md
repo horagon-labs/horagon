@@ -17,7 +17,8 @@ All keys are devnet-only Solana CLI keypair files in `.keys/` (git-ignored). Cre
 missing ones with `solana-keygen new --no-bip39-passphrase -o .keys/<name>.json`. The
 originals stay on your machine: a remote build host (`docs/dev-setup.md`, "Working on a remote
 Linux host") gets a copy of the deployer only for the command that signs with it, removed when
-that command ends. The attestor is the one exception: it lives on the VPS.
+that command ends. The attestor and the agent key are the exceptions: they live on the VPS, and
+the agent key is generated there (below).
 
 | File            | Role                                                                                                                                   | Lives on                                           | Needs                                     |
 | --------------- | -------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- | ----------------------------------------- |
@@ -79,13 +80,21 @@ variables it needs exported (`docs/runbook.md`, "Before you start").
 
 The agent is optional and off by default (`AGENT_ENABLED` unset). Before it ever trades:
 
-1. **Key:** `solana-keygen new --no-bip39-passphrase -o .keys/agent.json`, note its public key
-   (`solana-keygen pubkey .keys/agent.json`), copy it to `~/horagon/.keys/agent.json` on the VPS
-   (`chmod 600`) and remove the local copy. Send it about 0.5 devnet SOL; it claims its mUSDC
-   from the faucet every hour.
+1. **Key:** generate it on the VPS, never on a laptop, so the secret never leaves the VPS. In
+   a login shell there (`ssh "$HORAGON_VPS"`), then print only its public key:
+
+   ```bash
+   umask 077; solana-keygen new --no-bip39-passphrase --silent -o ~/horagon/.keys/agent.json
+   solana-keygen pubkey ~/horagon/.keys/agent.json
+   ```
+
+   Send that public key about 0.5 devnet SOL; it claims its mUSDC from the faucet every hour.
 2. **Disclosure:** add its public key to `docs/metrics-wallets.json` as a `team-burner` entry in a
    public commit (the pre-registered metric reads that file), and mark it a team wallet in the
-   database: `horagon-ops team <agent pubkey>`.
+   database: `horagon-ops team <agent pubkey>`. The agent checks the shipped copy of that file
+   when it starts: without the entry it alerts `agent-unlisted`, logs
+   `agent wallet is not listed as team-burner in docs/metrics-wallets.json` and exits 0, dry run
+   or not.
 3. **Variables:** add the "Reference agent" part of `.env.example` to `~/horagon/.env.keeper`, with
    `AGENT_ENABLED=1` and `AGENT_DRY_RUN=1` for the first run.
 4. **Start** it by hand after a deploy (`docs/runbook.md`, procedure J), read its dry-run
@@ -103,8 +112,10 @@ ssh to `~/horagon` (it never copies keys or `.env.keeper`). Then, in a login she
 it writes `~/horagon/REVISION`, runs `corepack pnpm install --frozen-lockfile` for the keeper
 and its dependencies, builds the SDK, copies the four units of `ops/systemd` to
 `~/.config/systemd/user`, enables and starts `horagon-watchdog.timer`, enables
-`horagon-keeper` and restarts it, then prints its status. It never enables or starts
-`horagon-agent`: a running agent is restarted on the new revision (`try-restart`), a stopped one
-stays stopped. A restart is safe during a night, but avoid the last 30 min before a close
-(`docs/runbook.md`, procedure G). Logs:
+`horagon-keeper` and restarts it, then prints its status. It never enables, starts or restarts
+`horagon-agent`. A running agent keeps the previous revision, and the script says so: restart it
+by hand (`systemctl --user restart horagon-agent`, procedure J of `docs/runbook.md`) to run the
+new one, which also clears the markets its anomaly check stopped. A stopped agent stays stopped.
+A keeper restart is safe during a night, but avoid one from S + 1h40m until a game's market is
+halted at the buzzer or its `end_ts` has passed (`docs/runbook.md`, procedure G). Logs:
 `ssh "$HORAGON_VPS" journalctl --user -u horagon-keeper -f -o cat`.

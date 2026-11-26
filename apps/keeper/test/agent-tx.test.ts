@@ -15,50 +15,21 @@ import {
 } from '@horagon/sdk'
 import {
   ComputeBudgetProgram,
-  type Connection,
   Keypair,
   type VersionedTransaction,
   type VersionedTransactionResponse,
-  VersionedTransaction as VTx,
 } from '@solana/web3.js'
 import pino from 'pino'
 import { describe, expect, it } from 'vitest'
 import { agentClaimInstructions, agentSwapInstructions, instructionsOf } from '../src/agent/tx'
 import { TxSender } from '../src/executor'
 import { hasBotMemo } from '../src/indexer'
+import { recordingConnection } from './agent-fixtures'
 
 const agent = Keypair.generate()
 const sponsor = Keypair.generate()
 const program = new HoragonProgram({ collateralMint: DEVNET_MUSDC_MINT })
 const market = deriveMarketPda(42n)
-const BLOCKHASH = 'EkSnNWid2cvwEVnVx9aBqawnmiCNiDgp3gUdkDPTKN1N'
-
-/** A chain that accepts everything and keeps the bytes it was sent. */
-function recordingConnection() {
-  const sent: VersionedTransaction[] = []
-  const conn = {
-    async getLatestBlockhash() {
-      return { blockhash: BLOCKHASH, lastValidBlockHeight: 10 }
-    },
-    async simulateTransaction() {
-      return { context: { slot: 1 }, value: { err: null, logs: [] } }
-    },
-    async sendRawTransaction(raw: Uint8Array) {
-      sent.push(VTx.deserialize(raw))
-      return `sig${sent.length}`
-    },
-    async confirmTransaction() {
-      return { context: { slot: 1 }, value: { err: null } }
-    },
-    async getBlockHeight() {
-      return 1
-    },
-    async getSignatureStatuses(sigs: string[]) {
-      return { context: { slot: 1 }, value: sigs.map(() => null) }
-    },
-  }
-  return { conn: conn as unknown as Connection, sent }
-}
 
 async function sendThroughKeeper(instructions: ReturnType<typeof agentSwapInstructions>) {
   const { conn, sent } = recordingConnection()

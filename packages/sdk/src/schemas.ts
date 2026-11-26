@@ -68,7 +68,10 @@ export const GameSchema = z.object({
   /** Seconds left in the current period; null before tip-off and after the end. */
   clockSecs: z.number().int().nullable(),
   featured: z.boolean(),
-  /** Display-only model probability that the home team wins (spec section 7). */
+  /**
+   * The keeper's in-game model probability that the home team wins (spec section 7): the YES
+   * side of a winner market. Shown to fans, and the price the reference agent trades toward.
+   */
   modelProb: ProbabilitySchema.nullable(),
   markets: z.array(MarketSummarySchema),
   updatedAt: z.iso.datetime(),
