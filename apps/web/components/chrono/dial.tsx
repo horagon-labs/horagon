@@ -22,6 +22,18 @@ import { RollingNumber } from './rolling-number'
 
 const C = 100
 const TICKS = Array.from({ length: 11 }, (_, i) => i / 10)
+/**
+ * The scale's numerals: 50 inside the top tick; 0 and 100 just past the ends of the scale, below
+ * the words under the hub and outside the needle's sweep, so neither ever sits under the needle
+ * or the caption (merge verify, finding 5).
+ */
+const NUMERALS = [
+  { text: '0', at: polar(C, C, 74, -150) },
+  { text: '50', at: polar(C, C, 67, 0) },
+  { text: '100', at: polar(C, C, 74, 150) },
+]
+/** Behind the caption and the detail: a needle at a low or high price passes under the words. */
+const BACKDROP = 'rounded-sm bg-enamel-900/90 px-1 leading-tight'
 
 export interface DialProps {
   /** The home side's price (YES), or null for no needle. */
@@ -148,21 +160,18 @@ export function Dial(p: DialProps) {
             )
           })}
         </g>
-        {[0, 0.5, 1].map((t) => {
-          const at = polar(C, C, 67, priceToAngle(t))
-          return (
-            <text
-              key={t}
-              x={at.x}
-              y={at.y}
-              textAnchor="middle"
-              dominantBaseline="middle"
-              className="fill-ash-400 font-mono text-[9px]"
-            >
-              {t * 100}
-            </text>
-          )
-        })}
+        {NUMERALS.map((n) => (
+          <text
+            key={n.text}
+            x={n.at.x}
+            y={n.at.y}
+            textAnchor="middle"
+            dominantBaseline="middle"
+            className="fill-ash-400 font-mono text-[9px]"
+          >
+            {n.text}
+          </text>
+        ))}
         {p.modelProb !== null && (
           <polygon
             points={pts(
@@ -241,7 +250,7 @@ export function Dial(p: DialProps) {
       </svg>
       <div
         aria-hidden="true"
-        className="absolute inset-x-0 top-[54%] flex flex-col items-center gap-1 text-center"
+        className="absolute inset-x-0 top-[54%] flex flex-col items-center gap-0.5 text-center"
       >
         {p.loading ? (
           <span className="block h-10 w-20 rounded-card bg-line/60" data-skeleton />
@@ -257,14 +266,18 @@ export function Dial(p: DialProps) {
         )}
         {p.caption && (
           <span
-            className="flex max-w-[70%] items-center justify-center gap-1.5 text-12 uppercase tracking-[0.16em] text-brass-500"
+            className={`flex max-w-[70%] items-center justify-center gap-1.5 text-12 uppercase tracking-[0.16em] text-brass-500 ${BACKDROP}`}
             data-caption
           >
             {p.liveDot && <span className="size-1.5 shrink-0 rounded-full bg-lume-300" data-live />}
             {p.caption}
           </span>
         )}
-        {p.detail && <span className="font-mono text-12 text-ash-400">{p.detail}</span>}
+        {p.detail && (
+          <span className={`max-w-[70%] font-mono text-12 text-ash-400 ${BACKDROP}`}>
+            {p.detail}
+          </span>
+        )}
       </div>
     </div>
   )

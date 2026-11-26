@@ -7,7 +7,7 @@ import type { GameDetail, GameHistory } from '@horagon/sdk'
 import Link from 'next/link'
 import type { ReactNode } from 'react'
 import { winnerOf } from '../../lib/chrono/board'
-import { dialCaption } from '../../lib/chrono/copy'
+import { faceCaption } from '../../lib/chrono/copy'
 import { canTrade, type GameDial } from '../../lib/chrono/game'
 import { findRuns, latestRun } from '../../lib/chrono/runs'
 import { AgentLine } from './agent-line'
@@ -53,7 +53,7 @@ export function GameScreen(p: GameScreenProps) {
             modelProb={game.modelProb}
             timeLeft={dial.timeLeft}
             state={dial.state}
-            caption={dialCaption(dial.state, game, winner?.outcome ?? null)}
+            caption={faceCaption(dial.state, game, winner?.outcome ?? null)}
             label={dial.label}
             detail={stateLine(dial.state, game, dial.secsLeft, p.now)}
             liveDot={game.status === 'live'}
