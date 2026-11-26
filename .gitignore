@@ -25,11 +25,8 @@ spikes/recordings/
 next-env.d.ts
 *.tsbuildinfo
 
-# `vercel link` writes the project link here; listed so the CLI never edits this file.
-.vercel/
-
 # Keeper data: raw ESPN archive, Elo build cache, elo.json (copied to the VPS by hand).
 apps/keeper/data/
 
-# Vercel CLI link (`vercel link`): the project and team ids.
+# Vercel CLI link (`vercel link`): the project and team ids. Listed so the CLI never edits this file.
 .vercel

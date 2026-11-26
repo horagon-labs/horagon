@@ -4,7 +4,7 @@ name: program
 # the Rust dependencies. Deploying stays manual (spec 20.4: CI holds no upgrade key).
 on:
   push:
-    branches: [main]
+    branches: [main, tier2]
     paths: [programs/**, Cargo.toml, Cargo.lock, Anchor.toml, idls/**, packages/sdk/idl/**]
   pull_request:
     paths: [programs/**, Cargo.toml, Cargo.lock, Anchor.toml, idls/**, packages/sdk/idl/**]
