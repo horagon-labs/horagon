@@ -235,15 +235,21 @@ export function NightDial(p: {
             )
           }),
         )}
-        <circle
-          cx={C}
-          cy={C}
-          r={HUB}
-          fill="none"
-          strokeWidth={0.75}
-          className="stroke-rule-faint"
-          data-hub
-        />
+        {/*
+          The readout's ring. At rest the words run wider than it (no arc rings the face), so it
+          goes: on white a faint line through the words reads as a strike, not a frame.
+        */}
+        {!p.rest && (
+          <circle
+            cx={C}
+            cy={C}
+            r={HUB}
+            fill="none"
+            strokeWidth={0.75}
+            className="stroke-rule-faint"
+            data-hub
+          />
+        )}
         <line
           x1={hub.x}
           y1={hub.y}

@@ -242,6 +242,17 @@ describe('the rest face of the Night dial', () => {
     )
   })
 
+  it('drops the readout ring at rest, so the wider words never run through it (light)', () => {
+    const rest = renderToStaticMarkup(
+      <NightDial items={[]} now={REST_NOW} selectedId={null} onSelect={noop} emptyText="x" rest />,
+    )
+    expect(rest).not.toContain('data-hub')
+    const empty = renderToStaticMarkup(
+      <NightDial items={[]} now={REST_NOW} selectedId={null} onSelect={noop} emptyText="x" />,
+    )
+    expect(empty).toContain('data-hub')
+  })
+
   it('puts an ink pip on the now hand and a seconds pip at r 97, stepping 6° a second', () => {
     const now = REST_NOW + 15
     const html = renderToStaticMarkup(

@@ -126,7 +126,8 @@ describe('YourHour (spec 3.2)', () => {
 
   it('shows the open positions and their value now', () => {
     const html = renderToStaticMarkup(<YourHour portfolio={two} onOpen={noop} />)
-    expect(html).toContain('><span class="text-live">◆</span> 2 · 12.90</button>')
+    // One flex item, so the inline-flex header chip keeps the space after the ◆.
+    expect(html).toContain('><span><span class="text-live">◆</span> 2 · 12.90</span></button>')
     expect(html).toContain('aria-label="2 open positions, worth 12.90 mUSDC"')
   })
 
@@ -140,7 +141,9 @@ describe('YourHour (spec 3.2)', () => {
     const html = renderToStaticMarkup(
       <YourHour portfolio={two} onOpen={noop} className="hidden sm:inline-flex" />,
     )
-    expect(html).toMatch(/class="[^"]*shrink-0 whitespace-nowrap[^"]*hidden sm:inline-flex"/)
+    expect(html).toMatch(/class="[^"]*shrink-0 [^"]*whitespace-nowrap[^"]*hidden sm:inline-flex"/)
+    // Centred in its pill once the header makes it a flex box.
+    expect(html).toMatch(/class="[^"]*items-center[^"]*hidden sm:inline-flex"/)
     const button = readFileSync(
       join(import.meta.dirname, '..', 'components', 'wallet-button.tsx'),
       'utf8',

@@ -18,9 +18,12 @@ export function YourHour(p: {
       type="button"
       onClick={p.onOpen}
       aria-label={`${hour.count} open ${noun}, worth ${hour.value} mUSDC`}
-      className={`min-h-11 shrink-0 whitespace-nowrap rounded-full border border-line px-3 font-mono text-13 text-ivory-100 tabular-nums ${p.className ?? ''}`.trim()}
+      className={`min-h-11 shrink-0 items-center whitespace-nowrap rounded-full border border-line px-3 font-mono text-13 text-ivory-100 tabular-nums ${p.className ?? ''}`.trim()}
     >
-      <span className="text-live">◆</span> {hour.count} · {hour.value}
+      {/* One flex item: the header shows the chip as inline-flex, which would drop the space. */}
+      <span>
+        <span className="text-live">◆</span> {hour.count} · {hour.value}
+      </span>
     </button>
   )
 }
