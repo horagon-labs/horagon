@@ -66,6 +66,8 @@ export interface MarketFields {
   pool: PoolState
   resolved?: boolean
   winningSide?: number
+  /** The opening price as stored: 6000 unless a test says otherwise. */
+  initialPriceBps?: number
 }
 
 /** pm-AMM `Market` account bytes (443), field by field in the IDL order. */
@@ -116,7 +118,7 @@ export function marketBytes(f: MarketFields): Buffer {
   u8(255)
   data.write('agent test market', o, 'utf8')
   o += 64
-  data.writeUInt16LE(6_000, o)
+  data.writeUInt16LE(f.initialPriceBps ?? 6_000, o)
   return data
 }
 
