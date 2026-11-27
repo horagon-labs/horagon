@@ -421,6 +421,28 @@ If the attestor key leaks, the attacker can propose a wrong result, halt open ma
 markets. A guardian challenges a wrong result within the 15-minute window, and the admin pauses
 market creation and replaces the attestor ([`docs/security.md`](docs/security.md)).
 
+### Who holds which key
+
+Public keys only, from [`docs/metrics-wallets.json`](docs/metrics-wallets.json) and the
+program's `Config` account. `node ops/check-upgrade-authority.mjs` prints who can upgrade the
+program today, read from chain.
+
+| Role                                   | Public key                                     | Holder                                                                                                   |
+| -------------------------------------- | ---------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| Program `horagon`                      | `HtDJ3vfx8vtFSmskm2Ks39kBMuDmFZH3H2B173BB9qHF` | Code; upgradable by the upgrade authority                                                                |
+| Admin (`Config.admin`), deployer       | `D6CYaG4YPm52oetuEy5yzXPSWsFv7yCWp2YAHeaodviR` | The operator. Also the upgrade authority until it moves to a cold key held offline (runbook procedure M) |
+| Attestor                               | `H6kzKfTP6Dq8YQmcGeL2tbNKmRSiXSpB3vpB1cyJ5jgx` | The keeper on the VPS                                                                                    |
+| Guardian 1                             | `4fPyTjxT2haHHg28M4JRqBjVj4n3dTeEKptgFAz7mY9h` | The operator                                                                                             |
+| Guardian 2                             | `AmqWjy4iVqK5RKF97YXawW7ZbGJo1U63bWF6Mo9vi9iQ` | Made for the watcher; not in the config (its second guardian slot is empty)                              |
+| Sponsor                                | `32tQ3JDbnnQSqs51BDNzgcy82dW7AKK2EMKDo9ACBnrc` | The API on Vercel                                                                                        |
+| Authority PDA                          | `mSFBJEB98CWSVaJwjQqRsTgmdPuoctnuav9Phi4SjX2`  | The program (no private key)                                                                             |
+| Treasury (the Authority's mUSDC ATA)   | `J8npAeSbcmjiYpjQGkw4oLreJFGKRaMCVbMkCRdXi93G` | The program, through the Authority PDA                                                                   |
+| Team burners (the agent's is one)      | `9v2ZmruntFtM4HmUFNq3Nn3rpXhV3uh8FmyRWafVbcHN` | The team; excluded from every metric                                                                     |
+|                                        | `7Da24CpktL9Cp4st1iQ3U4ZKHgsRYXXEJx5oGbgFWP1Z` |                                                                                                          |
+
+The wallets file also lists three `spike` wallets from the Tier 0 tests; they sign nothing in
+production.
+
 ## Sponsored transactions
 
 A player's wallet never needs SOL. The client builds a transaction with the sponsor as fee payer,
@@ -471,7 +493,7 @@ R12), which ends at the submission deadline of 2026-12-08, 21:00 UTC; the team s
 | ------------------------------- | ---------- | ------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
 | Tiers 0 and 1: foundation, core | Done       | The SDK's math and quote engine, the sponsor validator, the `horagon` program, keeper, indexer, API v1, web app     | Deployed on devnet; the first counted NBA night is ET 2026-11-27         |
 | Settlement and disclosure       | 2026-11-30 | Auto-propose with a second-source check (R6), fan versus agent volume (R2b), My Game-day (R7)                       | A live night resolves through the dispute window                         |
-| Practice, ops and security      | 2026-12-02 | Practice replay loop (R8), salted market ids, sponsor reserve and alerts, CSP, upgrade authority to a cold key (R9) | Each item shipped or cut by 2026-12-02                                   |
+| Practice, ops and security      | 2026-12-02 | Practice replay loop (R8), random market ids, sponsor reserve and alerts, CSP, upgrade authority to a cold key (R9) | Each item shipped or cut by 2026-12-02                                   |
 | Study, submission               | 2026-12-08 | Mechanism study and calibration from chain (R10), the submission package and a README rewrite (R11)                 | Submitted by 2026-12-08, 15:00 UTC; markets keep running through judging |
 
 Cut on 2026-11-26 (decision 6): Night Rank, Season, badges, Crews, the fan-facing Telegram bot,

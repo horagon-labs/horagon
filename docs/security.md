@@ -47,6 +47,8 @@ reachable with it.
 | --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Sponsor farming       | Allow list per instruction; 30 tx/h per wallet and per IP hash; daily SOL cap; every user signature checked locally before any RPC call                                                                                                                                                                                                                                                        |
 | Sponsor rent farming  | ATA rent counted as spend at creation; 26 new ATAs a day per wallet, 78 per IP hash; none for a wallet that closed one away outside a claim                                                                                                                                                                                                                                                    |
+| Sponsor budget drain  | The last `SPONSOR_RESERVE_SOL` (default 0.5) of the daily cap is spent only for wallets with a sponsored trade that landed, so fresh wallets cannot turn sponsored trades off for everyone; the API logs 50% and 80% of the cap once a UTC day and the keeper pages them; the keeper pages a sponsor under 1 SOL; `/api/v1/health` shows the sponsor's lamports                                |
+| Market id squatting   | pm-AMM's `initialize_market` is open to any signer, so an id anyone can compute lets them create the market PDA first. A new market's id is 8 random bytes the keeper stores in `market_id_reservations` before it sends the create; a restart reuses it, and an id whose PDA someone else took is replaced by a fresh one (page `market-id-taken`)                                            |
 | Malicious API input   | zod on every input, unknown fields refused, 64 KB body limit (4 KB for `POST /api/v1/tx/submit`), problem+json errors without RPC URLs or stacks                                                                                                                                                                                                                                               |
 | Wrong result          | Two-step resolution (propose, a challenge window, finalize). The attestor compares a Final with balldontlie before it proposes: a disagreement holds it and pages a guardian; a proposal no second source checked (no key, or no answer in 10 min) pages a guardian with a box-score link; a disagreement seen inside the window pages a challenge. After a challenge only a guardian proposes |
 | Feed failure          | No proposal unless ESPN still shows Final at the draft's score with periods that add up; a feed silent 2 min in Q4/OT, or from S + 1h40m (80 min before `end_ts`), alerts the guardian; 10 min in Q4/OT halts the market                                                                                                                                                                       |
@@ -66,6 +68,16 @@ it still exists, and alerts `ata-close:<wallet>` when one closed to an address o
 sponsor (or to one it cannot trace), unless pm-AMM closed it inside a `claim_winnings`; the API
 then opens no more accounts for that wallet. A first trade on a market costs the sponsor the
 fee plus two ATAs (YES and NO), about 0.003 SOL on devnet (Tier 0, S3a).
+
+## Upgrade authority
+
+The upgrade authority of `horagon` can replace the program, and with it every rule above. At
+deploy it is the admin key (`deployer.json`), a hot key on the operator's machine. Runbook
+procedure M moves it to a cold key that stays offline; `node ops/check-upgrade-authority.mjs`
+reads the current one from chain. `Config.admin` stays the deployer: the program checks the
+stored admin, never the upgrade authority, so pausing creation, replacing the attestor and
+withdrawing the treasury keep working, and a leaked admin key can no longer change the code.
+Until the operator signs procedure M, the deployer key remains the upgrade authority.
 
 ## GitHub Actions
 

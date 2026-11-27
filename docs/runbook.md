@@ -70,11 +70,13 @@ the alert table; the key itself is in the keeper's `alert` log line (the last co
 | Raw ESPN archive                           | The VPS, `~/horagon/apps/keeper/data/archive/<ET date>.ndjson`; gzipped after 2 days, deleted after 30                                                                                                                                                                                                                                                         |
 | Units                                      | The VPS, `~/.config/systemd/user/`: `horagon-keeper.service`, `horagon-watchdog.service`, `horagon-watchdog.timer`, `horagon-agent.service` (copied from `ops/systemd` by every deploy)                                                                                                                                                                        |
 | Admin and guardian keys                    | Your machine, `.keys/deployer.json` and `.keys/guardian.json`                                                                                                                                                                                                                                                                                                  |
+| Upgrade authority                          | `.keys/deployer.json` until procedure M moves it to a cold key that stays offline with the operator; `node ops/check-upgrade-authority.mjs` prints the current one                                                                                                                                                                                             |
 | Web app and API v1                         | Vercel; the sponsor key is its `SPONSOR_SECRET_KEY`                                                                                                                                                                                                                                                                                                            |
 | Database                                   | Supabase Postgres (`DATABASE_URL`)                                                                                                                                                                                                                                                                                                                             |
 | `keeper_heartbeats` row `keeper`           | Written by the tick loop every round (5 s): `round`, `actions`, `feed`, the failure streaks `failing.tick` and `failing.index`, `index.rounds`, `index.busySecs` and `index.lastRoundAt` (L). `status` prints it; `/api/v1/health` reads its age and the index lag                                                                                             |
 | `keeper_heartbeats` row `agent`            | Written by the reference agent after every round (20 s), paused ones too: its round count, dry run or not, paused or not (and until when), the markets it read and the ones it decided, `cut` when the round ended early (`stale`, `stop` or `pause`; null when it decided them all), the swaps it sent, the markets it disabled; `stopped` after a clean stop |
 | `keeper_heartbeats` row `watchdog`         | The time of the watchdog's last `heartbeat` page (`pagedAt`), so a new watchdog run knows when it paged                                                                                                                                                                                                                                                        |
+| `keeper_heartbeats` row `sponsor-marks`    | The ops event ids of the sponsor budget marks the keeper has paged (`sponsor-cap:<mark>:<UTC date>`), so a restart does not page one twice                                                                                                                                                                                                                     |
 | `keeper_heartbeats` row `propose:<gameId>` | The `propose` attempts of one game: the evidence hash, the challenge round, and how each send ended. `status` prints the newest one                                                                                                                                                                                                                            |
 
 ## The day before (by 05:00 UTC)
@@ -618,6 +620,82 @@ When `index-rate-limited` pages (every RPC paused over 15 min):
    `~/horagon/.env.keeper` (the variables above; a key in a URL is fine, the keeper logs the host
    only), check it by name only, never print its value, and restart (G) outside the window G
    names. A new RPC that fails its cluster check is left out with `rpc-index-down:<variable>`.
+
+### M. Move the upgrade authority to a cold key
+
+Today `.keys/deployer.json` is three things at once: the Anchor wallet, the `Config.admin` of the
+`horagon` program, and the program's upgrade authority. Whoever holds the upgrade authority can
+replace the program's code, and with it every rule that guards the markets and the treasury. This
+procedure moves only the upgrade authority to a key that never touches a networked machine. Nothing
+else changes: markets, the keeper, the API and every `horagon-ops` command keep working.
+
+Run it in the day, outside a game window (G). Nothing in it is urgent, and nothing can be undone
+without the cold key.
+
+1. Read the authority today (read-only, two `getAccountInfo` calls, no key):
+
+   ```bash
+   node ops/check-upgrade-authority.mjs --rpc https://api.devnet.solana.com
+   ```
+
+   It prints the program, its ProgramData address, the slot of the last deploy and the upgrade
+   authority. Expect the deployer's public key.
+
+2. Make the cold key, by the operator only, on a machine that is offline and stays offline. Either
+   a hardware wallet (its public key from the device), or a new keypair protected by a BIP39
+   passphrase, with the seed phrase written on paper and the file never copied anywhere:
+
+   ```bash
+   solana-keygen new --outfile cold-upgrade.json
+   solana-keygen pubkey cold-upgrade.json
+   ```
+
+   Carry only the public key back, typed or read from the device, and compare it character by
+   character on both screens. Never put the cold key, its seed phrase or its file in the repo, in
+   `.keys/`, on the VPS or in chat.
+
+3. On the operator's networked machine, sign with the current authority (the deployer):
+
+   ```bash
+   solana program set-upgrade-authority HtDJ3vfx8vtFSmskm2Ks39kBMuDmFZH3H2B173BB9qHF \
+     --new-upgrade-authority <COLD_PUBKEY> \
+     --upgrade-authority .keys/deployer.json \
+     --skip-new-upgrade-authority-signer-check \
+     --url https://api.devnet.solana.com
+   ```
+
+   Recent Solana CLIs refuse to set a new upgrade authority that does not sign the same
+   transaction, so that a mistyped key cannot lock the program for good. A cold key cannot sign
+   online, so the check is skipped with `--skip-new-upgrade-authority-signer-check`: the
+   character-by-character comparison of step 2 replaces it. A wrong key here leaves the program
+   with an authority nobody holds: it can never be upgraded again (markets keep working). With a
+   hardware wallet the flag is not needed: pass `--new-upgrade-authority usb://ledger` and confirm
+   on the device, and the device signs as the new authority.
+
+4. Check it (the command of step 1, with the key it must show):
+
+   ```bash
+   node ops/check-upgrade-authority.mjs --rpc https://api.devnet.solana.com --expect <COLD_PUBKEY>
+   ```
+
+   Exit 0 and "matches --expect": done. Exit 1 prints the authority on chain instead. The same
+   field shows as "Authority" in `solana program show HtDJ3vfx8vtFSmskm2Ks39kBMuDmFZH3H2B173BB9qHF
+   --url https://api.devnet.solana.com`. The script decodes the ProgramData account itself: a u32
+   tag 3, the u64 slot of the last deploy, then an optional 32-byte authority.
+
+5. Leave `Config.admin` as it is (the deployer). The program sets it once, in
+   `initialize_config`, to the upgrade authority of that moment, and checks the stored key from
+   then on (`has_one = admin`), never the upgrade authority: moving the upgrade authority does not
+   move it, and `update_config` has no field that could. It must stay a key the operator can sign
+   with in minutes: it pauses market creation (`horagon-ops pause`), replaces a leaked attestor and
+   withdraws the treasury. A leaked admin key can do those things, but it cannot change the program.
+
+To upgrade the program later: write the new build to a buffer from the networked machine
+(`solana program write-buffer target/deploy/horagon.so`), hand the buffer to the cold key
+(`solana program set-buffer-authority <BUFFER> --new-buffer-authority <COLD_PUBKEY>`), then sign
+the upgrade with the cold key (a hardware wallet, or the offline machine with the CLI's offline
+signing; check `solana program --help` of the installed CLI for its flags). The freeze of
+2026-12-07 18:00 UTC is the last production deploy; after it there is no planned upgrade.
 
 ## Alerts
 

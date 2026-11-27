@@ -194,6 +194,8 @@ const NOT_ALERT_WORDS = new Set([
   'unchecked',
   'balldontlie',
   'second-source',
+  // the keeper_heartbeats row of the sponsor budget marks it has paged
+  'sponsor-marks',
   // other words
   'devnet',
   'horagon',
