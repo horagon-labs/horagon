@@ -15,13 +15,11 @@ const page = (initial: InitialBoard) =>
   )
 
 describe('the first frame of / (R5)', () => {
-  it('says what Horagon is and the three steps, word for word', () => {
-    expect(HERO_LINE).toBe(
-      'Call NBA games live. Prices move with every run. Open until the final buzzer.',
-    )
-    expect(HERO_SUB).toBe('Play money on Solana devnet.')
+  it('says what Horagon is and the three steps, word for word (first-screen C1, C3, C4)', () => {
+    expect(HERO_LINE).toBe('Call the winner while the NBA game is on. Open until the final buzzer.')
+    expect(HERO_SUB).toBe('Play money on Solana devnet. Free, no sign-up.')
     expect(HERO_STEPS).toEqual([
-      "Pick tonight's game.",
+      'Pick a game.',
       'Back a team: each share pays 1 mUSDC if it wins.',
       'Watch the price move with the game; claim after the result.',
     ])
@@ -52,7 +50,7 @@ describe('the first frame of / (R5)', () => {
     expect(html).toMatch(/<div class="[^"]*lg:order-first[^"]*"><div role="listbox"/)
     expect(html).not.toMatch(/\border-[12]\b/)
     expect(html).toMatch(/<details[^>]*data-follow[^>]*><summary[^>]*>☆ Follow teams/)
-    expect(html).toContain('>Tonight · Tue Nov 24</h2>')
+    expect(html).toContain('>Tonight · Tue Nov 24 · 5 games</h2>')
   })
 
   it('says when the next games are on a night without any', () => {
