@@ -5,7 +5,8 @@
 // While no market is open (S1 rest, S2 later, S5 after), the story card is the board's idle face,
 // in the dial's slot, and its foot holds the night's other games (A4), the Practice line (R8) and
 // the sign-off. Once a market is open (S3, S4) the Night dial keeps the slot, and the compact story
-// and the Practice line follow the board. Last, one static line discloses the reference agent.
+// and the Practice line follow the board; the board gets both, so a market opening under its poll
+// swaps them with no reload. Last, one static line discloses the reference agent.
 import type { Metadata } from 'next'
 import { connection } from 'next/server'
 import { AgentNote } from '../components/chrono/agent-line'
@@ -81,22 +82,27 @@ export default async function TonightPage() {
         record={record}
         proofMarket={story?.game.market ?? night?.rows[0]?.market ?? null}
       />
-      <TonightBoard initial={initial} idleFace={face} idleFoot={foot} />
-      {!face && (
-        // S3/S4 (or no night to tell): "How it works" under the board at 375, the compact story,
-        // then the Practice line.
-        <>
-          <HowItWorks className="mt-4 sm:hidden" />
-          {story ? (
-            <div className="mt-8">
-              <StoryCard story={story} now={initial.now} variant="compact" rows={rows} />
-            </div>
-          ) : (
-            night && <LastNightStrip night={night} now={initial.now} />
-          )}
-          <PracticeStrip strip={strip} className="mt-6" />
-        </>
-      )}
+      {/* The open foot follows the board whenever no idle face shows: S3/S4 (or no night to
+          tell) from the first frame, and S1/S2 once the poll sees the first market open (G4).
+          "How it works" under the board at 375, the compact story, then the Practice line. */}
+      <TonightBoard
+        initial={initial}
+        idleFace={face}
+        idleFoot={foot}
+        openFoot={
+          <>
+            <HowItWorks className="mt-4 sm:hidden" />
+            {story ? (
+              <div className="mt-8">
+                <StoryCard story={story} now={initial.now} variant="compact" rows={rows} />
+              </div>
+            ) : (
+              night && <LastNightStrip night={night} now={initial.now} />
+            )}
+            <PracticeStrip strip={strip} className="mt-6" />
+          </>
+        }
+      />
       <AgentNote />
     </>
   )

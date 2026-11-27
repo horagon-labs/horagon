@@ -9,7 +9,9 @@
 // "First market opens in 14 h 44 min", then how a market opens; the calendar button sits under
 // the list (C23). While no market is open, an idle face (the story card, W5) takes the dial's
 // slot: first below lg, the list after it and the idle foot after the list; from lg the face and
-// its foot share the left column and the list runs down the right one.
+// its foot share the left column and the list runs down the right one. When the first market
+// opens under the poll, the Night dial, the count line and the open foot (the compact story)
+// take over with no reload (G4).
 import type { Game, PositionsResponse } from '@horagon/sdk'
 import type { ReactNode } from 'react'
 import {
@@ -47,6 +49,11 @@ export interface BoardViewProps {
   idleFace?: ReactNode
   /** What follows the idle face: under the list below lg, under the face from lg. */
   idleFoot?: ReactNode
+  /**
+   * What follows the board once a market is open (S3/S4): the compact story and the Practice
+   * line. Given in every state, so a market opening under the poll brings it with the dial (G4).
+   */
+  openFoot?: ReactNode
 }
 
 /** C18, word for word. */
@@ -102,7 +109,7 @@ export function BoardView(p: BoardViewProps) {
         {model.firstOpen}
       </p>
     ) : null
-  return (
+  const board = (
     <div
       className={
         idle
@@ -255,5 +262,14 @@ export function BoardView(p: BoardViewProps) {
         </div>
       )}
     </div>
+  )
+  // Once a market is open the compact story follows the board, as the server lays out S3/S4;
+  // when the first one opens under the poll it arrives with the dial, no reload (G4). One shape
+  // in every state, so the swap keeps the board's own nodes.
+  return (
+    <>
+      {board}
+      {!idle && p.openFoot != null && <div data-open-foot>{p.openFoot}</div>}
+    </>
   )
 }

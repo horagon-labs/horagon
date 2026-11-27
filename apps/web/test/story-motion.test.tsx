@@ -1,0 +1,355 @@
+// First screen, slice 5 "Motion and live swap" (first-screen spec §4, G1, G4, §5 C17, §11 row 5):
+// the story's line draws once on first paint and stops, the low's ring and the readout fade in
+// after it, reduced motion shows the end frame at once, and a market opening under the poll swaps
+// the idle face for the Night dial, the count line and the compact story, with no reload. Motion
+// lives in globals.css classes only: no style attribute and no script (R9 CSP). Pure markup and
+// source: no API, no DB.
+import { readdirSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { type Game, type Night, type NightGame, NightSchema } from '@horagon/sdk'
+import { renderToStaticMarkup } from 'react-dom/server'
+import { describe, expect, it, vi } from 'vitest'
+import { BoardView, type BoardViewProps } from '../components/chrono/board-view'
+import { StoryCard } from '../components/story-card'
+import { at, game, market } from '../lib/chrono/fixtures'
+
+const WEB = join(import.meta.dirname, '..')
+const read = (...p: string[]) => readFileSync(join(WEB, ...p), 'utf8')
+
+const nightFile = (name: string): Night =>
+  NightSchema.parse(
+    JSON.parse(
+      readFileSync(new URL(`../../../tests/fixtures/nights/${name}`, import.meta.url), 'utf8'),
+    ),
+  )
+const REAL = nightFile('2026-11-25.night.json')
+const MOVED_NIGHT = nightFile('moved.night.json')
+const MOVED = MOVED_NIGHT.games[0] as NightGame
+const MIN_OKC = REAL.games.find((g) => g.id === 'nba-401909320') as NightGame
+const S2_NOW = at('2026-11-27T08:16:00Z')
+
+const LIVE = /\b(text|bg|stroke|fill|border)-live\b/
+
+type Attrs = Record<string, string>
+const attrs = (s: string): Attrs =>
+  Object.fromEntries([...s.matchAll(/([\w:-]+)="([^"]*)"/g)].map((m) => [m[1], m[2]]))
+const tags = (html: string, name: string): Attrs[] =>
+  [...html.matchAll(new RegExp(`<${name}\\b([^>]*)>`, 'g'))].map((m) => attrs(m[1] ?? ''))
+const svgs = (html: string) => [
+  ...html.matchAll(/<svg viewBox="0 0 (?:340|600) \d+"[\s\S]*?<\/svg>/g),
+]
+const masks = (svg: string) =>
+  [...svg.matchAll(/<mask\b([^>]*)>([\s\S]*?)<\/mask>/g)].map((m) => ({
+    mask: attrs(m[1] ?? ''),
+    paths: tags(m[2] ?? '', 'path'),
+  }))
+
+/** One CSS rule's body by its exact selector (top level, no nesting). */
+const rule = (css: string, selector: string) => {
+  const at_ = css.indexOf(`${selector} {`)
+  if (at_ < 0) return null
+  return css.slice(css.indexOf('{', at_) + 1, css.indexOf('}', at_))
+}
+const keyframes = (css: string, name: string) =>
+  css.match(new RegExp(`@keyframes ${name} \\{([\\s\\S]*?)\\n\\}`))?.[1] ?? null
+
+describe('the story draws once in CSS, the end frame as its base (§4, G1)', () => {
+  const css = read('app', 'globals.css')
+
+  it('draws the line with stroke-dashoffset 1 → 0 on pathLength 1, 2.4 s ease-out, once', () => {
+    const k = keyframes(css, 'story-draw')
+    expect(k).not.toBeNull()
+    expect(k).toMatch(/from\s*\{\s*stroke-dashoffset:\s*1;?\s*\}/)
+    expect(k).toMatch(/to\s*\{\s*stroke-dashoffset:\s*0;?\s*\}/)
+    const draw = rule(css, '.story-draw')
+    expect(draw).not.toBeNull()
+    // The base style is the end frame: the whole line, so no animation shows it all.
+    expect(draw).toMatch(/stroke-dasharray:\s*1 1;/)
+    expect(draw).toMatch(/stroke-dashoffset:\s*0;/)
+    expect(draw).toMatch(/animation:\s*story-draw 2\.4s ease-out both;/)
+    expect(draw).not.toContain('infinite')
+  })
+
+  it('fades the low ring and the readout in over 0.3 s once the line is drawn', () => {
+    const k = keyframes(css, 'story-at-low')
+    expect(k).toMatch(/from\s*\{\s*opacity:\s*0;?\s*\}/)
+    const low = rule(css, '.story-at-low')
+    expect(low).not.toBeNull()
+    expect(low).toMatch(/animation:\s*story-at-low 0\.3s ease-out 2\.4s both;/)
+    // Never hidden in its base style: with no animation it shows.
+    expect(low).not.toMatch(/opacity:\s*0/)
+    expect(low).not.toContain('infinite')
+  })
+
+  it('leaves reduced motion to the one block above: animation none, end frame shown', () => {
+    const block = css.match(/@media \(prefers-reduced-motion: reduce\) \{([\s\S]*?)\n\}/)?.[1]
+    expect(block).toMatch(/\*:not\(\.keep-motion\)\s*\{\s*animation: none;/)
+    expect(css).toMatch(
+      /html\[data-motion="reduced"\] \*:not\(\.keep-motion\)\s*\{\s*animation: none;/,
+    )
+    // Unlayered and after the theme, so the draw beats no utility and the block beats the draw.
+    expect(css.indexOf('.story-draw {')).toBeGreaterThan(
+      css.indexOf('@media (prefers-reduced-motion'),
+    )
+    // Decoration, not progress: no story part opts out of reduced motion.
+    const story = read('components', 'story-card.tsx')
+    expect(story).not.toContain('keep-motion')
+  })
+})
+
+describe('the full card wires the draw with classes only (§4, R9 CSP)', () => {
+  const html = renderToStaticMarkup(
+    <StoryCard story={{ night: REAL, game: MIN_OKC }} now={S2_NOW} />,
+  )
+
+  it('draws each tape through a mask whose path is the model line on pathLength 1', () => {
+    const both = svgs(html)
+    expect(both).toHaveLength(2)
+    const ids = new Set<string>()
+    for (const [svg] of both) {
+      const model = tags(svg, 'path').find((p) => 'data-tape-model' in p)
+      expect(model).toBeDefined()
+      // The visible line keeps its dashes; the mask draws it.
+      expect(model?.['stroke-dasharray']).toBe('4 3')
+      const ref = model?.mask?.match(/^url\(#([\w-]+)\)$/)?.[1]
+      expect(ref).toBeDefined()
+      const ms = masks(svg)
+      const m = ms.find((x) => x.mask.id === ref)
+      expect(m).toBeDefined()
+      // A flat line has a zero-height box: the mask region is the svg's own, not the line's.
+      expect(m?.mask.maskUnits).toBe('userSpaceOnUse')
+      const [draw] = m?.paths ?? []
+      expect(draw?.d).toBe(model?.d)
+      expect(draw?.pathLength).toBe('1')
+      expect(draw?.class).toBe('story-draw')
+      expect(draw?.stroke).toBe('white')
+      ids.add(ref ?? '')
+    }
+    // Two svgs on one page: every mask id is its own.
+    expect(ids.size).toBe(2)
+    expect(new Set(tags(html, 'mask').map((m) => m.id)).size).toBe(tags(html, 'mask').length)
+  })
+
+  it('fades the ring and the low % in after the draw; the open, final and quarters stay still', () => {
+    const groups = [...html.matchAll(/<g class="story-at-low"[^>]*>([\s\S]*?)<\/g>/g)]
+    expect(groups).toHaveLength(2)
+    for (const [, g] of groups) {
+      expect(g).toContain('data-tape-low')
+      expect(g).toMatch(/>7%<\/text>/)
+      expect(g).not.toContain('opened')
+      expect(g).not.toContain('Final')
+    }
+    expect(html).toMatch(/class="[^"]*hidden[^"]*sm:flex[^"]*\bstory-at-low\b[^"]*" data-readout/)
+    expect(html.match(/story-at-low/g)).toHaveLength(3)
+  })
+
+  it('keeps the card free of style attributes, scripts and Live blue', () => {
+    expect(html).not.toContain('style=')
+    expect(html).not.toContain('<script')
+    expect(html).not.toMatch(LIVE)
+  })
+
+  it('draws the price line too on a moved night, each line through its own mask', () => {
+    const moved = renderToStaticMarkup(
+      <StoryCard story={{ night: MOVED_NIGHT, game: MOVED }} now={S2_NOW} />,
+    )
+    for (const [svg] of svgs(moved)) {
+      const price = tags(svg, 'path').find((p) => 'data-tape-price' in p)
+      const ref = price?.mask?.match(/^url\(#([\w-]+)\)$/)?.[1]
+      const m = masks(svg).find((x) => x.mask.id === ref)
+      expect(m?.paths[0]?.d).toBe(price?.d)
+      expect(m?.paths[0]?.class).toBe('story-draw')
+      expect(masks(svg)).toHaveLength(2)
+    }
+    expect(new Set(tags(moved, 'mask').map((m) => m.id)).size).toBe(4)
+    expect(moved).not.toContain('style=')
+    expect(moved.match(/story-at-low/g)).toHaveLength(3)
+  })
+
+  it('keeps the compact card still: no tape, nothing to draw or fade', () => {
+    const compact = renderToStaticMarkup(
+      <StoryCard story={{ night: REAL, game: MIN_OKC }} now={S2_NOW} variant="compact" />,
+    )
+    expect(compact).not.toContain('story-draw')
+    expect(compact).not.toContain('story-at-low')
+  })
+
+  it('ships no motion code: the classes live in no client module', () => {
+    const files = (dir: string): string[] =>
+      readdirSync(join(WEB, dir), { recursive: true, encoding: 'utf8' })
+        .filter((f) => /\.(ts|tsx)$/.test(f))
+        .map((f) => join(dir, f))
+    for (const f of [...files('components'), ...files('lib'), ...files('app')]) {
+      const src = read(f)
+      if (!/^['"]use client['"]/m.test(src)) continue
+      expect(src, f).not.toMatch(/story-draw|story-at-low/)
+    }
+    const story = read('components', 'story-card.tsx')
+    expect(story).not.toMatch(/^['"]use client['"]/m)
+    expect(story).not.toMatch(/useEffect|from 'motion/)
+  })
+})
+
+describe('a market opening under the poll swaps the idle face, no reload (G4, C17)', () => {
+  const noop = () => {}
+  const OK = { stale: false, error: undefined }
+  const sched = (id: string, away: string, home: string, tip: string, p: number): Game =>
+    game({
+      id,
+      away,
+      home,
+      status: 'scheduled',
+      homeScore: 0,
+      awayScore: 0,
+      period: 0,
+      clockSecs: null,
+      scheduledTipoff: tip,
+      modelProb: p,
+      markets: [],
+    })
+  const friday = () => [
+    sched('nba-401909326', 'MIA', 'NYK', '2026-11-28T00:00:00.000Z', 0.788),
+    sched('nba-401909327', 'MIL', 'DET', '2026-11-28T00:30:00.000Z', 0.917),
+  ]
+  // 7:00 PM ET minus 59 min: NYK's market has just opened at the model's chance.
+  const OPEN_NOW = at('2026-11-27T23:01:00Z')
+  const opened = (n: number) =>
+    friday().map((g, i) =>
+      i < n
+        ? {
+            ...g,
+            markets: [
+              market({
+                pubkey: `Mkt${i}`,
+                initialPriceBps: Math.round((g.modelProb ?? 0.5) * 10_000),
+                price: g.modelProb,
+                priceTs: OPEN_NOW - 5,
+                endTs: at(i === 0 ? '2026-11-28T05:32:00Z' : '2026-11-28T06:02:00Z'),
+              }),
+            ],
+          }
+        : g,
+    )
+  const board = (over: Partial<BoardViewProps> = {}) =>
+    renderToStaticMarkup(
+      <BoardView
+        games={friday()}
+        portfolio={undefined}
+        now={at('2026-11-27T22:58:00Z')}
+        health={OK}
+        follows={[]}
+        onToggleFollow={noop}
+        selectedId={null}
+        onSelect={noop}
+        hoverId={null}
+        onHover={noop}
+        idleFace={<p data-test-face>FACE</p>}
+        idleFoot={<p data-test-foot>FOOT</p>}
+        openFoot={<p data-test-open>COMPACT</p>}
+        {...over}
+      />,
+    )
+
+  it('S2: the face and its foot show; the compact story waits', () => {
+    const html = board()
+    expect(html).toContain('data-test-face')
+    expect(html).toContain('data-test-foot')
+    expect(html).not.toContain('data-test-open')
+    expect(html).toContain('First market opens in 2 min')
+  })
+
+  it('the next poll with NYK open: the Night dial, "● 1 market open now", then the compact story', () => {
+    const html = board({ games: opened(1), now: OPEN_NOW })
+    expect(html).not.toContain('data-test-face')
+    expect(html).not.toContain('data-test-foot')
+    expect(html).toContain('role="listbox"')
+    expect(html).toMatch(
+      /<p [^>]*data-count[^>]*><span aria-hidden="true" class="text-live">●<\/span> 1 market open now · <a href="#first-open"[^>]*>Pick a game<\/a><\/p>/,
+    )
+    expect(html).toMatch(/<a [^>]*id="first-open"[^>]*href="\/game\/nba-401909326"/)
+    // The compact story follows the board (dial and list), as the server lays out S3.
+    const open = html.indexOf('data-test-open')
+    expect(open).toBeGreaterThan(html.indexOf('role="listbox"'))
+    expect(open).toBeGreaterThan(html.indexOf('data-board-list'))
+    expect(html).toMatch(/<div data-open-foot="true"><p data-test-open="true">COMPACT<\/p><\/div>$/)
+  })
+
+  it('says "2 markets open now" for two', () => {
+    expect(board({ games: opened(2), now: OPEN_NOW })).toContain(' 2 markets open now · ')
+  })
+
+  it('S3 from the server: no face given, the compact story follows the board at once', () => {
+    const html = board({
+      games: opened(1),
+      now: OPEN_NOW,
+      idleFace: undefined,
+      idleFoot: undefined,
+    })
+    expect(html).toContain('data-test-open')
+    expect(html).toContain('role="listbox"')
+  })
+
+  it('without an open foot the board markup is as before', () => {
+    const without = board({ games: opened(1), now: OPEN_NOW, openFoot: undefined })
+    expect(without).not.toContain('data-open-foot')
+    expect(without.startsWith('<div class="flex flex-col gap-4 lg:grid')).toBe(true)
+  })
+})
+
+// `/games` answers `s-maxage=1, stale-while-revalidate=5` for the edge, and a browser honours the
+// stale-while-revalidate too: by default each 3 s tick showed the answer fetched in the background
+// one tick earlier, so a market opening reached the board a poll late (measured 3.4-6.0 s after
+// the market's row was written, on next start). The board's poll asks the server first.
+describe("the board's poll shows the server's newest answer, within one poll (G4)", () => {
+  it('asks the server before the browser copy: cache "no-cache" on the same /games request', async () => {
+    const seen: Array<[unknown, RequestInit | undefined]> = []
+    // The client binds fetch when it is built: stub first, then load the module afresh.
+    vi.stubGlobal('fetch', async (input: unknown, init?: RequestInit) => {
+      seen.push([input, init])
+      return new Response(JSON.stringify({ games: [] }), {
+        headers: { 'content-type': 'application/json' },
+      })
+    })
+    vi.resetModules()
+    const { api, boardApi } = await import('../lib/api')
+    try {
+      await expect(boardApi.games.list()).resolves.toEqual([])
+      await expect(api.games.list()).resolves.toEqual([])
+    } finally {
+      vi.unstubAllGlobals()
+    }
+    expect(seen).toHaveLength(2)
+    const [board, other] = seen
+    // One origin and path for both: the board's client reaches nothing new (R9 connect-src).
+    expect(board?.[0]).toBe(other?.[0])
+    expect(String(board?.[0])).toMatch(/\/games$/)
+    expect(board?.[1]?.cache).toBe('no-cache')
+    expect(board?.[1]?.method).toBe('GET')
+    // The other pages keep fetch's own default.
+    expect(other?.[1]).not.toHaveProperty('cache')
+  })
+
+  it('polls the board through that client; the other pages keep theirs', () => {
+    const api = read('lib', 'api.ts')
+    expect(api).toMatch(/export const boardApi = new HoragonClient\(\{[^}]*cache: 'no-cache'/s)
+    const board = read('components', 'tonight-board.tsx')
+    expect(board).toContain("usePoll('games', () => boardApi.games.list())")
+    expect(board).not.toMatch(/\bapi\.games\.list\(\)/)
+  })
+})
+
+describe('/ hands the board both faces, so the swap needs no reload (§3, §7)', () => {
+  const page = read('app', 'page.tsx')
+
+  it('passes the compact story and the Practice line as the open foot', () => {
+    const board = page.indexOf('<TonightBoard')
+    const open = page.indexOf('openFoot={', board)
+    expect(open).toBeGreaterThan(board)
+    const compact = page.indexOf('variant="compact"', open)
+    expect(compact).toBeGreaterThan(open)
+    expect(page.indexOf('<PracticeStrip', compact)).toBeGreaterThan(compact)
+    // No second, server-only copy of the S3/S4 layout outside the board.
+    expect(page).not.toContain('{!face &&')
+    expect(read('components', 'tonight-board.tsx')).toContain('openFoot={openFoot}')
+  })
+})

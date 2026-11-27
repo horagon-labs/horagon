@@ -116,6 +116,33 @@ html[data-motion="reduced"] *:not(.keep-motion) {
   transition: none;
 }
 
+/* The story's tape (first-screen spec §4, G1): the timekeeper writes the record once, then stops.
+   Each line draws on first paint (a mask copy of it on pathLength 1, so the dashed model line
+   keeps its dashes), 2.4 s ease-out; then the low's ring and the readout fade in over 0.3 s, and
+   the card stays still. No loop. The end frame is the base style, so reduced motion (the block
+   above) shows it at once. Classes only: no style attribute, no script (R9 CSP). */
+.story-draw {
+  stroke-dasharray: 1 1;
+  stroke-dashoffset: 0;
+  animation: story-draw 2.4s ease-out both;
+}
+.story-at-low {
+  animation: story-at-low 0.3s ease-out 2.4s both;
+}
+@keyframes story-draw {
+  from {
+    stroke-dashoffset: 1;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+@keyframes story-at-low {
+  from {
+    opacity: 0;
+  }
+}
+
 /* Clutch time (culture A2, R8): with the game close at the end and the price in doubt, the
    dial's ticks and the screen's rules recede to rule-faint, 1.2 s in and 0.6 s out. The face
    stays white; the numbers, the needle, the ◆, the buttons, the crown sheet and the banner are

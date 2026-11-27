@@ -2,9 +2,11 @@
 // the newest final night takes the board's dial slot: the eyebrow, the plate and what happened,
 // the model's line on a tape with its low ringed, a readout resting on the low (from sm), and the
 // result's proof on /verify. `compact` keeps the eyebrow, line 1 and the proof (S3/S4, under the
-// Night dial). Static in this slice: the line does not draw yet. A server component with plain
-// links only (next/link from a server component added a client chunk to /, slice 2), no style
-// attribute (R9 CSP) and no Live blue: nothing here is an open market.
+// Night dial). The line draws once on first paint, then the low's ring and the readout fade in
+// (globals.css `.story-draw`, `.story-at-low`; the end frame under reduced motion). A server
+// component with plain links only (next/link from a server component added a client chunk to /,
+// slice 2), no style attribute and no script (R9 CSP) and no Live blue: nothing here is an open
+// market.
 import type { Night, NightGame } from '@horagon/sdk'
 import type { PracticeStripLine } from '../lib/chrono/practice'
 import { type LastNightRow, lastNightHeader, nightDayLabel } from '../lib/server/last-night'
@@ -50,17 +52,41 @@ const HALO = { paintOrder: 'stroke', strokeWidth: 3, strokeLinejoin: 'round' } a
 /** A label's baseline above a point, or under it when the top edge is too close. */
 const above = (y: number, top = 10) => (y - 6 >= top ? y - 6 : y + 13)
 
+/**
+ * The draw (spec §4, G1): a mask holding a copy of the line on pathLength 1, its dash offset run
+ * from 1 to 0 by `.story-draw` (globals.css). The visible line keeps its own dashes. The region
+ * is the svg's own: a flat line's box has no height, and a box-sized mask would hide it.
+ */
+function DrawMask({ id, d, box }: { id: string; d: string; box: typeof NARROW }) {
+  return (
+    <mask id={id} maskUnits="userSpaceOnUse" x={0} y={0} width={box.w} height={box.h}>
+      {/* A mask's white shows what it covers: 8 units cover the 1.5-2 px line. */}
+      <path
+        d={d}
+        pathLength={1}
+        fill="none"
+        stroke="white"
+        strokeWidth={8}
+        className="story-draw"
+      />
+    </mask>
+  )
+}
+
 function TapeSvg({
   tape,
   box,
   openedBelow,
   className,
+  id,
 }: {
   tape: Tape
   box: typeof NARROW
   /** The line climbs off the open: its label goes under the dot, clear of the line. */
   openedBelow: boolean
   className: string
+  /** Unique on the page: the two tapes' masks must not share an id. */
+  id: string
 }) {
   const { w, h, pad } = box
   const top = pad.top
@@ -82,6 +108,10 @@ function TapeSvg({
       className={`w-full overflow-visible ${className}`}
       data-tape
     >
+      <defs>
+        <DrawMask id={`${id}-model`} d={tape.model} box={box} />
+        {tape.price && <DrawMask id={`${id}-price`} d={tape.price} box={box} />}
+      </defs>
       <line x1={left} y1={bottom} x2={right} y2={bottom} className="stroke-rule-faint" />
       {tape.rules.map((x) => (
         <line key={x} x1={x} y1={top} x2={x} y2={bottom} className="stroke-rule-faint" />
@@ -105,6 +135,7 @@ function TapeSvg({
         strokeWidth={1.5}
         strokeDasharray="4 3"
         vectorEffect="non-scaling-stroke"
+        mask={`url(#${id}-model)`}
         className="stroke-ink"
         data-tape-model
       />
@@ -115,6 +146,7 @@ function TapeSvg({
           strokeWidth={2}
           strokeLinejoin="round"
           vectorEffect="non-scaling-stroke"
+          mask={`url(#${id}-price)`}
           className="stroke-ink"
           data-tape-price
         />
@@ -134,7 +166,8 @@ function TapeSvg({
         {tape.final.label}
       </text>
       {low && (
-        <>
+        // Once the line is drawn, the ring and its % fade in on the low and rest there (G1).
+        <g className="story-at-low">
           <circle
             cx={low.x}
             cy={low.y}
@@ -154,7 +187,7 @@ function TapeSvg({
           >
             {low.label}
           </text>
-        </>
+        </g>
       )}
     </svg>
   )
@@ -205,7 +238,8 @@ export function StoryCard({ story, now, variant = 'full', rows }: StoryCardProps
         <span>{s.line1}</span>
       </p>
       {full && s.readout && low && (
-        <div className="hidden items-center gap-4 pt-1 sm:flex" data-readout>
+        // Fades in with the low's ring, once the line is drawn (G1, spec §4).
+        <div className="hidden items-center gap-4 pt-1 sm:flex story-at-low" data-readout>
           {/* MiniDial is 48 px; its 96 px use here sizes the svg from the box. A model low gets
               the model's ink ▲; a price low the price's needle, ash once trading stopped, so
               each glyph keeps its one meaning and matches the legend (C11). */}
@@ -231,8 +265,20 @@ export function StoryCard({ story, now, variant = 'full', rows }: StoryCardProps
             <span>{narrow.caption}</span>
             <span>{narrow.legend.join('  ')}</span>
           </figcaption>
-          <TapeSvg tape={narrow} box={nbox} openedBelow={openedBelow} className="sm:hidden" />
-          <TapeSvg tape={wide} box={WIDE} openedBelow={openedBelow} className="hidden sm:block" />
+          <TapeSvg
+            tape={narrow}
+            box={nbox}
+            openedBelow={openedBelow}
+            className="sm:hidden"
+            id="story-tape-narrow"
+          />
+          <TapeSvg
+            tape={wide}
+            box={WIDE}
+            openedBelow={openedBelow}
+            className="hidden sm:block"
+            id="story-tape-wide"
+          />
         </figure>
       )}
       {full && s.line2 && (

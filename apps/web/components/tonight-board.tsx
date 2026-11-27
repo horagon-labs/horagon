@@ -5,7 +5,7 @@
 // answers, so the page never opens on "Setting the dial…" while the API is up. While no market is
 // open, the server's idle face (the story card) takes the dial's slot.
 import { type ReactNode, useEffect, useState } from 'react'
-import { api } from '../lib/api'
+import { boardApi } from '../lib/api'
 import { pollHealth } from '../lib/chrono/health'
 import { useNow } from '../lib/chrono/now'
 import { loadFollows, toggleFollow } from '../lib/follows'
@@ -24,18 +24,22 @@ const storage = () => {
 
 /**
  * `idleFace` and `idleFoot`: the server-rendered story card and what follows it (first-screen W5),
- * shown in the dial's slot until the first market opens.
+ * shown in the dial's slot until the first market opens. `openFoot`: the compact story and the
+ * Practice line, shown under the board once a market is open, so the poll swaps them in (G4).
  */
 export function TonightBoard({
   initial,
   idleFace,
   idleFoot,
+  openFoot,
 }: {
   initial: InitialBoard
   idleFace?: ReactNode
   idleFoot?: ReactNode
+  openFoot?: ReactNode
 }) {
-  const games = usePoll('games', () => api.games.list())
+  // Asks the server first each tick, so a market opening swaps the face within one poll (G4).
+  const games = usePoll('games', () => boardApi.games.list())
   const { address, portfolio } = useWallet()
   // 0 while hydrating (lib/chrono/now.ts): the server's clock, so both renders match.
   const now = useNow() || initial.now
@@ -66,6 +70,7 @@ export function TonightBoard({
       onHover={setHoverId}
       idleFace={idleFace}
       idleFoot={idleFoot}
+      openFoot={openFoot}
     />
   )
 }
