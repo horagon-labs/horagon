@@ -29,7 +29,7 @@ describe('ESPN scoreboard', () => {
     expect(games[2]?.clockSecs).toBeNull()
   })
 
-  it('reads 0 on the clock only when no time is left: under a second is 1, none read is null', () => {
+  it('reads 0 on the clock only at the ESPN end of a period: a live 0.0 is 1, none read is null', () => {
     type Status = { clock?: number; type: { name: string } }
     type Ev = { competitions: Array<{ status: Status }> }
     /** The live game's clockSecs with ESPN's clock (undefined: none) and status name. */
@@ -44,11 +44,14 @@ describe('ESPN scoreboard', () => {
     }
     expect(at(0.4)).toBe(1)
     expect(at(0.1)).toBe(1)
-    expect(at(0)).toBe(0)
+    // Free throws or a review at 0.0 are still in progress: a tie there goes to overtime.
+    expect(at(0)).toBe(1)
+    expect(at(0, 'STATUS_IN_PROGRESS')).toBe(1)
     expect(at(45.3)).toBe(45)
     expect(at(undefined)).toBeNull()
     // ESPN's end of a period is the horn, whatever the clock says.
     expect(at(0.1, 'STATUS_END_PERIOD')).toBe(0)
+    expect(at(0, 'STATUS_END_PERIOD')).toBe(0)
   })
 
   it('maps GS, NY, NO, SA, UTAH and WSH to NBA tricodes', () => {

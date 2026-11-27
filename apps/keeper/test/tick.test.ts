@@ -26,6 +26,7 @@ import { type AccountInfo, type Connection, Keypair, PublicKey } from '@solana/w
 import pino from 'pino'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { ProgramFailure, type SendSpec, type TxSender, UnresolvedAttempt } from '../src/executor'
+import { espnFeed } from '../src/feeds/espn'
 import type { Feed, FeedGame } from '../src/feeds/types'
 import { DEFAULT_SEEDS, DEFAULT_TIMINGS, type GameState } from '../src/planner'
 import {
@@ -696,6 +697,90 @@ describe('the horn (R8)', () => {
     }
     now += 5
     expect(types(await throttled.tick())).toEqual(['halt'])
+    expect(sends).toEqual(['create nba-401910007', 'halt nba-401910007 (horn)'])
+  })
+
+  it('reads ESPN free throws at 0.0 as time left: a tie goes to overtime with the market open', async () => {
+    // The real parser on the main keeper's 15 s feed: only ESPN's end of a period is the horn.
+    let espn: { name: string; clock: number; period: number; home: number[]; away: number[] }
+    const sum = (xs: number[]) => xs.reduce((a, b) => a + b, 0)
+    const body = () => ({
+      events: [
+        {
+          id: '401910007',
+          date: new Date(S * 1000).toISOString(),
+          competitions: [
+            {
+              status: {
+                clock: espn.clock,
+                period: espn.period,
+                type: { name: espn.name, state: 'in', completed: false },
+              },
+              competitors: [
+                ['home', 'CLE', espn.home],
+                ['away', 'MEM', espn.away],
+              ].map(([homeAway, abbreviation, ls]) => ({
+                homeAway,
+                score: String(sum(ls as number[])),
+                linescores: (ls as number[]).map((value) => ({ value })),
+                team: { abbreviation },
+              })),
+            },
+          ],
+        },
+      ],
+    })
+    const fetchImpl = (async () => Response.json(body())) as unknown as typeof fetch
+    const real = new Keeper({
+      ...deps,
+      feed: espnFeed({ fetchImpl, now: () => new Date(now * 1000) }),
+      feedEverySecs: 15,
+    })
+    expect(types(await real.tick())).toEqual(['create'])
+    now = S + 9_600
+    // A foul at the horn: CLE 100, MEM 102, Q4 at 0.0 while the free throws are shot, for 90 s.
+    espn = {
+      name: 'STATUS_IN_PROGRESS',
+      clock: 0,
+      period: 4,
+      home: [25, 25, 25, 25],
+      away: [26, 26, 25, 25],
+    }
+    for (let t = 0; t < 90; t += 5) {
+      expect(await real.tick()).toEqual([])
+      now += 5
+    }
+    // Both made: 102 all at 0.0, then ESPN's end of Q4, tied.
+    espn = { ...espn, home: [25, 25, 25, 27] }
+    for (let t = 0; t < 30; t += 5) {
+      expect(await real.tick()).toEqual([])
+      now += 5
+    }
+    espn = { ...espn, name: 'STATUS_END_PERIOD' }
+    for (let t = 0; t < 60; t += 5) {
+      expect(await real.tick()).toEqual([])
+      now += 5
+    }
+    // Overtime trades on the open market.
+    espn = { ...espn, name: 'STATUS_IN_PROGRESS', clock: 120, period: 5, home: [...espn.home, 4] }
+    espn = { ...espn, away: [...espn.away, 2] }
+    for (let t = 0; t < 30; t += 5) {
+      expect(await real.tick()).toEqual([])
+      now += 5
+    }
+    expect(sends).toEqual(['create nba-401910007'])
+    expect((await getGame(h.db, 'nba-401910007'))?.markets[0]?.status).toBe('open')
+    // ESPN's end of overtime is the horn: it halts at the second read that shows it.
+    espn = { ...espn, name: 'STATUS_END_PERIOD', clock: 0 }
+    const endAt = now
+    let acts = await real.tick()
+    while (acts.length === 0 && now - endAt < 60) {
+      now += 5
+      acts = await real.tick()
+    }
+    expect(types(acts)).toEqual(['halt'])
+    expect(now - endAt).toBeGreaterThanOrEqual(15)
+    expect(now - endAt).toBeLessThan(30)
     expect(sends).toEqual(['create nba-401910007', 'halt nba-401910007 (horn)'])
   })
 
