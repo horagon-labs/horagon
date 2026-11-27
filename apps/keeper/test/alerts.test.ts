@@ -43,6 +43,7 @@ describe('personAlertWindow', () => {
       'archive',
       'tick-failing',
       'index-failing',
+      'index-rate-limited',
       'evidence-mismatch:nba-1',
       'source-held:nba-1',
       'second-source-refused',

@@ -58,6 +58,16 @@ const EnvSchema = z.object({
   HORAGON_RPC_BACKUP_URL: z.url({ protocol: /^https?$/ }).optional(),
   /** Comma list of wss:// URLs, by position to the RPC URLs; an empty entry is derived. */
   RPC_WS_URLS: z.string().optional(),
+  /**
+   * The index reads' RPCs (indexer and ATA watch, reads only), tried in this order before
+   * HORAGON_RPC_URL. Checked by `indexRpcSpecs`, not here: a bad one is left out at start with a
+   * page, never a reason to stop the keeper.
+   */
+  HORAGON_INDEX_RPC_URL: z.preprocess(blank, z.string().optional()),
+  HORAGON_INDEX_RPC_URL_2: z.preprocess(blank, z.string().optional()),
+  HORAGON_INDEX_FALLBACK_RPC_URL: z.preprocess(blank, z.string().optional()),
+  /** Sent as the fallback's x-api-key header. Never logged. */
+  HORAGON_INDEX_FALLBACK_RPC_KEY: z.preprocess(blank, z.string().optional()),
   HORAGON_CLUSTER: z.enum(['devnet', 'localnet']).default('devnet'),
   DATABASE_URL: z.string().min(1),
   ATTESTOR_KEYPAIR: z.string().min(1).default('.keys/attestor.json'),
@@ -136,9 +146,69 @@ export interface RpcEndpoint {
   wsUrl?: string
 }
 
+/** One index RPC from the environment. Log its name and host only, never its URL or headers. */
+export interface IndexRpcSpec {
+  /** The variable it comes from. */
+  name: string
+  url: string
+  /** Sent with every request (the fallback's key). */
+  headers?: Record<string, string>
+  /** Why it cannot be used (not an https URL, a mainnet URL): left out at start, with a page. */
+  refused?: string
+}
+
+/** The index RPC variables, in the order the reads try them (HORAGON_RPC_URL comes last). */
+export const INDEX_RPC_VARS = [
+  'HORAGON_INDEX_RPC_URL',
+  'HORAGON_INDEX_RPC_URL_2',
+  'HORAGON_INDEX_FALLBACK_RPC_URL',
+] as const
+
+/**
+ * The index RPCs that are set, in order, the fallback with HORAGON_INDEX_FALLBACK_RPC_KEY as its
+ * x-api-key header. One that is not an https URL or names mainnet is kept with `refused`, so the
+ * start leaves it out with a page instead of failing. Nothing here quotes a URL.
+ */
+export function indexRpcSpecs(e: {
+  HORAGON_INDEX_RPC_URL?: string | undefined
+  HORAGON_INDEX_RPC_URL_2?: string | undefined
+  HORAGON_INDEX_FALLBACK_RPC_URL?: string | undefined
+  HORAGON_INDEX_FALLBACK_RPC_KEY?: string | undefined
+}): IndexRpcSpec[] {
+  const specs: IndexRpcSpec[] = []
+  for (const name of INDEX_RPC_VARS) {
+    const url = e[name]
+    if (!url) continue
+    const key =
+      name === 'HORAGON_INDEX_FALLBACK_RPC_URL' ? e.HORAGON_INDEX_FALLBACK_RPC_KEY : undefined
+    let refused: string | undefined
+    try {
+      if (new URL(url).protocol !== 'https:') refused = 'not an https URL'
+    } catch {
+      refused = 'not an https URL'
+    }
+    if (!refused) {
+      try {
+        assertNotMainnet(url)
+      } catch {
+        refused = 'a mainnet URL'
+      }
+    }
+    specs.push({
+      name,
+      url,
+      ...(key ? { headers: { 'x-api-key': key } } : {}),
+      ...(refused ? { refused } : {}),
+    })
+  }
+  return specs
+}
+
 export interface KeeperConfig {
   /** Primary first, then the backup. */
   rpcs: RpcEndpoint[]
+  /** The index RPCs that are set, in order; HORAGON_RPC_URL comes after them. */
+  indexRpcs: IndexRpcSpec[]
   cluster: Cluster
   databaseUrl: string
   attestor: Keypair
@@ -342,14 +412,88 @@ export function timeoutFetch(
 export function makeConnection(
   url: string,
   wsUrl?: string,
-  opts: { fetchImpl?: typeof fetch; timeoutMs?: number; onActivity?: () => void } = {},
+  opts: {
+    fetchImpl?: typeof fetch
+    timeoutMs?: number
+    onActivity?: () => void
+    /** Sent with every request (an RPC key in a header). */
+    httpHeaders?: Record<string, string>
+  } = {},
 ): Connection {
   return new Connection(url, {
     commitment: 'confirmed',
     disableRetryOnRateLimit: true,
     fetch: timeoutFetch(opts.timeoutMs ?? RPC_TIMEOUT_MS, opts.fetchImpl, opts.onActivity),
     ...(wsUrl ? { wsEndpoint: wsUrl } : {}),
+    ...(opts.httpHeaders ? { httpHeaders: opts.httpHeaders } : {}),
   })
+}
+
+/** The host of an RPC URL, the only part of it that is ever logged (the rest may hold a key). */
+export function rpcHost(url: string): string {
+  try {
+    return new URL(url).hostname
+  } catch {
+    return '(invalid URL)'
+  }
+}
+
+/** One endpoint of the index reads, verified: its variable name and host (never the URL). */
+export interface CheckedEndpoint<C> {
+  name: string
+  host: string
+  connection: () => C
+}
+
+/**
+ * The index reads' endpoints, in order: each index RPC that passes the cluster check, then
+ * `main` (HORAGON_RPC_URL, verified at start already). Every index RPC is checked at once, each
+ * like a backup (BACKUP_RPC_TRIES tries, 5 s then 10 s apart). One that is refused by its URL
+ * (`spec.refused`), names mainnet or another cluster by its genesis hash, or has not answered is
+ * left out until the keeper restarts, with a warning and `onDropped`; this never fails the start,
+ * and the reads still run on `main`. Logs name each endpoint by variable and host only.
+ */
+export async function indexEndpoints<C extends Pick<Connection, 'getGenesisHash'>>(opts: {
+  specs: readonly IndexRpcSpec[]
+  main: ReadonlyArray<CheckedEndpoint<C>>
+  cluster: Cluster
+  log: Logger
+  make: (spec: IndexRpcSpec) => C
+  sleep?: (ms: number) => Promise<void>
+  onDropped?: (name: string, host: string, reason: string) => Promise<void>
+}): Promise<Array<CheckedEndpoint<C>>> {
+  const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)))
+  const check = async (spec: IndexRpcSpec): Promise<CheckedEndpoint<C> | null> => {
+    const host = rpcHost(spec.url)
+    const drop = async (reason: string) => {
+      opts.log.warn({ indexRpc: spec.name, indexRpcHost: host, reason }, 'index RPC left out')
+      await opts.onDropped?.(spec.name, host, reason)
+      return null
+    }
+    if (spec.refused) return drop(spec.refused)
+    let conn: C
+    try {
+      conn = opts.make(spec)
+    } catch (err) {
+      return drop(`could not be opened (${errorSummary(err).message})`)
+    }
+    for (let attempt = 0; ; attempt++) {
+      try {
+        await assertCluster(conn, opts.cluster)
+        opts.log.info({ indexRpc: spec.name, indexRpcHost: host }, 'index RPC verified')
+        return { name: spec.name, host, connection: () => conn }
+      } catch (err) {
+        const error = errorSummary(err).message
+        if (isClusterRefusal(err)) return drop(`refused: ${error}`)
+        if (attempt + 1 >= BACKUP_RPC_TRIES) {
+          return drop(`did not answer the cluster check ${BACKUP_RPC_TRIES} times (${error})`)
+        }
+        await sleep(5_000 * 2 ** attempt)
+      }
+    }
+  }
+  const checked = await Promise.all(opts.specs.map(check))
+  return [...checked.filter((e): e is CheckedEndpoint<C> => e !== null), ...opts.main]
 }
 
 /** Issue paths and messages only: zod never puts the input value in its messages by default. */
@@ -399,6 +543,7 @@ export function loadConfig(
   const path = (p: string) => resolve(repoDir, p)
   return {
     rpcs,
+    indexRpcs: indexRpcSpecs(e),
     cluster: e.HORAGON_CLUSTER,
     databaseUrl: e.DATABASE_URL,
     attestor: loadKeypair(resolveKeyPath(e.ATTESTOR_KEYPAIR, repoDir)),
@@ -432,13 +577,14 @@ export function loadConfig(
 
 /**
  * JSON logs for journald; `destination` is for tests. `onActivity` runs on every log call that
- * is emitted (the stall guard's clock); the output itself is unchanged.
+ * is emitted, with the logger (or child) that made it (the stall guard's clock); the output
+ * itself is unchanged.
  */
 export function createLogger(
   level: string,
   service = 'keeper',
   destination?: DestinationStream,
-  onActivity?: () => void,
+  onActivity?: (logger: Logger) => void,
 ): Logger {
   const options = {
     level,
@@ -448,7 +594,7 @@ export function createLogger(
       ? {
           hooks: {
             logMethod(this: Logger, args: Parameters<LogFn>, method: LogFn) {
-              onActivity()
+              onActivity(this)
               method.apply(this, args)
             },
           },

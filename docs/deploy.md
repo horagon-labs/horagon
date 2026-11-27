@@ -93,6 +93,29 @@ Run the first night after the deploy that brings auto-propose with `KEEPER_AUTO_
 then `on`. Write the balldontlie key into `.env.keeper` on the VPS yourself, never in a chat, the
 repository or a command line.
 
+## Index reads (the keeper's variables)
+
+The indexer and the ATA watch only read the chain, on a loop of their own, and the public devnet
+endpoint can rate-limit those reads (`docs/runbook.md`, procedure L). They take an ordered list
+of RPCs, read from `~/horagon/.env.keeper` like the variables above, each with its own pace; a
+read that one fails (rate limit, auth, 5xx, timeout) goes to the next. The tick (halts,
+proposals, finalizes, sync) keeps `HORAGON_RPC_URL`. In the order they are tried:
+
+| Variable                         | Default | What it is                                                                                                                                   |
+| -------------------------------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `HORAGON_INDEX_RPC_URL`          | unset   | First choice: an https devnet RPC of a dedicated provider, its key in the URL if it takes one there                                          |
+| `HORAGON_INDEX_RPC_URL_2`        | unset   | Second choice: another provider's https devnet RPC, the same way                                                                             |
+| `HORAGON_INDEX_FALLBACK_RPC_URL` | unset   | Third choice: an https devnet RPC whose key goes in a header, not in the URL                                                                 |
+| `HORAGON_INDEX_FALLBACK_RPC_KEY` | unset   | The fallback's key, sent as its `x-api-key` header on every request. Ignored without `HORAGON_INDEX_FALLBACK_RPC_URL`                        |
+| (`HORAGON_RPC_URL`)              |         | Always last (then `HORAGON_RPC_BACKUP_URL` when it passed its check): with none of the above set, index reads go through it alone, as before |
+
+Unset or blank skips one. Each is cluster-checked at start (genesis hash); one that is not an
+https URL, names mainnet, is on another cluster or does not answer is left out with
+`rpc-index-down:<variable>`, never a reason to stop the keeper. Only the variable name and the
+host are ever logged or paged: never the path, the query or the header, where the keys are. Write
+the values into `.env.keeper` on the VPS yourself, never in a chat, the repository or a command
+line, and check them by name only.
+
 ## Reference agent (once, before its first swap)
 
 The agent is optional and off by default (`AGENT_ENABLED` unset). Before it ever trades:

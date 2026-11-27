@@ -1,7 +1,7 @@
-// Small pieces of the keeper's main loop (`main.ts`), kept apart so they are unit tested: one
-// step that fails on its own, the steps of a round in order and the round that stops between
-// two steps, a gate for periodic steps, and the failure streaks that page when the tick or the
-// indexer keeps failing.
+// Small pieces of the keeper's loops (`main.ts`), kept apart so they are unit tested: one step
+// that fails on its own, the steps of a tick round and of an index round in order and the round
+// that stops between two steps, a gate for periodic steps, the periodic loop each of them runs
+// on, and the failure streaks that page when the tick or the indexer keeps failing.
 import { errorSummary } from '@horagon/sdk'
 import type { Logger } from 'pino'
 import type { StallGuard } from './stall'
@@ -26,27 +26,107 @@ export async function runStep<T>(
   }
 }
 
-export type RoundStep = 'tick' | 'index' | 'schedule' | 'treasury' | 'archive' | 'ata-watch'
+export type RoundStep = 'tick' | 'schedule' | 'treasury' | 'archive'
 
 /**
- * The steps of one round, in order. The tick (halts, drafts, settlement) and the indexer come
- * first, so a halt due in this round never waits on the hourly work. Then, behind one hourly
- * gate: the schedule sets the featured flags of the next 36 h before the treasury counts their
- * seeds, then the ESPN archive retention (`archive`: with an archive directory). Last, the
- * sponsored-ATA watch when it is due.
+ * The steps of one tick round, in order. The tick (halts, drafts, settlement) comes first, so a
+ * halt due in this round never waits on the hourly work. Then, behind one hourly gate: the
+ * schedule sets the featured flags of the next 36 h before the treasury counts their seeds, then
+ * the ESPN archive retention (`archive`: with an archive directory). The indexer and the ATA
+ * watch run on a loop of their own (`indexSteps`), so a slow or hung read there never holds a
+ * tick.
  */
-export function roundSteps(o: {
-  hourly: boolean
-  archive: boolean
-  ataWatch: boolean
-}): RoundStep[] {
+export function roundSteps(o: { hourly: boolean; archive: boolean }): RoundStep[] {
   return [
     'tick',
-    'index',
     ...(o.hourly ? (['schedule', 'treasury'] as const) : []),
     ...(o.hourly && o.archive ? (['archive'] as const) : []),
-    ...(o.ataWatch ? (['ata-watch'] as const) : []),
   ]
+}
+
+export type IndexStep = 'index' | 'ata-watch'
+
+/** The steps of one index round: the indexer, then the sponsored-ATA watch when it is due. */
+export function indexSteps(o: { ataWatch: boolean }): IndexStep[] {
+  return ['index', ...(o.ataWatch ? (['ata-watch'] as const) : [])]
+}
+
+/**
+ * Runs `round` every `periodMs` (start to start; at once when a round took longer), never two
+ * rounds at once, until `stopping()`: a stop ends the loop after the round in progress, and
+ * `wake()` cuts the wait between rounds short. `round` handles its own failures (`runStep`).
+ * Each of the keeper's loops (tick, index) is one; they run side by side.
+ */
+export class PeriodicLoop {
+  /** Rounds finished. */
+  rounds = 0
+  private startedAt: number | null = null
+  /** When (ms) the round in progress last made progress (`progress()`). */
+  private progressAt = Number.NEGATIVE_INFINITY
+  private wakeUp: (() => void) | undefined
+
+  constructor(
+    private readonly opts: {
+      periodMs: number
+      round: () => Promise<void>
+      stopping: () => boolean
+      /** Wall clock in ms; defaults to Date.now. */
+      clock?: () => number
+    },
+  ) {}
+
+  async run(): Promise<void> {
+    const clock = this.opts.clock ?? Date.now
+    while (!this.opts.stopping()) {
+      const started = clock()
+      this.startedAt = started
+      try {
+        await this.opts.round()
+      } finally {
+        this.startedAt = null
+      }
+      this.rounds++
+      if (this.opts.stopping()) break
+      // Never longer than one period, even after the clock steps back.
+      const wait = Math.min(
+        this.opts.periodMs,
+        Math.max(0, this.opts.periodMs - (clock() - started)),
+      )
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(resolve, wait)
+        this.wakeUp = () => {
+          clearTimeout(timer)
+          resolve()
+        }
+      })
+      this.wakeUp = undefined
+    }
+  }
+
+  /** Ends the wait between two rounds now (a stop). */
+  wake(): void {
+    this.wakeUp?.()
+  }
+
+  /** How long (ms) the round in progress has run; null between rounds. */
+  busyMs(): number | null {
+    return this.startedAt === null ? null : (this.opts.clock ?? Date.now)() - this.startedAt
+  }
+
+  /** The round in progress did something (an RPC read answered or failed). */
+  progress(): void {
+    this.progressAt = (this.opts.clock ?? Date.now)()
+  }
+
+  /**
+   * How long (ms) the round in progress has gone without progress: since it started or since its
+   * last `progress()`, whichever is later; null between rounds. A long round that keeps reading
+   * is not stalled; one waiting on a lost database response is.
+   */
+  stalledMs(): number | null {
+    if (this.startedAt === null) return null
+    return (this.opts.clock ?? Date.now)() - Math.max(this.startedAt, this.progressAt)
+  }
 }
 
 /**

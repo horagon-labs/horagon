@@ -72,7 +72,7 @@ the alert table; the key itself is in the keeper's `alert` log line (the last co
 | Admin and guardian keys                    | Your machine, `.keys/deployer.json` and `.keys/guardian.json`                                                                                                                                                                                                                                                                                                  |
 | Web app and API v1                         | Vercel; the sponsor key is its `SPONSOR_SECRET_KEY`                                                                                                                                                                                                                                                                                                            |
 | Database                                   | Supabase Postgres (`DATABASE_URL`)                                                                                                                                                                                                                                                                                                                             |
-| `keeper_heartbeats` row `keeper`           | Written by the keeper after every round (5 s): `round`, `actions`, `feed` and the failure streaks `failing.tick` and `failing.index`. `status` prints it; `/api/v1/health` reads its age                                                                                                                                                                       |
+| `keeper_heartbeats` row `keeper`           | Written by the tick loop every round (5 s): `round`, `actions`, `feed`, the failure streaks `failing.tick` and `failing.index`, and `index.rounds` and `index.busySecs` (L). `status` prints it; `/api/v1/health` reads its age                                                                                                                                |
 | `keeper_heartbeats` row `agent`            | Written by the reference agent after every round (20 s), paused ones too: its round count, dry run or not, paused or not (and until when), the markets it read and the ones it decided, `cut` when the round ended early (`stale`, `stop` or `pause`; null when it decided them all), the swaps it sent, the markets it disabled; `stopped` after a clean stop |
 | `keeper_heartbeats` row `watchdog`         | The time of the watchdog's last `heartbeat` page (`pagedAt`), so a new watchdog run knows when it paged                                                                                                                                                                                                                                                        |
 | `keeper_heartbeats` row `propose:<gameId>` | The `propose` attempts of one game: the evidence hash, the challenge round, and how each send ended. `status` prints the newest one                                                                                                                                                                                                                            |
@@ -276,13 +276,14 @@ the market stays halted until its result is proposed. A market that is not open 
 ssh "$HORAGON_VPS" systemctl --user restart horagon-keeper
 ```
 
-- The keeper exits by itself when nothing has happened for `KEEPER_STALL_SECS` (default 120 s;
-  no step, heartbeat, log line or RPC answer, as when a database response is lost; the check runs
+- The keeper exits by itself when nothing has happened in its tick loop for `KEEPER_STALL_SECS`
+  (default 120 s; no step, heartbeat, log line or RPC answer of the tick loop, as when a database
+  response is lost; the index loop has its own limit, 300 s without an index read, L; the check runs
   every 15 s, so it fires 120 to 135 s after the last sign of life), logging
   `keeper stalled: exiting so the service restarts` at fatal; systemd restarts it after 5 s. ESPN
   fetches do not count as activity and the schedule step can be silent for about 70 s in the
   worst case, so a value under about 90 can fire falsely on a healthy keeper.
-- A stop (SIGTERM) ends the round after the step in progress. The unit waits up to 120 s
+- A stop (SIGTERM) ends each loop (tick, index) after the step in progress. The unit waits up to 120 s
   (`TimeoutStopSec`): one transaction wait (90 s) plus an RPC timeout. A step that holds
   several sends can take longer and is then killed. A second SIGTERM exits at once.
 - Avoid restarting from S + 1h40m until a game's market is halted at the buzzer (or its
@@ -527,6 +528,90 @@ retry sends the stored evidence unchanged. After an auto-propose that did not la
 propose with other inputs is refused because the stored evidence was sealed from other inputs:
 follow B.
 
+### L. Index reads: their RPCs, failover and rate limits
+
+The indexer (every 5 s) and the ATA watch (every 10 min) run on a loop of their own, beside the
+tick loop: a slow or hung read there never delays a tick (halts, proposals, finalizes). The
+keeper heartbeat is still the tick loop's, written every tick round; it also carries
+`index.rounds` (index rounds finished) and `index.busySecs` (how long the index round in progress
+has run, null between rounds). An index round in which no RPC read has answered or failed for
+300 s means a lost database response: the keeper logs `keeper stalled: exiting so the service
+restarts` with step `index loop` and exits, and systemd restarts it (G). A long round that keeps
+reading is not stalled.
+
+**The RPCs, in order.** Index reads try `HORAGON_INDEX_RPC_URL`, then `HORAGON_INDEX_RPC_URL_2`,
+then `HORAGON_INDEX_FALLBACK_RPC_URL` (sent with `HORAGON_INDEX_FALLBACK_RPC_KEY` as its x-api-key
+header), then `HORAGON_RPC_URL` (and `HORAGON_RPC_BACKUP_URL` when it passed its own check). Unset
+ones are skipped; with none set, index reads go through `HORAGON_RPC_URL` as before. Before its
+first round the index loop checks every index RPC's cluster by its genesis hash, all at once,
+three tries each: one that is not an https URL, names mainnet, is on another cluster or does not
+answer is left out until the next restart, with the warning `index RPC left out` and the page
+`rpc-index-down:<variable>`. That never stops the keeper. The line
+`index reads use these RPCs, in order` then names the list by variable and host. Logs and pages
+name an RPC by its variable and host only, never its URL (a key may sit in its path or query) or
+its header.
+
+**Pace, per RPC.** Each RPC has its own pace, shared by the indexer and the ATA watch:
+signature reads 350 ms apart (at most 29 in any 10 s, under the public devnet limit of 40 calls
+of one method per 10 s); transaction reads in batches of at most 10, each entry counted, at most
+30 entries in any 10 s and 350 ms of the RPC's transaction clock per entry; one account read per
+pass (100 accounts each). A pass starts no market after 3 s. A market stops with its cursor at
+the last transaction read, and goes on next pass after the markets that waited longer, when its
+next batch would wait past those 3 s, or when the 3 s are spent and it has read a batch (however
+slowly the RPC answers, a pass reads one batch past its budget at most). A backlog after a pause
+drains at about 2 transactions a second per RPC (one batch of 10 per 5 s pass), and every market
+gets its turn.
+
+**Failover.** A read the RPC in use fails with a rate limit (HTTP 429, JSON-RPC -32005 or 429,
+"Too many requests"), an auth refusal (HTTP 401 or 403, JSON-RPC -16401, "Unauthorized"), another
+HTTP 4xx or "method not found", a 5xx, a timeout (15 s), an unreachable host, or a batch answered
+with something that is not a list pauses that RPC: 30 s, doubling on each failure in a row up to
+10 min, a little less with jitter, and back to 30 s after a pass whose reads on it all answered.
+Each pause logs one warning, `index RPC read failed; pausing its reads`, with the variable, the
+host, the kind of failure and the delay. The same read then goes to the next RPC in the list:
+nothing the pass read is lost and the cursors stay where the reads left them. The first RPC that
+is not paused is always the one used, so a paused one is tried again as soon as its back-off
+ends. A move logs `index reads moved to another RPC` (info); a move away from the first one
+also pages `index-failover` (3 h). Any other failure (a JSON-RPC error about the request, a
+database error) is the market's: it counts toward `index-stuck:` as before.
+
+A cursor never moves back. The RPCs' confirmed tips differ by a few seconds, so the RPC a read
+moves to may not hold a market's cursor signature yet; it then answers with older signatures. The
+indexer keeps the slot of each cursor it wrote this run, and a listing whose newest signature is
+older than that is left unread: the cursor stays, the market is asked again on the next pass, and
+the warning `index RPC behind the cursor; indexing waits` is logged (once a minute per market). It
+counts as a stop, so an RPC that stays behind for about 5 min pages `index-stuck:`. The slots live
+in memory: after a start, the slot of each market's newest indexed trade stands in until a cursor
+is written (the cursor is at or past it), so only an RPC behind that trade is caught on a market's
+first listing, and a market with no trade is not checked until its cursor moves.
+
+When every RPC is paused, index and ATA watch passes read nothing (a held pass costs nothing)
+until one back-off ends. `index-rate-limited` pages once every RPC has been paused for more than
+15 min with no clean pass.
+
+**Change-driven reads.** The indexer asks a market for its signatures only when its account or
+one of its two outcome mints changed since it was last indexed (a swap or liquidity change writes
+the market; a claim or redeem burns shares, which changes a mint's supply), or when its sweep is
+due: 60 s for an open market, 5 min for the others (it catches what writes neither, such as a
+challenge or a failed transaction). Each market is indexed once after a start.
+
+When `index-failover` pages: nothing to do at night, the next RPC serves the reads and the first
+is tried again by itself. In the day, look at the first provider's dashboard (credits left, key,
+status) and the warnings above for the kind of failure. An auth failure means its key is wrong
+or revoked: fix the variable in `~/horagon/.env.keeper` and restart (G) outside the window G
+names.
+
+When `index-rate-limited` pages (every RPC paused over 15 min):
+
+1. Nothing on chain is at risk; halts, proposals and finalizes do not use these reads. The
+   reads resume by themselves once one RPC answers, and the next pass catches up every market
+   from its cursor. A keeper restart does not help: it only starts each back-off over at 30 s.
+2. Read the `index RPC read failed` warnings: the kind of failure per RPC says which provider to
+   look at (credits, key, outage). If it lasts into a game night, fix or add an index RPC in
+   `~/horagon/.env.keeper` (the variables above; a key in a URL is fine, the keeper logs the host
+   only), check it by name only, never print its value, and restart (G) outside the window G
+   names. A new RPC that fails its cluster check is left out with `rpc-index-down:<variable>`.
+
 ## Alerts
 
 One row per alert key. "Repeats" is the shortest gap between two messages with the same key
@@ -578,11 +663,14 @@ transaction: `create <gameId>`, `halt <gameId> (<rule>)`, `propose <gameId>` (au
 | `agent-musdc`                  | `Reference agent wallet holds <n> mUSDC, under 200`                                                                                                                                     | 10 min            | Live runs only: a dry run logs it at most hourly and plans against its spend cap (J). The agent claims the faucet (1,000 mUSDC) every hour and claims its winnings; under 1 mUSDC it stops swapping. Nothing to do unless it lasts                                                                                                                                                                                                                                                                                                                             |
 | `decode:<gameId>`              | `<gameId>: its GameMarket account does not decode`                                                                                                                                      | 3 h               | The keeper skips that market: no halt, draft or settlement for it. Watch the game by hand; the deployed program and `packages/sdk/idl/horagon.json` likely differ                                                                                                                                                                                                                                                                                                                                                                                              |
 | `feed-skipped:<ET date>`       | `<n> ESPN events on <ET date> could not be read; check the feed`                                                                                                                        | 10 min            | Those games are not observed: no halts or drafts from the feed. Watch them on a live source and halt by hand if needed (F); check the log for the parse error                                                                                                                                                                                                                                                                                                                                                                                                  |
-| `index-stuck:<market>`         | `Indexing of <gameId> (market <market>) is stuck`                                                                                                                                       | 3 h               | One transaction stays unreadable, so trades and prices of that market lag on the site. Check the RPC; indexing resumes once it can read it                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `index-stuck:<market>`         | `Indexing of <gameId> (market <market>) is stuck`                                                                                                                                       | 3 h               | One transaction (or the market's signature list) stays unreadable, or the index RPC in use stays behind the market's cursor (L), so trades and prices of that market lag on the site. Check the RPC; indexing resumes once it can read it                                                                                                                                                                                                                                                                                                                      |
 | `index-skip:<market>`          | `Indexing of <gameId> (market <market>) skipped a row`                                                                                                                                  | 3 h               | One trade, claim or redeem is missing from the database for good (that wallet's P&L is off): its token flows could not be read, or did not add up (a claim must pay what its winning side burned, a redeem must burn equal YES and NO for the same collateral). Note it; nothing to do on chain                                                                                                                                                                                                                                                                |
 | `tick-failing`                 | `The keeper's tick step failed <n> rounds in a row`                                                                                                                                     | 3 h               | 12 failed rounds (about a minute): no halts, drafts or settlement while it lasts. Read the error in the log (database or RPC); halt by hand anything that needs it (F)                                                                                                                                                                                                                                                                                                                                                                                         |
 | `index-failing`                | `The keeper's index step failed <n> rounds in a row`                                                                                                                                    | 3 h               | Trades and prices stop updating; markets are not affected. Read the error in the log                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `index-rate-limited`           | `Every index RPC (<hosts>) has failed the keeper's index reads for <n> min`                                                                                                             | 3 h               | Every index RPC in the list (L) has been paused after failing reads (rate limit, auth, 5xx, timeout; 30 s doubling to 10 min each) for over 15 min: trades, claims, positions and prices stop updating; halts, proposals and finalizes are not affected. Reads resume by themselves once one RPC answers. If it lasts into a game night, fix or add an index RPC (L)                                                                                                                                                                                           |
+| `index-failover`               | `Index reads moved from <variable> (<host>) to <variable> (<host>): <failure>`                                                                                                          | 3 h               | The first index RPC failed a read and the next one in the list serves them; nothing is lost and the first is tried again after its back-off. Nothing to do at night. In the day, check that provider (credits, key, status) and the `index RPC read failed` warnings (L)                                                                                                                                                                                                                                                                                       |
 | `rpc-backup-down`              | `Backup RPC 1 failed the cluster check 3 times`                                                                                                                                         | once a start      | The keeper runs on the primary RPC only. Fix `HORAGON_RPC_BACKUP_URL` in `.env.keeper` and restart when convenient (G), not near a close                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `rpc-index-down:<variable>`    | `Index RPC <variable> (<host>) left out: <reason>`                                                                                                                                      | once a start      | That index RPC (L) is not an https URL, names mainnet, is on another cluster or did not answer its cluster check 3 times; index reads use the other RPCs in the list, down to `HORAGON_RPC_URL`. Fix the variable in `.env.keeper` and restart when convenient (G), not near a close                                                                                                                                                                                                                                                                           |
 | `archive`                      | `The raw ESPN archive could not be written`, or `ESPN archive retention failed`                                                                                                         | 3 h               | Markets are not affected. Check the VPS's free disk space and `apps/keeper/data/archive`                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | `heartbeat`                    | `Keeper heartbeat is <n> s old during a game night`                                                                                                                                     | 15 min (watchdog) | From the watchdog: no keeper heartbeat for 120 s between 90 min before a tip-off and 4 h after. Read the log, then restart (G)                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | `watchdog`                     | `Watchdog cannot read the keeper heartbeat`                                                                                                                                             | every run (2 min) | The database does not answer the watchdog, so the keeper likely fails too (`tick-failing`). Check Supabase and `DATABASE_URL`                                                                                                                                                                                                                                                                                                                                                                                                                                  |
