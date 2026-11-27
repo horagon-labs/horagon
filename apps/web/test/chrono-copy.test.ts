@@ -76,34 +76,41 @@ describe('what the number means (R5, audit section 13)', () => {
 })
 
 describe('rowWords (R5)', () => {
-  it('reads subject, percent and the latest close for a live game (R1: it closes at the buzzer)', () => {
-    expect(rowWords(boardItem(game(), undefined, NOW))).toEqual({
+  it('reads subject, percent, the move since open and the close for a live game (first-screen C20)', () => {
+    expect(rowWords(boardItem(game(), undefined, NOW), NOW)).toEqual({
       subject: 'CLE to win',
       value: '77%',
-      note: 'latest 10:10 PM ET',
+      model: false,
+      note: '+27 since open',
+      wide: ' · closes by 10:10 PM ET',
     })
   })
 
   it('says the result is pending once the game is final, and drops the number after it', () => {
     const closed = final(105, 107)
     closed.markets = [market({ endTs: NOW - 60 })]
-    expect(rowWords(boardItem(closed, undefined, NOW))).toEqual({
+    expect(rowWords(boardItem(closed, undefined, NOW), NOW)).toEqual({
       subject: 'CLE lost',
       value: '77%',
+      model: false,
       note: 'result pending',
+      wide: '',
     })
     const done = final(110, 104)
     done.markets = [market({ status: 'finalized', outcome: 'yes', endTs: NOW - 60 })]
-    expect(rowWords(boardItem(done, undefined, NOW))).toEqual({
-      subject: 'Resolved: CLE won',
+    // After the result: the winner, its opening price and, as the price moved, its close (C21).
+    expect(rowWords(boardItem(done, undefined, NOW), NOW)).toEqual({
+      subject: 'CLE won',
       value: '',
-      note: 'result final',
+      model: false,
+      note: 'opened 50% · closed 77%',
+      wide: '',
     })
   })
 
   it('names a market closed under a game still on the court', () => {
     const late = game({ markets: [market({ endTs: NOW - 10, priceTs: NOW - 20 })] })
-    expect(rowWords(boardItem(late, undefined, NOW)).note).toBe('trading closed')
+    expect(rowWords(boardItem(late, undefined, NOW), NOW).note).toBe('trading closed')
   })
 })
 

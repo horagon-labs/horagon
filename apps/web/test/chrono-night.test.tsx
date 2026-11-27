@@ -179,53 +179,56 @@ describe('NightDial (spec 3.2, 4.1)', () => {
 
 describe('DialRow (spec 3.2)', () => {
   const cle = boardItem(game(), held, NOW)
-  const row = renderToStaticMarkup(<DialRow item={cle} />)
+  const row = renderToStaticMarkup(<DialRow item={cle} now={NOW} />)
 
   it('is one link to the game, named by the whole sentence', () => {
     expect(row).toContain('href="/game/nba-401810001"')
     expect(row).toContain(`aria-label="${itemLabel(cle)}"`)
   })
 
-  it('shows the mini dial, the score, whose chance, the % in mono 19 px, the latest ET close and your diamond', () => {
+  it('shows the mini dial, the score, whose chance, the % in mono 19 px, the move, the close from sm and your diamond', () => {
     expect(row).toContain('viewBox="0 0 100 100"')
     expect(row).toContain('78–84 · Q3 4:12')
     expect(row).toContain('data-subject="true">CLE to win</span>')
-    expect(row).toContain('font-mono text-19 tabular-nums text-lume-300">77%')
+    // Live blue: this market trades now (first-screen spec W4).
+    expect(row).toContain('font-mono text-19 tabular-nums text-live">77%')
     expect(row).not.toContain('¢')
-    expect(row).toContain('latest 10:10 PM ET')
-    expect(row).not.toContain('closes')
+    expect(row).toContain('+27 since open<span class="hidden sm:inline"> · closes by 10:10 PM ET')
+    expect(row).not.toContain('closes in')
     expect(row).toContain('◆')
   })
 
-  it('shows the latest close while the market trades, and no time once it stopped', () => {
+  it('shows the close while the market trades, and no time once it stopped', () => {
     const rowOf = (g: ReturnType<typeof game>) =>
-      renderToStaticMarkup(<DialRow item={boardItem(g, held, NOW)} />)
+      renderToStaticMarkup(<DialRow item={boardItem(g, held, NOW)} now={NOW} />)
     // Minutes from end_ts, the game still in play: the time stays.
     // In its last five minutes it counts down instead (review §10 item 9).
     const closing = game({ markets: [market({ endTs: NOW + 130 })] })
     expect(rowOf(closing)).toContain('>closes in 2:10<')
-    expect(rowOf(closing)).not.toContain('latest')
+    expect(rowOf(closing)).not.toContain('closes by')
     // Halted at the final buzzer, then proposed: trading is over, and R5 says what comes next.
     for (const status of ['halted', 'proposed'] as const) {
       const html = rowOf(game({ status: 'final', markets: [market({ status })] }))
       expect(html).toContain('>result pending<')
-      expect(html).not.toContain('latest')
+      expect(html).not.toContain('closes by')
     }
     // Past end_ts with the game still in play, or halted mid-game: no time either.
     const late = rowOf(game({ markets: [market({ endTs: NOW - 60 })] }))
     expect(late).toContain('>trading closed<')
-    expect(late).not.toContain('latest')
+    expect(late).not.toContain('closes by')
     const halted = rowOf(game({ markets: [market({ status: 'halted' })] }))
     expect(halted).toContain('>trading halted<')
-    expect(halted).not.toContain('latest')
+    expect(halted).not.toContain('closes by')
   })
 
-  it('shows the tip-off and the opening time before a market exists', () => {
+  it('shows the tip-off, the model number and when it opens before a market exists (C19)', () => {
     const phx = items.find((i) => i.id === 'nba-401810004')
-    const html = phx ? renderToStaticMarkup(<DialRow item={phx} />) : ''
-    expect(html).toContain('tip-off 10:30 PM ET')
-    expect(html).toContain('opens 9:30 PM ET')
-    expect(html).toContain('>—<')
+    const html = phx ? renderToStaticMarkup(<DialRow item={phx} now={NOW} />) : ''
+    expect(html).toContain('>10:30 PM ET<')
+    expect(html.replace(/aria-label="[^"]*"/, '')).not.toContain('tip-off')
+    expect(html).toContain('44%<span class="font-sans text-12 text-ink-muted"> model</span>')
+    expect(html).toContain('>opens in 22 min<')
+    expect(html).not.toContain('—')
     expect(html).not.toContain('◆')
   })
 })

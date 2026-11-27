@@ -123,7 +123,7 @@ export function NightDial(p: {
   const ids = labelIds(tracks, { selectedId: p.selectedId, hoverId: hover, now: p.now })
   const spots = labelSpots(tracks, ids, p.now)
   const focus = tracks.find((t) => t.item.id === ids[0])?.item
-  const focusWords = focus ? rowWords(focus) : null
+  const focusWords = focus ? rowWords(focus, p.now) : null
   const angle = etClockAngle(p.now)
   const hand = polar(C, C, HAND, angle)
   const hub = polar(C, C, p.rest ? REST_HUB : HUB, angle)
@@ -320,6 +320,9 @@ export function NightDial(p: {
               {focusWords.value && (
                 <span className="font-mono text-24 text-ivory-100 tabular-nums">
                   {focusWords.value}
+                  {focusWords.model && (
+                    <span className="font-sans text-12 text-ink-muted"> model</span>
+                  )}
                 </span>
               )}
               {focusWords.subject && (

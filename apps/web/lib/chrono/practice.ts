@@ -2,7 +2,7 @@
 // the pure reads behind the plate, the strip on `/` and the /practice page. A Practice game is
 // told apart by its league only, and every place that shows one says so.
 import type { Game, PracticeResponse } from '@horagon/sdk'
-import { etClock } from './time'
+import { etClock, inMinutes } from './time'
 
 /** String 26 of the culture plan, word for word. */
 export const PRACTICE_LINE = 'Replay · a recorded night · practice calls never count'
@@ -49,14 +49,6 @@ export function recordedLine(g: Pick<Game, 'id' | 'home' | 'away'>): string {
 
 export const counterpartyLine = (c: PracticeResponse['counterparty']): string =>
   c === 'agent' ? COUNTERPARTY_AGENT : COUNTERPARTY_NONE
-
-/** "in 47 min", "in 2 h 5 min". */
-function inMinutes(secs: number): string {
-  const m = Math.max(1, Math.ceil(secs / 60))
-  if (m < 60) return `in ${m} min`
-  const h = Math.floor(m / 60)
-  return m % 60 === 0 ? `in ${h} h` : `in ${h} h ${m % 60} min`
-}
 
 const nextLine = (at: number, now: number) =>
   `Next practice tip-off ${etClock(at)} · ${inMinutes(at - now)}`

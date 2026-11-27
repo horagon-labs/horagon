@@ -161,9 +161,11 @@ describe('live: the market is open (review §3.2)', () => {
 
 describe('yours: ◆ in live, the shape tells it apart (review §3.2 row 15)', () => {
   it('marks your game on the board row with a live ◆, and leaves the MiniDial rim alone', () => {
-    const row = renderToStaticMarkup(<DialRow item={boardItem(game(), held, NOW)} />)
+    const row = renderToStaticMarkup(<DialRow item={boardItem(game(), held, NOW)} now={NOW} />)
     expect(row).toContain('<span class="text-15 text-live">◆</span>')
-    const bare = renderToStaticMarkup(<DialRow item={boardItem(game(), undefined, NOW)} />)
+    const bare = renderToStaticMarkup(
+      <DialRow item={boardItem(game(), undefined, NOW)} now={NOW} />,
+    )
     const rim = (html: string) => html.match(/<circle [^>]*data-rim/)?.[0]
     expect(rim(row)).toBe(rim(bare))
     expect(bare).not.toContain('◆')
@@ -209,15 +211,21 @@ describe('yours: ◆ in live, the shape tells it apart (review §3.2 row 15)', (
 })
 
 describe('closing reads "closes in m:ss" on the board row (review §10 item 9)', () => {
-  it('replaces "latest …" in the last five minutes, and keeps it before', () => {
+  it('replaces the move and "closes by …" in the last five minutes, and keeps them before', () => {
     const closing = boardItem(game({ markets: [market({ endTs: NOW + 130 })] }), undefined, NOW)
     expect(closing.state).toBe('closing')
-    expect(rowWords(closing).note).toBe('closes in 2:10')
-    expect(rowWords(boardItem(game(), undefined, NOW)).note).toBe('latest 10:10 PM ET')
+    expect(rowWords(closing, NOW)).toMatchObject({ note: 'closes in 2:10', wide: '' })
+    expect(rowWords(boardItem(game(), undefined, NOW), NOW)).toMatchObject({
+      note: '+27 since open',
+      wide: ' · closes by 10:10 PM ET',
+    })
   })
 })
 
-describe('live never colours a word (u3 §3.2: live numbers are ink)', () => {
+// First-screen spec W4 (slice 1) moves one thing: an open market's number on a board row is Live
+// blue (`LIVE_NUMBER` in dial-row.tsx, applied only while `openNow`), and so is the count line's
+// "● 4 markets open now" dot. Every other number and every word stays ink.
+describe("live never colours a word (u3 §3.2; first-screen W4: an open market's row number)", () => {
   const root = join(import.meta.dirname, '..')
   const sources = ['app', 'components', 'lib'].flatMap((dir) =>
     readdirSync(join(root, dir), { recursive: true, encoding: 'utf8' })
@@ -225,12 +233,15 @@ describe('live never colours a word (u3 §3.2: live numbers are ink)', () => {
       .map((file) => join(dir, file)),
   )
 
-  it('uses text-live and fill-live only on a ◆ or the Tape legend', () => {
+  it('uses text-live and fill-live only on a ◆, the Tape legend, the count dot or a row number', () => {
     const uses: string[] = []
     for (const file of sources) {
       const text = readFileSync(join(root, file), 'utf8')
+      const numbers = [...text.matchAll(/\bLIVE_NUMBER = '(?:text|fill)-live'/g)].length
+      for (let i = 0; i < numbers; i++) uses.push(`${file}: (open market number)`)
       expect(text.match(/(?:text|fill)-live\b/g)?.length ?? 0, file).toBe(
-        [...text.matchAll(/className="[^"]*\b(?:text|fill)-live\b[^"]*"[^>]*>([^<]*)</g)].length,
+        [...text.matchAll(/className="[^"]*\b(?:text|fill)-live\b[^"]*"[^>]*>([^<]*)</g)].length +
+          numbers,
       )
       // The element's own text, wherever the formatter breaks the line.
       for (const m of text.matchAll(
@@ -240,7 +251,16 @@ describe('live never colours a word (u3 §3.2: live numbers are ink)', () => {
       }
     }
     expect(uses.length).toBeGreaterThan(0)
-    for (const use of uses) expect(use).toMatch(/: (?:◆ ?|━ Market \(\{props\.home\} to win\))$/)
+    for (const use of uses) {
+      expect(use).toMatch(/: (?:◆ ?|━ Market \(\{props\.home\} to win\)|●|\(open market number\))$/)
+    }
+    // The number and the dot live in one place each.
+    expect(uses.filter((u) => u.endsWith('(open market number)'))).toEqual([
+      `${join('components', 'chrono', 'dial-row.tsx')}: (open market number)`,
+    ])
+    expect(uses.filter((u) => u.endsWith(': ●'))).toEqual([
+      `${join('components', 'chrono', 'board-view.tsx')}: ●`,
+    ])
   })
 
   it('never draws a needle, ring, arc, ghost or ◆ in an ink-named old token', () => {

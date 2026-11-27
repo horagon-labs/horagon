@@ -16,7 +16,7 @@ import {
   secsToClose,
   stillTrades,
 } from './state'
-import { etClock, etDay, etDayLabel, etWeekday } from './time'
+import { etClock, etDay, etDayLabel, etWeekday, inMinutes, roughIn } from './time'
 import { gameInterval, type Interval } from './tracks'
 
 export interface BoardItem {
@@ -115,28 +115,86 @@ export function yourHour(
 }
 
 /**
- * A row's three right-hand lines (R5, audit section 13): whose chance the number is, the number
- * in percent, and the close. "MEM to win · 62% · latest 10:40 PM ET" while it trades (it closes
- * at the final buzzer, end_ts at the latest, R1), "closes in 2:10" in its last five minutes;
- * once the final buzzer went, "CHA lost · 74% · result pending"; after the result, "Resolved:
- * MEM won" with no number. A market that stopped names no time. A game that started with no
- * market says so (R5c), never a past opening time.
+ * The move since the market opened, on the subject's (home) side, in points (first-screen spec
+ * C20): "+2 since open", "−19 since open" with U+2212, "+0.4 since open" under one point, and
+ * "opening price" while the price still equals the open (to 0.05 of a point).
  */
-export function rowWords(i: BoardItem): { subject: string; value: string; note: string } {
-  const subject = rowSubject(i.state, i.game, i.market?.outcome ?? null)
-  if (i.state === 'resolved') return { subject, value: '', note: 'result final' }
-  if (i.state === 'void') return { subject, value: '', note: '' }
-  const value = i.price === null ? '—' : percent(i.price)
-  if (!i.market && started(i.game)) return { subject, value, note: 'no market' }
-  const pending = i.game.status === 'final' || i.state === 'proposed' || i.state === 'challenged'
-  if (pending) return { subject, value, note: 'result pending' }
-  if (!i.market) return { subject, value, note: `opens ${etClock(i.interval.start)}` }
+export function sinceOpen(price: number, initialPriceBps: number): string {
+  const points = (price * 10_000 - initialPriceBps) / 100
+  const size = Math.abs(points)
+  if (Math.round(price * 10_000) === initialPriceBps || size < 0.05) return 'opening price'
+  const shown = Math.round(size) >= 1 ? String(Math.round(size)) : size.toFixed(1)
+  return `${points > 0 ? '+' : '−'}${shown} since open`
+}
+
+/** The indexed price differs from the opening one (spec §6 "moved", board rows). */
+export const movedFromOpen = (m: Pick<MarketSummary, 'price' | 'initialPriceBps'>): boolean =>
+  m.price !== null && Math.round(m.price * 10_000) !== m.initialPriceBps
+
+export interface RowWords {
+  /** Whose chance the number is: "NYK to win", "CLE lost", "MIN won". */
+  subject: string
+  /** The number in percent, or '' for none. */
+  value: string
+  /** The number is the model's (no market yet): the row adds " model" (C19). */
+  model: boolean
+  /** The line under the number. */
+  note: string
+  /** What the note adds from `sm` up (C20: " · closes by 12:32 AM ET"), or ''. */
+  wide: string
+}
+
+/**
+ * A row's right-hand lines (R5, first-screen spec C19-C21): whose chance the number is, the
+ * number in percent, and a note. Before a market opens: "NYK to win · 79% model · opens in 15 h".
+ * While it trades: the move since open, "closes by 12:32 AM ET" from `sm` up, and "closes in 2:10"
+ * in its last five minutes. Once the final buzzer went, "CHA lost · 74% · result pending"; after
+ * the result, "MIN won · opened 28%", plus "closed 81%" only when the price moved. A market that
+ * stopped names no time. A game that started with no market says so (R5c).
+ */
+export function rowWords(i: BoardItem, now: number): RowWords {
+  const g = i.game
+  const outcome = i.market?.outcome ?? null
+  const words = (over: Partial<RowWords>): RowWords => ({
+    subject: rowSubject(i.state, g, outcome),
+    value: '',
+    model: false,
+    note: '',
+    wide: '',
+    ...over,
+  })
+  if (i.state === 'resolved' && i.market && outcome && g.status === 'final') {
+    const homeWon = outcome === 'yes'
+    const m = i.market
+    const opened = homeWon ? m.initialPriceBps : 10_000 - m.initialPriceBps
+    const head = `opened ${percent(opened / 10_000)}`
+    const closed = m.price === null ? null : homeWon ? m.price : 1 - m.price
+    return words({
+      subject: `${homeWon ? g.home : g.away} won`,
+      note: closed !== null && movedFromOpen(m) ? `${head} · closed ${percent(closed)}` : head,
+    })
+  }
+  if (i.state === 'resolved') return words({ note: 'result final' })
+  if (i.state === 'void') return words({})
+  // No market: the model's number, never a dash (C19); none once the game is over.
+  const model = i.price === null && g.modelProb !== null && g.status !== 'final'
+  const value = i.price !== null ? percent(i.price) : model ? percent(g.modelProb) : ''
+  if (!i.market && started(g)) return words({ value, model, note: 'no market' })
+  const pending = g.status === 'final' || i.state === 'proposed' || i.state === 'challenged'
+  if (pending) return words({ value, note: 'result pending' })
+  if (!i.market) return words({ value, model, note: `opens ${roughIn(i.interval.start - now)}` })
   // The last five minutes count down, in the dial's own words (light branding review §10 item 9).
   if (i.state === 'closing')
-    return { subject, value, note: `closes in ${countdown(i.secsLeft ?? 0, 0)}` }
-  if (isTrading(i.state)) return { subject, value, note: `latest ${etClock(i.interval.end)}` }
-  return { subject, value, note: i.state === 'halted' ? 'trading halted' : 'trading closed' }
+    return words({ value, note: `closes in ${countdown(i.secsLeft ?? 0, 0)}` })
+  if (isTrading(i.state)) {
+    const note = i.price === null ? '' : sinceOpen(i.price, i.market.initialPriceBps)
+    return words({ value, note, wide: ` · closes by ${etClock(i.interval.end)}` })
+  }
+  return words({ value, note: i.state === 'halted' ? 'trading halted' : 'trading closed' })
 }
+
+/** The market trades now: its number and arc are Live blue (one meaning per colour). */
+export const openNow = (i: BoardItem): boolean => i.market !== undefined && isTrading(i.state)
 
 /** What a screen reader hears for one game, on its row link and in the Night dial's list. */
 export function itemLabel(i: BoardItem): string {
@@ -195,41 +253,45 @@ export function nextLine(u: Upcoming): string {
   return `Next games: ${etDayLabel(u.tip)} · ${games} from ${etClock(u.tip)}`
 }
 
+const gamesCount = (n: number) => (n === 1 ? '1 game' : `${n} games`)
+const withCount = (label: string, count?: number) =>
+  count ? `${label} · ${gamesCount(count)}` : label
+
 /**
- * "Tonight · Thu Nov 27" (culture string 2): the ET night on the board, which rolls over at
- * 06:00 ET like the API's (etNight), so after midnight it still names the night. CSS uppercases it.
+ * "Tonight · Fri Nov 27 · 11 games" (culture string 2, first-screen C16): the ET night on the
+ * board, which rolls over at 06:00 ET like the API's (etNight), so after midnight it still names
+ * the night; the count only when games are listed. CSS uppercases it.
  */
-export function boardLabel(now: number): string {
+export function boardLabel(now: number, count?: number): string {
   const noon = Date.parse(`${etNight(now)}T12:00:00Z`) / 1000
-  return `Tonight · ${etDayLabel(noon).replace(',', '')}`
+  return withCount(`Tonight · ${etDayLabel(noon).replace(',', '')}`, count)
 }
 
 /**
- * "Next · Fri Nov 27": the board's heading when every game it lists belongs to a later night (an
- * evening with no game of its own, or after midnight once the night's games left the list), and
- * the subheading of a later night's games listed under the night's own, so those games are never
- * headed with tonight's date.
+ * "Fri Nov 27 · 11 games" (C16): the board's heading when every game it lists belongs to a later
+ * night (an evening with no game of its own, or after midnight once the night's games left the
+ * list), and the subheading of a later night's games listed under the night's own, so those games
+ * are never headed with tonight's date.
  */
-export function nextLabel(tip: number): string {
-  return `Next · ${etDayLabel(tip).replace(',', '')}`
+export function nextLabel(tip: number, count?: number): string {
+  return withCount(etDayLabel(tip).replace(',', ''), count)
 }
 
 /** The game is on the court, or tips off on the ET night `night` (etNight, 06:00 rollover). */
 const ofNight = (g: Game, night: string): boolean =>
   g.status === 'live' || etDay(tipOf(g)) === night
 
-const REST = 'The dial rests tonight.'
-
-/** Whole hours to `tip`, at least 1. */
-const hoursTo = (tip: number, now: number): number => Math.max(1, Math.round((tip - now) / 3_600))
+const NO_GAMES = 'No NBA games in the next 24 hours.'
 
 /**
- * The rest face's words (culture string 3) on a night with no game: "The dial rests tonight.
- * Next tip-off Fri, Nov 27 · 7:00 PM ET · in 39 h", or the first sentence with none known.
+ * The rest face's words (culture string 3 made date-true, first-screen C22) when the 24 h list is
+ * empty: "The dial rests until Fri, Nov 27. 4 games, first tip-off in 39 h.", or "No NBA games in
+ * the next 24 hours." with no next games known.
  */
 export function restLine(next: Upcoming | null, now: number): string {
-  if (!next || next.tip <= now) return REST
-  return `${REST} Next tip-off ${etDayLabel(next.tip)} · ${etClock(next.tip)} · in ${hoursTo(next.tip, now)} h`
+  if (!next || next.tip <= now) return NO_GAMES
+  const games = next.count === 1 ? '1 game, tip-off' : `${next.count} games, first tip-off`
+  return `The dial rests until ${etDayLabel(next.tip)}. ${games} ${roughIn(next.tip - now)}.`
 }
 
 /** Culture string 21: "All stopped. Next tip-off Sat 3:30 PM ET.", or "All stopped.". */
@@ -266,7 +328,7 @@ export interface BoardModel {
   list: BoardItem[]
   /**
    * Rows of a later night in a list that also heads the night's own games (the next slate is
-   * often under 24 h away): each night under its own "Next · Sat Nov 28", in list order.
+   * often under 24 h away): each night under its own "Sat Nov 28 · 3 games", in list order.
    */
   later: Array<{ label: string; items: BoardItem[] }>
   /** The line for an empty board, with the words the board already uses; null with rows. */
@@ -277,17 +339,29 @@ export interface BoardModel {
   next: string | null
   /** The Night dial's clock (spec 5.4): `now` moved up to the newest winner `priceTs` the board has seen. */
   chainNow: number
-  /** The Night dial's arcs: `items`, or none while the dial rests (no game of the night). */
+  /**
+   * The Night dial's arcs: `items` (pre-open ones dotted), or none while the dial rests (the 24 h
+   * list is empty).
+   */
   dial: BoardItem[]
   /**
-   * "Tonight · Thu Nov 27" (boardLabel), or "Next · Fri Nov 27" (nextLabel) when every listed
-   * game belongs to a later night.
+   * "Tonight · Fri Nov 27 · 11 games" (boardLabel), or "Fri Nov 27 · 11 games" (nextLabel) when
+   * every listed game belongs to a later night.
    */
   label: string
-  /** No game of the night (ET, 06:00 rollover): the rest face's words (restLine); else null. */
+  /** The 24 h list is empty (first-screen S1): the rest face's words (restLine); else null. */
   rest: string | null
-  /** With the rest face: the next game day's calendar file, when the next games are known. */
+  /**
+   * The next game day's calendar file: on the rest face, or under a list no market of which has
+   * opened yet (first-screen S2, C23); else null.
+   */
   calendar: { href: string; label: string } | null
+  /** Listed winner markets that trade now: "● 4 markets open now" (C17). */
+  openNow: number
+  /** No market open yet: "First market opens in 14 h 44 min" (C17); else null. */
+  firstOpen: string | null
+  /** No game on the court and a market still to open: the board note says how one opens (C18). */
+  note: boolean
   /** Every game of the night stopped: "All stopped. Next tip-off …" (stoppedLine); else null. */
   stopped: string | null
 }
@@ -319,6 +393,9 @@ export function boardModel(
       rest: null,
       calendar: null,
       stopped: null,
+      openNow: 0,
+      firstOpen: null,
+      note: false,
     }
   }
   // Every endTs comparison on the Night dial uses chain time (spec 5.4), like each row does.
@@ -334,12 +411,20 @@ export function boardModel(
   const coming = upcomingOf(games, now) ?? upcoming
   const ahead = coming && coming.tip > now ? coming : null
   const over = nightOver(games, now)
-  // The dial rests on a night with no game of its own (R7 review adv-1, finding 1): the 24 h list
-  // may already hold the next night's games, which never make tonight a game night. A night whose
-  // games all stopped is over, not at rest, even once they left the 4 h window.
+  // The dial rests only on an empty 24 h list (first-screen spec S1, W4): a listed slate, even the
+  // next night's, keeps its pre-open arcs and its numbers. A night whose games all stopped is
+  // over, not at rest, even once they left the 4 h window.
   const night = etNight(now)
-  const resting = !games.some((g) => ofNight(g, night)) && !over
+  const resting = tonight.length === 0 && !over
   const restNext = resting ? (aheadOf(games, now) ?? ahead) : null
+  const open = items.filter(openNow).length
+  // A market still to open: no market yet, and the game has not started (stillTrades).
+  const waiting = items.filter((i) => !i.market && i.trading)
+  const opensAt = Math.min(...waiting.map((i) => i.interval.start).filter((t) => t > now))
+  const anyLive = tonight.some((g) => g.status === 'live')
+  // Before any market opens, the calendar link sits under the list (S2): the first listed tip-off.
+  const listNext = open === 0 && !anyLive && !over ? aheadOf(tonight, now) : null
+  const calendarNext = restNext ?? listNext
   // Every listed game is of a later night: head the list with that night's date, not tonight's.
   const firstListed = Math.min(...tonight.map(tipOf))
   const laterOnly = tonight.length > 0 && !tonight.some((g) => ofNight(g, night))
@@ -354,20 +439,27 @@ export function boardModel(
   const later = [...byNight.entries()]
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([, rows]) => ({
-      label: nextLabel(Math.min(...rows.map((i) => tipOf(i.game)))),
+      label: nextLabel(Math.min(...rows.map((i) => tipOf(i.game))), rows.length),
       items: rows,
     }))
+  const list = laterOnly ? items : items.filter((i) => ofNight(i.game, night))
   const base = {
     teams,
     items,
-    list: laterOnly ? items : items.filter((i) => ofNight(i.game, night)),
+    list,
     later,
     dial: resting ? [] : items,
     chainNow,
-    label: laterOnly ? nextLabel(firstListed) : label,
+    label: laterOnly ? nextLabel(firstListed, list.length) : boardLabel(now, list.length),
     rest: resting ? restLine(restNext, now) : null,
-    calendar: restNext ? calendarLink(restNext) : null,
+    calendar: calendarNext ? calendarLink(calendarNext) : null,
     stopped: over ? stoppedLine(aheadOf(games, now)?.tip ?? ahead?.tip ?? null, now) : null,
+    openNow: open,
+    firstOpen:
+      open === 0 && Number.isFinite(opensAt)
+        ? `First market opens ${inMinutes(opensAt - now)}`
+        : null,
+    note: !anyLive && waiting.length > 0,
   }
   if (items.length > 0) return { ...base, empty: null, filtered: false, next: null }
   if (follows.length > 0) {

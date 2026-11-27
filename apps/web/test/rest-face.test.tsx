@@ -1,5 +1,6 @@
 // A3 (culture plan, rides with R7): the dated board label, the rest face on a night with no
-// games, the calendar link and "All stopped".
+// games, the calendar link and "All stopped". First-screen spec slice 1: the dial rests only on an
+// empty 24 h list (C22), and the labels carry the game count (C16).
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Game } from '@horagon/sdk'
@@ -53,17 +54,19 @@ describe('the dated board label (string 2)', () => {
 
   it('heads the board, uppercased by the style only', () => {
     const html = board()
-    expect(html).toMatch(/<h2 class="[^"]*uppercase[^"]*">Tonight · Tue Nov 24<\/h2>/)
+    expect(html).toMatch(/<h2 class="[^"]*uppercase[^"]*">Tonight · Tue Nov 24 · 5 games<\/h2>/)
   })
 })
 
-describe('the rest line (string 3) and the calendar link (string 4)', () => {
-  it('says when the next tip-off is, in ET, and in how many hours', () => {
-    expect(restLine({ tip: FRI7, count: 4 }, REST_NOW)).toBe(
-      'The dial rests tonight. Next tip-off Fri, Nov 27 · 7:00 PM ET · in 39 h',
+const REST_39 = 'The dial rests until Fri, Nov 27. 4 games, first tip-off in 39 h.'
+
+describe('the rest line (string 3 made date-true, C22) and the calendar link (string 4)', () => {
+  it('says the day the dial rests until, the games and the first tip-off in hours', () => {
+    expect(restLine({ tip: FRI7, count: 4 }, REST_NOW)).toBe(REST_39)
+    expect(restLine(null, REST_NOW)).toBe('No NBA games in the next 24 hours.')
+    expect(restLine({ tip: REST_NOW - 60, count: 1 }, REST_NOW)).toBe(
+      'No NBA games in the next 24 hours.',
     )
-    expect(restLine(null, REST_NOW)).toBe('The dial rests tonight.')
-    expect(restLine({ tip: REST_NOW - 60, count: 1 }, REST_NOW)).toBe('The dial rests tonight.')
   })
 
   it("links the next game day's calendar file by its ET date", () => {
@@ -73,11 +76,9 @@ describe('the rest line (string 3) and the calendar link (string 4)', () => {
     })
   })
 
-  it('rests only on a board with no game tonight', () => {
+  it('rests only on an empty 24 h list', () => {
     const rest = boardModel([], undefined, REST_NOW, [], { tip: FRI7, count: 4 })
-    expect(rest.rest).toBe(
-      'The dial rests tonight. Next tip-off Fri, Nov 27 · 7:00 PM ET · in 39 h',
-    )
+    expect(rest.rest).toBe(REST_39)
     expect(rest.calendar?.href).toBe('/calendar/2026-11-27')
     expect(boardModel([], undefined, REST_NOW, []).calendar).toBeNull()
     const night = boardModel(evening(), undefined, NOW, [])
@@ -87,7 +88,7 @@ describe('the rest line (string 3) and the calendar link (string 4)', () => {
   })
 })
 
-describe('a night with no game, the next slate under 24 h away (R7 review adv-1, finding 1)', () => {
+describe('a night with no game, the next slate under 24 h away (first-screen S2)', () => {
   // Thu, Nov 26, 8:00 PM ET: the night of Thu, Nov 26 has no game; Friday's tip at 7:00 PM ET is
   // 23 h away, so the 24 h list already holds it.
   const THU8 = at('2026-11-27T01:00:00Z')
@@ -96,34 +97,31 @@ describe('a night with no game, the next slate under 24 h away (R7 review adv-1,
     scheduled('2026-11-28T00:30:00.000Z', { id: 'nba-fri-2', home: 'TOR', away: 'BOS' }),
   ]
 
-  it('rests the dial by the night, not by the 24 h window', () => {
+  it("never rests beside a listed slate: the dial keeps the next night's pre-open arcs", () => {
     const m = boardModel(fri(), undefined, THU8, [])
-    expect(m.rest).toBe('The dial rests tonight. Next tip-off Fri, Nov 27 · 7:00 PM ET · in 23 h')
+    expect(m.rest).toBeNull()
     expect(m.calendar?.href).toBe('/calendar/2026-11-27')
     expect(m.stopped).toBeNull()
-    // The resting dial draws no arc: the next night's games are not tonight's.
-    expect(m.dial).toEqual([])
+    expect(m.dial.map((i) => i.id).sort()).toEqual(['nba-fri-1', 'nba-fri-2'])
+    expect(m.firstOpen).toBe('First market opens in 22 h')
   })
 
   it("lists the next night's games under their own date, never under tonight's", () => {
     const m = boardModel(fri(), undefined, THU8, [])
     expect(m.items.map((i) => i.id).sort()).toEqual(['nba-fri-1', 'nba-fri-2'])
-    expect(m.label).toBe('Next · Fri Nov 27')
+    expect(m.label).toBe('Fri Nov 27 · 2 games')
     const html = board({ games: fri(), now: THU8 })
     expect(html).not.toContain('Tonight · Thu Nov 26')
-    expect(html).toMatch(/<h2 class="[^"]*uppercase[^"]*">Next · Fri Nov 27<\/h2>/)
-    expect(html).toContain('data-rest')
-    expect(html).toContain(
-      'The dial rests tonight. Next tip-off Fri, Nov 27 · 7:00 PM ET · in 23 h',
-    )
-    expect(html).not.toMatch(/data-id="nba-fri-1"/)
+    expect(html).toMatch(/<h2 class="[^"]*uppercase[^"]*">Fri Nov 27 · 2 games<\/h2>/)
+    expect(html).not.toContain('data-rest')
+    expect(html).not.toContain('rests')
   })
 
-  it('rests the same way in the morning, with the slate past 24 h', () => {
+  it('rests in the morning, with the slate past 24 h', () => {
     const m = boardModel(fri(), undefined, at('2026-11-26T15:00:00Z'), [])
     expect(m.items).toHaveLength(0)
     expect(m.label).toBe('Tonight · Thu Nov 26')
-    expect(m.rest).toBe('The dial rests tonight. Next tip-off Fri, Nov 27 · 7:00 PM ET · in 33 h')
+    expect(m.rest).toBe('The dial rests until Fri, Nov 27. 2 games, first tip-off in 33 h.')
   })
 
   it('after a night whose games stopped, heads the next games by their date', () => {
@@ -133,7 +131,7 @@ describe('a night with no game, the next slate under 24 h away (R7 review adv-1,
     const wed = scheduled('2026-11-26T00:00:00.000Z', { id: 'nba-wed' })
     const m = boardModel([...finals(), wed], undefined, late, [])
     expect(m.items.map((i) => i.id)).toEqual(['nba-wed'])
-    expect(m.label).toBe('Next · Wed Nov 25')
+    expect(m.label).toBe('Wed Nov 25 · 1 game')
     expect(m.rest).toBeNull()
     expect(m.stopped).toBe('All stopped. Next tip-off Wed 7:00 PM ET.')
   })
@@ -149,13 +147,13 @@ describe('a night with no game, the next slate under 24 h away (R7 review adv-1,
     })
     const t1 = scheduled('2026-11-29T00:30:00.000Z', { id: 't1', home: 'TOR', away: 'BOS' })
     const m = boardModel([f1, t1], undefined, fri11, [])
-    expect(m.label).toBe('Tonight · Fri Nov 27')
+    expect(m.label).toBe('Tonight · Fri Nov 27 · 1 game')
     expect(m.list.map((i) => i.id)).toEqual(['f1'])
     expect(m.later).toEqual([
-      { label: 'Next · Sat Nov 28', items: [m.items.find((i) => i.id === 't1')] },
+      { label: 'Sat Nov 28 · 1 game', items: [m.items.find((i) => i.id === 't1')] },
     ])
     const html = board({ games: [f1, t1], now: fri11 })
-    const heading = html.indexOf('>Next · Sat Nov 28<')
+    const heading = html.indexOf('>Sat Nov 28 · 1 game<')
     expect(heading).toBeGreaterThan(-1)
     expect(html.indexOf('/game/f1')).toBeLessThan(heading)
     expect(html.indexOf('/game/t1')).toBeGreaterThan(heading)
@@ -164,7 +162,7 @@ describe('a night with no game, the next slate under 24 h away (R7 review adv-1,
   })
 
   it("keeps tonight's date while a game of the night is listed", () => {
-    expect(boardModel(evening(), undefined, NOW, []).label).toBe('Tonight · Tue Nov 24')
+    expect(boardModel(evening(), undefined, NOW, []).label).toBe('Tonight · Tue Nov 24 · 5 games')
     expect(boardModel(evening(), undefined, NOW, []).dial).toHaveLength(
       boardModel(evening(), undefined, NOW, []).items.length,
     )
@@ -198,7 +196,7 @@ describe('All stopped (string 21)', () => {
     expect(m.stopped).toBe('All stopped. Next tip-off Sat 3:30 PM ET.')
     const html = board({ games: finals(), now: late, upcoming: { tip: SAT330, count: 1 } })
     expect(html).not.toContain('data-rest')
-    expect(html).not.toContain('The dial rests tonight.')
+    expect(html).not.toContain('The dial rests')
     // The dial says it too.
     expect(html).toMatch(/<span class="[^"]*">All stopped\. Next tip-off Sat 3:30 PM ET\.<\/span>/)
   })
@@ -229,9 +227,7 @@ describe('the rest face of the Night dial', () => {
     const twelve = polar(100, 100, 80, 0)
     expect(html).toContain(`x="${twelve.x}" y="${twelve.y}"`)
     expect(html).toMatch(/<text [^>]*>ET<\/text>/)
-    expect(html).toContain(
-      'The dial rests tonight. Next tip-off Fri, Nov 27 · 7:00 PM ET · in 39 h',
-    )
+    expect(html).toContain(REST_39)
     // The list keeps its words, and adds the calendar link.
     expect(html).toContain('Next games: Fri, Nov 27 · 4 games from 7:00 PM ET')
     expect(html).toContain(

@@ -50,3 +50,17 @@ export function spokenDuration(secs: number): string {
   if (h === 0) return plural(m, 'minute')
   return m === 0 ? plural(h, 'hour') : `${plural(h, 'hour')} ${plural(m, 'minute')}`
 }
+
+/** "in 47 min", "in 2 h 5 min", "in 3 h": exact to the minute (R8, shared by the board). */
+export function inMinutes(secs: number): string {
+  const m = Math.max(1, Math.ceil(secs / 60))
+  if (m < 60) return `in ${m} min`
+  const h = Math.floor(m / 60)
+  return m % 60 === 0 ? `in ${h} h` : `in ${h} h ${m % 60} min`
+}
+
+/** "in 15 h" in whole hours from 2 h up, "in 42 min" below (first-screen spec C19). */
+export function roughIn(secs: number): string {
+  if (secs >= 7_200) return `in ${Math.round(secs / 3_600)} h`
+  return `in ${Math.max(1, Math.ceil(secs / 60))} min`
+}

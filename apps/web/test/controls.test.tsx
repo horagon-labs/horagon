@@ -43,7 +43,7 @@ describe('header, rows and panels (review §4.8)', () => {
 
   it('edges a game row in rule (3.59) and darkens it to ink on hover and when lit', () => {
     const row = classAt(
-      renderToStaticMarkup(<DialRow item={boardItem(game(), undefined, NOW)} />),
+      renderToStaticMarkup(<DialRow item={boardItem(game(), undefined, NOW)} now={NOW} />),
       '<a ',
     )
     expect(row).toContain('border-line')

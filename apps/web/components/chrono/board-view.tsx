@@ -4,9 +4,19 @@
 // first in the DOM too, so focus and screen readers meet them in the order the phone shows them
 // (WCAG 2.4.3); only the desktop grid moves the dial column first. The follow chips fold behind
 // "Follow teams". Shared loading, empty, stale and error states. Hovering a row lights its arc
-// and hovering an arc lights its row.
+// and hovering an arc lights its row. Under the heading (first-screen spec C17, C18): the count
+// line, "● 4 markets open now · Pick a game" (the dot Live blue, as only an open market is) or
+// "First market opens in 14 h 44 min", then how a market opens; the calendar button sits under
+// the list (C23).
 import type { Game, PositionsResponse } from '@horagon/sdk'
-import { boardModel, followChips, followSummary, type Upcoming } from '../../lib/chrono/board'
+import {
+  type BoardItem,
+  boardModel,
+  followChips,
+  followSummary,
+  openNow,
+  type Upcoming,
+} from '../../lib/chrono/board'
 import { SELECTED } from '../../lib/chrono/controls'
 import type { Health } from '../../lib/chrono/health'
 import { ErrorText } from '../error-text'
@@ -32,12 +42,29 @@ export interface BoardViewProps {
   onHover: (id: string | null) => void
 }
 
+/** C18, word for word. */
+export const BOARD_NOTE =
+  "Each market opens 60 min before tip-off at the model's chance at that time."
+
 export function BoardView(p: BoardViewProps) {
   const filter = p.showAll ? [] : p.follows
   const model = boardModel(p.games, p.portfolio, p.now, filter, p.upcoming ?? null)
   // Three failures before any data: the error text replaces the loading line.
   const empty = p.games === undefined && p.health.error ? '' : (model.empty ?? '')
   const chips = p.games === undefined ? [] : followChips(model.teams, p.follows)
+  // The first trading row in the order shown: the target of "Pick a game".
+  const firstOpen = [...model.list, ...model.later.flatMap((n) => n.items)].find(openNow)?.id
+  const row = (i: BoardItem) => (
+    <li key={i.id}>
+      <DialRow
+        item={i}
+        now={p.now}
+        first={i.id === firstOpen}
+        lit={p.hoverId === i.id}
+        onHover={p.onHover}
+      />
+    </li>
+  )
   return (
     <div className="flex flex-col gap-4 lg:grid lg:grid-cols-[minmax(0,26rem)_minmax(0,1fr)] lg:items-start lg:gap-8">
       <div className="space-y-3" data-board-list>
@@ -70,6 +97,28 @@ export function BoardView(p: BoardViewProps) {
             </details>
           )}
         </div>
+        {model.openNow > 0 ? (
+          <p className="text-13 text-ink" data-count>
+            <span aria-hidden="true" className="text-live">
+              ●
+            </span>{' '}
+            {model.openNow} {model.openNow === 1 ? 'market' : 'markets'} open now ·{' '}
+            <a href="#first-open" className="underline underline-offset-4">
+              Pick a game
+            </a>
+          </p>
+        ) : (
+          model.firstOpen && (
+            <p className="text-13 text-ink tabular-nums" data-count>
+              {model.firstOpen}
+            </p>
+          )
+        )}
+        {model.note && (
+          <p className="text-12 text-ink-muted" data-board-note>
+            {BOARD_NOTE}
+          </p>
+        )}
         <ErrorText error={p.health.error} />
         {model.stopped && (
           <p className="text-13 text-ink" data-stopped>
@@ -80,16 +129,6 @@ export function BoardView(p: BoardViewProps) {
           <p className="text-13 text-ivory-100" data-next>
             {model.next}
           </p>
-        )}
-        {model.calendar && (
-          // A file, not a page: a plain link, so the router never fetches it as one.
-          <a
-            href={model.calendar.href}
-            className="inline-flex min-h-11 items-center text-13 text-ink underline underline-offset-4"
-            data-calendar
-          >
-            {model.calendar.label}
-          </a>
         )}
         {/* The dial's own words are hidden from screen readers; the empty line is said here. */}
         {empty && (
@@ -107,27 +146,25 @@ export function BoardView(p: BoardViewProps) {
             Show all games
           </button>
         )}
-        <ul className="space-y-2">
-          {model.list.map((i) => (
-            <li key={i.id}>
-              <DialRow item={i} lit={p.hoverId === i.id} onHover={p.onHover} />
-            </li>
-          ))}
-        </ul>
+        <ul className="space-y-2">{model.list.map(row)}</ul>
         {model.later.map((night) => (
           <section key={night.label} className="space-y-2 pt-2" data-later>
             <h3 className="text-13 font-medium uppercase tracking-[0.2em] text-ink">
               {night.label}
             </h3>
-            <ul className="space-y-2">
-              {night.items.map((i) => (
-                <li key={i.id}>
-                  <DialRow item={i} lit={p.hoverId === i.id} onHover={p.onHover} />
-                </li>
-              ))}
-            </ul>
+            <ul className="space-y-2">{night.items.map(row)}</ul>
           </section>
         ))}
+        {model.calendar && (
+          // A file, not a page: a plain link, so the router never fetches it as one.
+          <a
+            href={model.calendar.href}
+            className="inline-flex min-h-11 items-center rounded-card border border-rule px-4 text-13 text-ink hover:border-ink"
+            data-calendar
+          >
+            {model.calendar.label}
+          </a>
+        )}
       </div>
       <div className="mx-auto w-full max-w-sm lg:sticky lg:top-20 lg:order-first lg:max-w-none">
         <NightDial

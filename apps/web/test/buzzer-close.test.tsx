@@ -67,10 +67,16 @@ describe('a halted market under a final game reads closed (R1 ruling)', () => {
   })
 
   it('reads "CLE lost · 77% · result pending" on its row, in ash and with no time', () => {
-    expect(rowWords(item)).toEqual({ subject: 'CLE lost', value: '77%', note: 'result pending' })
+    expect(rowWords(item, NOW)).toEqual({
+      subject: 'CLE lost',
+      value: '77%',
+      model: false,
+      note: 'result pending',
+      wide: '',
+    })
     expect(liveNumber(item.state)).toBe(false)
-    const row = renderToStaticMarkup(<DialRow item={item} />)
-    expect(row).toContain('text-ash-400">77%')
+    const row = renderToStaticMarkup(<DialRow item={item} now={NOW} />)
+    expect(row).toContain('text-ink-muted">77%')
     expect(row).not.toContain('latest')
   })
 
@@ -129,7 +135,7 @@ describe('a halted market under a final game reads closed (R1 ruling)', () => {
   it('keeps the amber halt for a game still on the court', () => {
     const live = boardItem(midGame, undefined, NOW)
     expect(RING[live.state]).toBe('stroke-amber-400')
-    expect(rowWords(live).note).toBe('trading halted')
+    expect(rowWords(live, NOW).note).toBe('trading halted')
     expect(resolutionStatus(live.state, midGame, null)).toBe('Trading halted')
   })
 })

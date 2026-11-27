@@ -105,7 +105,13 @@ describe('final means closed (item 1)', () => {
     const item = boardItem(atBuzzer, undefined, NOW)
     expect(item.secsLeft).toBeGreaterThan(0)
     expect(item.state).toBe('closed')
-    expect(rowWords(item)).toEqual({ subject: 'CLE lost', value: '77%', note: 'result pending' })
+    expect(rowWords(item, NOW)).toEqual({
+      subject: 'CLE lost',
+      value: '77%',
+      model: false,
+      note: 'result pending',
+      wide: '',
+    })
     const d = gameDial(detail({ ...over, markets: [open] }), open, null, null, NOW)
     expect(d.state).toBe('closed')
     expect(canTrade(d.state)).toBe(false)
@@ -252,7 +258,7 @@ describe('a game that started with no market (item 6)', () => {
       const item = none(status)
       expect(item.state).toBe('pre')
       expect(stateLine(item.state, item.game, item.secsLeft, NOW)).toBe('No market for this game')
-      expect(rowWords(item).note).toBe('no market')
+      expect(rowWords(item, NOW).note).toBe('no market')
       expect(itemLabel(item)).toMatch(/no market for this game$/)
       expect(itemLabel(item)).not.toMatch(/opens/)
     }
@@ -269,7 +275,7 @@ describe('a game that started with no market (item 6)', () => {
   it('still says when the market opens for a game not started yet', () => {
     const item = boardItem(game({ status: 'scheduled', markets: [] }), undefined, NOW)
     expect(stateLine(item.state, item.game, item.secsLeft, NOW)).toBe('Opens 60 min before tip-off')
-    expect(rowWords(item).note).toMatch(/^opens /)
+    expect(rowWords(item, NOW).note).toMatch(/^opens /)
   })
 })
 
