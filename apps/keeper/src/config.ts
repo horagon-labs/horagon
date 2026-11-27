@@ -577,13 +577,14 @@ export function loadConfig(
 
 /**
  * JSON logs for journald; `destination` is for tests. `onActivity` runs on every log call that
- * is emitted (the stall guard's clock); the output itself is unchanged.
+ * is emitted, with the logger (or child) that made it (the stall guard's clock); the output
+ * itself is unchanged.
  */
 export function createLogger(
   level: string,
   service = 'keeper',
   destination?: DestinationStream,
-  onActivity?: () => void,
+  onActivity?: (logger: Logger) => void,
 ): Logger {
   const options = {
     level,
@@ -593,7 +594,7 @@ export function createLogger(
       ? {
           hooks: {
             logMethod(this: Logger, args: Parameters<LogFn>, method: LogFn) {
-              onActivity()
+              onActivity(this)
               method.apply(this, args)
             },
           },

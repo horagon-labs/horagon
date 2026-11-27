@@ -1,6 +1,14 @@
 import pino from 'pino'
-import { describe, expect, it } from 'vitest'
-import { dueEvery, FailureStreak, roundSteps, runRound, runStep } from '../src/loop'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import {
+  dueEvery,
+  FailureStreak,
+  indexSteps,
+  PeriodicLoop,
+  roundSteps,
+  runRound,
+  runStep,
+} from '../src/loop'
 
 describe('FailureStreak', () => {
   it('alerts from the 12th failure in a row, with the error summary', () => {
@@ -69,40 +77,35 @@ describe('runStep', () => {
 })
 
 describe('roundSteps', () => {
-  it('runs the tick and the indexer first, then the hourly group behind one gate', () => {
-    expect(roundSteps({ hourly: false, archive: true, ataWatch: false })).toEqual(['tick', 'index'])
-    expect(roundSteps({ hourly: true, archive: true, ataWatch: true })).toEqual([
+  it('runs the tick first, then the hourly group behind one gate; the index work has its own loop', () => {
+    expect(roundSteps({ hourly: false, archive: true })).toEqual(['tick'])
+    expect(roundSteps({ hourly: true, archive: true })).toEqual([
       'tick',
-      'index',
       'schedule',
       'treasury',
       'archive',
-      'ata-watch',
     ])
-    expect(roundSteps({ hourly: true, archive: false, ataWatch: false })).toEqual([
-      'tick',
-      'index',
-      'schedule',
-      'treasury',
-    ])
-    expect(roundSteps({ hourly: false, archive: false, ataWatch: true })).toEqual([
-      'tick',
-      'index',
-      'ata-watch',
-    ])
+    expect(roundSteps({ hourly: true, archive: false })).toEqual(['tick', 'schedule', 'treasury'])
+  })
+})
+
+describe('indexSteps', () => {
+  it('runs the indexer, then the ATA watch when it is due', () => {
+    expect(indexSteps({ ataWatch: false })).toEqual(['index'])
+    expect(indexSteps({ ataWatch: true })).toEqual(['index', 'ata-watch'])
   })
 })
 
 describe('runRound', () => {
   it('runs every step in order when not stopping', async () => {
     const ran: string[] = []
-    const steps = roundSteps({ hourly: true, archive: true, ataWatch: false })
+    const steps = roundSteps({ hourly: true, archive: true })
     const done = await runRound(
       steps,
       async (s) => void ran.push(s),
       () => false,
     )
-    expect(ran).toEqual(['tick', 'index', 'schedule', 'treasury', 'archive'])
+    expect(ran).toEqual(['tick', 'schedule', 'treasury', 'archive'])
     expect(done).toEqual({ ran, stopped: false })
   })
 
@@ -110,7 +113,7 @@ describe('runRound', () => {
     let stopping = false
     const ran: string[] = []
     const r = await runRound(
-      roundSteps({ hourly: true, archive: true, ataWatch: true }),
+      indexSteps({ ataWatch: true }),
       async (s) => {
         ran.push(s)
         // SIGTERM arrives while the indexer runs: it finishes, nothing after it starts.
@@ -118,8 +121,8 @@ describe('runRound', () => {
       },
       () => stopping,
     )
-    expect(ran).toEqual(['tick', 'index'])
-    expect(r).toEqual({ ran: ['tick', 'index'], stopped: true })
+    expect(ran).toEqual(['index'])
+    expect(r).toEqual({ ran: ['index'], stopped: true })
 
     const none = await runRound(
       ['tick', 'index'],
@@ -127,5 +130,84 @@ describe('runRound', () => {
       () => true,
     )
     expect(none).toEqual({ ran: [], stopped: true })
+  })
+})
+
+describe('PeriodicLoop', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+  const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
+
+  it('runs a round every period, never two at once, until stopping', async () => {
+    vi.useFakeTimers()
+    let stopping = false
+    let running = 0
+    let most = 0
+    const starts: number[] = []
+    const loop = new PeriodicLoop({
+      periodMs: 10,
+      stopping: () => stopping,
+      round: async () => {
+        running++
+        most = Math.max(most, running)
+        starts.push(Date.now())
+        // Every other round takes longer than the period.
+        await sleep(starts.length % 2 === 0 ? 25 : 1)
+        running--
+      },
+    })
+    const done = loop.run()
+    await vi.advanceTimersByTimeAsync(150)
+    stopping = true
+    loop.wake()
+    await vi.advanceTimersByTimeAsync(50)
+    await done
+    expect(most).toBe(1)
+    // Start to start: 10 ms after a short round, at once (the next timer tick) after a long one.
+    const gaps = starts.slice(1).map((t, i) => t - (starts[i] ?? 0))
+    expect(gaps[0]).toBe(10)
+    expect(gaps[1]).toBeGreaterThanOrEqual(25)
+    expect(gaps[1]).toBeLessThanOrEqual(26)
+    expect(gaps[2]).toBe(10)
+    expect(loop.rounds).toBe(starts.length)
+    expect(loop.busyMs()).toBeNull()
+  })
+
+  it('ends after the round in progress once stopping, and a wake cuts the wait short', async () => {
+    vi.useFakeTimers()
+    let stopping = false
+    let release: () => void = () => {}
+    const loop = new PeriodicLoop({
+      periodMs: 60_000,
+      stopping: () => stopping,
+      round: () => new Promise<void>((r) => (release = r)),
+    })
+    const done = loop.run()
+    await vi.advanceTimersByTimeAsync(20)
+    expect(loop.busyMs()).toBe(20)
+    stopping = true
+    let ended = false
+    void done.then(() => (ended = true))
+    await vi.advanceTimersByTimeAsync(20)
+    // The round in progress is not cut off.
+    expect(ended).toBe(false)
+    release()
+    await done
+    expect(loop.rounds).toBe(1)
+
+    // A loop asleep between rounds stops at once on a wake.
+    stopping = false
+    const idle = new PeriodicLoop({
+      periodMs: 60_000,
+      stopping: () => stopping,
+      round: async () => {},
+    })
+    const idleDone = idle.run()
+    await vi.advanceTimersByTimeAsync(20)
+    stopping = true
+    idle.wake()
+    await idleDone
+    expect(idle.rounds).toBe(1)
   })
 })

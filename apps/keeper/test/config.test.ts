@@ -712,6 +712,14 @@ describe('index RPC endpoints', () => {
 })
 
 describe('createLogger', () => {
+  it('tells its activity hook which logger, or child, made the line', () => {
+    const seen: Array<Record<string, unknown>> = []
+    const log = createLogger('info', 'keeper', { write: () => {} }, (l) => seen.push(l.bindings()))
+    log.info('tick')
+    log.child({ loop: 'index' }).warn('index')
+    expect(seen.map((b) => b.loop)).toEqual([undefined, 'index'])
+  })
+
   it('writes JSON with the service name and redacts tokens and secret keys', () => {
     const lines: string[] = []
     const log = createLogger('info', 'ops', { write: (l: string) => void lines.push(l) })

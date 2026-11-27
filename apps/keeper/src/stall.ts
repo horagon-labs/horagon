@@ -45,7 +45,7 @@ export class StallGuard {
  * the same stuck resources): the watchdog's missing heartbeat already tells the guardian.
  */
 export function watchStall(
-  guard: StallGuard,
+  guard: Pick<StallGuard, 'check'>,
   log: Pick<Logger, 'fatal' | 'flush'>,
   exit: (code: number) => void = (code) => process.exit(code),
   intervalMs = STALL_CHECK_MS,
