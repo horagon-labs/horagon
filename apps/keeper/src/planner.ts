@@ -76,7 +76,10 @@ export const DEFAULT_TIMINGS: Timings = {
 /**
  * The horn frame (Q4 or an overtime at 0:00, not tied) must hold this long before the keeper
  * halts on it (R8): a frame ESPN shows for a moment, or that a review takes back, does not close
- * the market. A planner constant, not a KEEPER_TIMINGS field.
+ * the market. The hold is measured between feed reads, from the first read of the frame to the
+ * latest read that still shows it, never against the tick clock: the main keeper ticks every 5 s
+ * but reads ESPN every 15 s, so one read of the frame never halts. A planner constant, not a
+ * KEEPER_TIMINGS field.
  */
 export const HORN_HOLD_SECS = 10
 
@@ -484,7 +487,8 @@ function haltRule(
     feed &&
     isHornFrame(feed) &&
     s.hornSince != null &&
-    now - s.hornSince >= HORN_HOLD_SECS &&
+    s.feedSeenAt !== null &&
+    s.feedSeenAt - s.hornSince >= HORN_HOLD_SECS &&
     now < chain.endTs
   )
     return 'horn'

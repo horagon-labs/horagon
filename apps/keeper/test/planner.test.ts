@@ -302,6 +302,17 @@ describe('the horn (R8)', () => {
     expect(run(now, open({ feed: horn(), feedSeenAt: now }))).toEqual([])
   })
 
+  it('counts the hold between feed reads, not ticks: one read of the horn never halts', () => {
+    // Read once 30 s ago and not since: no read has confirmed the frame held.
+    expect(run(now, open({ feed: horn(), feedSeenAt: now - 30, hornSince: now - 30 }))).toEqual([])
+    // The last read is 9 s after the first: not yet.
+    expect(run(now, open({ feed: horn(), feedSeenAt: now - 21, hornSince: now - 30 }))).toEqual([])
+    // A read 10 s after the first still showed it.
+    expect(
+      types(run(now, open({ feed: horn(), feedSeenAt: now - 20, hornSince: now - 30 }))),
+    ).toEqual(['halt'])
+  })
+
   it('halts on the horn of an overtime', () => {
     expect(types(held(10, horn({ period: 5, homeScore: 120, awayScore: 118 })))).toEqual(['halt'])
   })

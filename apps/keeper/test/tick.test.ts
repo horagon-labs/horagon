@@ -662,6 +662,43 @@ describe('the horn (R8)', () => {
     expect(types(await keeper.tick())).toEqual(['draft'])
   })
 
+  it('needs a second read of the horn frame 10 s after the first: a 15 s feed and a 5 s tick', async () => {
+    // The main keeper reads ESPN every 15 s (feedEverySecs' default) and ticks every 5 s.
+    const throttled = new Keeper({ ...deps, feedEverySecs: 15 })
+    expect(types(await throttled.tick())).toEqual(['create'])
+    now = S + 9_600
+    const horn = {
+      status: 'live',
+      period: 4,
+      clockSecs: 0,
+      homeScore: 109,
+      awayScore: 106,
+    } as const
+    current = { ...current, ...horn }
+    // Read at t = 0: the horn frame. The ticks at 5 and 10 s read nothing new: no halt.
+    expect(await throttled.tick()).toEqual([])
+    now += 5
+    expect(await throttled.tick()).toEqual([])
+    now += 5
+    expect(await throttled.tick()).toEqual([])
+    // A review put a second back: the read at 15 s shows it, and nothing ever halted.
+    current = { ...current, clockSecs: 1 }
+    now += 5
+    expect(await throttled.tick()).toEqual([])
+    now += 5
+    expect(await throttled.tick()).toEqual([])
+    expect(sends).toEqual(['create nba-401910007'])
+    // The horn again: read at 30 s, held through the read at 45 s, halts at that read.
+    current = { ...current, clockSecs: 0 }
+    for (const step of [10, 5, 5]) {
+      now += step
+      expect(await throttled.tick()).toEqual([])
+    }
+    now += 5
+    expect(types(await throttled.tick())).toEqual(['halt'])
+    expect(sends).toEqual(['create nba-401910007', 'halt nba-401910007 (horn)'])
+  })
+
   it('never halts on a tied horn frame: overtime follows', async () => {
     expect(types(await keeper.tick())).toEqual(['create'])
     now = S + 9_600
