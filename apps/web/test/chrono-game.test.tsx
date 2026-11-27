@@ -29,6 +29,9 @@ const proposal: Resolution = {
   finalizeSig: null,
   recycleSig: null,
   externalLp: false,
+  gameMarket: 'GameMarket11111111111111111111111111111111',
+  proposedAt: null,
+  challengeEndsAt: null,
 }
 
 describe('gameDial (spec 4.2, 4.3)', () => {

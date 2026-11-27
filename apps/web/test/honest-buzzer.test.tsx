@@ -154,6 +154,9 @@ describe('no "halted" for a normal close (item 2)', () => {
     finalizeSig: null,
     recycleSig: null,
     externalLp: false,
+    gameMarket: 'GameMarket11111111111111111111111111111111',
+    proposedAt: null,
+    challengeEndsAt: null,
   }
 
   it('reads a halted position as "trading closed" in the wallet sheet', () => {
@@ -503,6 +506,9 @@ describe('the last post-buzzer words (refix)', () => {
       finalizeSig: null,
       recycleSig: null,
       externalLp: true,
+      gameMarket: 'GameMarket11111111111111111111111111111111',
+      proposedAt: null,
+      challengeEndsAt: null,
     }
     const card = renderToStaticMarkup(
       <ResolutionCard game={detail({ ...over, resolutions: [r] })} state="closed" />,

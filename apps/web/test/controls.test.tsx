@@ -307,6 +307,9 @@ function resolution(over: Partial<Resolution> = {}): Resolution {
     finalizeSig: null,
     recycleSig: null,
     externalLp: false,
+    gameMarket: 'GameMarket11111111111111111111111111111111',
+    proposedAt: null,
+    challengeEndsAt: null,
     ...over,
   }
 }

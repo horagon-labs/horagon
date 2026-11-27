@@ -17,6 +17,7 @@ import {
   type Outcome,
   type Resolution,
 } from '@horagon/sdk'
+import { challengeEndsAt } from './dispute-window'
 
 const secs = (d: Date) => Math.floor(d.getTime() / 1000)
 
@@ -78,7 +79,11 @@ export function marketRules(g: Pick<GameWithMarkets, 'home' | 'away'>, kinds: nu
   return rules
 }
 
-export function toResolution(m: MarketRow, publicUrl: string): Resolution {
+export function toResolution(
+  m: MarketRow,
+  publicUrl: string,
+  disputeWindowSecs: number | null,
+): Resolution {
   const kind = marketKindName(m.kind)
   return {
     market: m.pubkey,
@@ -93,6 +98,9 @@ export function toResolution(m: MarketRow, publicUrl: string): Resolution {
     finalizeSig: m.finalizeSig,
     recycleSig: m.recycleSig,
     externalLp: m.externalLp,
+    gameMarket: m.gameMarketPda,
+    proposedAt: m.proposedAt ? secs(m.proposedAt) : null,
+    challengeEndsAt: challengeEndsAt(m.status, m.proposedAt, disputeWindowSecs),
   }
 }
 
@@ -101,6 +109,7 @@ export function toGameDetail(
   prices: PriceIndex,
   publicUrl: string,
   activity: GameActivity,
+  disputeWindowSecs: number | null,
 ): GameDetail {
   return {
     ...toGame(g, prices),
@@ -108,7 +117,7 @@ export function toGameDetail(
       g,
       g.markets.map((m) => m.kind),
     ),
-    resolutions: g.markets.map((m) => toResolution(m, publicUrl)),
+    resolutions: g.markets.map((m) => toResolution(m, publicUrl, disputeWindowSecs)),
     activity,
   }
 }
