@@ -7,12 +7,16 @@
 //   6. the RPC is not mainnet by its genesis hash (once per process; fails closed) -> 400/502
 //   7. sign that same object
 //   8. reserve the worst-case lamports under the daily cap (atomic) -> RATE_LIMITED; the same
-//      signature already reserved is the same transaction again: answer it, send nothing
+//      signature already reserved is the same transaction again: answer it, send nothing. A
+//      wallet with no sponsored trade that landed reserves under the cap less its reserve slice
+//      (RATE_LIMITED, reason RESERVE_ONLY), so new wallets cannot use the whole day up
 //   9. simulate with sigVerify; release on failure   -> SLIPPAGE_EXCEEDED, ... PROGRAM_ERROR
 //  10. take the daily ATA budget (wallet and hashed IP); release if it is used up
 //  11. send with skipPreflight and return the signature at once. A send error may come after
 //      the node took the transaction, so the reservation and the ATA budget stay spent and the
 //      502 names the signature to look up.
+//  12. once the day's spend passes 50% and 80% of the cap, an ops event for each mark, once a UTC
+//      day (`sponsor-cap-50`, `sponsor-cap-80`); the keeper pages them.
 // No step before 9 calls the RPC (apart from the genesis check and one rent read, both made
 // once), and nothing from an exception reaches the client, or the logs beyond `errorSummary`.
 
@@ -20,10 +24,13 @@ import { Buffer } from 'node:buffer'
 import {
   atasClosedAway,
   listMarketMints,
+  logOps,
   rateLimitRefund,
   rateLimitTake,
+  sponsoredTradeLanded,
   sponsorRelease,
   sponsorReserve,
+  sponsorSpentSince,
 } from '@horagon/db'
 import { assertNotMainnetGenesis, errorSummary, fromProgramError, PROTOCOL_DAO } from '@horagon/sdk'
 import { ComputeBudgetProgram, PublicKey, VersionedTransaction } from '@solana/web3.js'
@@ -234,12 +241,16 @@ export async function submitSponsored(
     )
     tokenAccountRent = BigInt(rent)
   }
+  const lamports = exposureLamports(tx, tokenAccountRent, ataCreates)
+  const cap = sponsor.dailyCapLamports
+  // The reserve slice is for wallets with a sponsored trade that landed; one read, by index.
+  const held = sponsor.reserveLamports > 0n && !(await sponsoredTradeLanded(deps.db, wallet))
   const reservation = await sponsorReserve(deps.db, {
     sig: signature,
     wallet,
     ipHash,
-    lamports: exposureLamports(tx, tokenAccountRent, ataCreates),
-    capLamports: sponsor.dailyCapLamports,
+    lamports,
+    capLamports: held ? cap - sponsor.reserveLamports : cap,
   })
   if (reservation === 'duplicate') {
     // The sponsor's signature is deterministic: this exact transaction was submitted before.
@@ -247,6 +258,14 @@ export async function submitSponsored(
     return { signature }
   }
   if (reservation === 'over_cap') {
+    // The same day as sponsor_reserve, which counts from 00:00 UTC by the database clock.
+    if (held && (await sponsorSpentSince(deps.db, utcDayStart(Date.now()))) + lamports <= cap) {
+      // No retryAfterSecs: a client would show a day-long countdown instead of these words.
+      throw new ApiError('RATE_LIMITED', 'Sponsored fees for new wallets are used up for today', {
+        reason: 'RESERVE_ONLY',
+        hint: 'They come back at 00:00 UTC. A wallet that has traded here before can still trade.',
+      })
+    }
     throw new ApiError('RATE_LIMITED', "Today's sponsor budget is used up", {
       hint: 'Retry after 00:00 UTC, or build the transaction with sponsored: false and pay the fee.',
       retryAfterSecs: secondsToUtcMidnight(deps.now()),
@@ -291,7 +310,42 @@ export async function submitSponsored(
     })
   }
   deps.log.info({ sig: signature, wallet }, 'sponsored tx sent')
+  await logCapMarks(deps, cap)
   return { signature }
+}
+
+/** Shares of the daily cap that log an ops event (and page, through the keeper) once a day. */
+const CAP_MARKS = [50, 80] as const
+
+/**
+ * Logs `sponsor-cap-<mark>` for each mark today's spend has passed, once per UTC day: a
+ * one-token bucket whose key names the day is taken first, so parallel submits log it once.
+ * Never throws: the transaction is already sent.
+ */
+async function logCapMarks(deps: ApiDeps, cap: bigint): Promise<void> {
+  try {
+    const dayStart = utcDayStart(Date.now())
+    const day = dayStart.toISOString().slice(0, 10)
+    const spent = await sponsorSpentSince(deps.db, dayStart)
+    for (const mark of CAP_MARKS) {
+      if (spent * 100n < cap * BigInt(mark)) continue
+      const action = `sponsor-cap-${mark}`
+      const wait = await rateLimitTake(deps.db, `once:${action}:${day}`, {
+        capacity: 1,
+        refillPerSec: 1 / 86_400,
+      })
+      if (wait > 0) continue
+      const detail = { day, spentLamports: spent.toString(), capLamports: cap.toString() }
+      await logOps(deps.db, { actor: 'api', action, detail })
+      deps.log.warn({ action, ...detail }, 'sponsor budget mark passed')
+    }
+  } catch (e) {
+    deps.log.warn({ error: errorSummary(e) }, 'sponsor budget mark not logged')
+  }
+}
+
+function utcDayStart(ms: number): Date {
+  return new Date(Math.floor(ms / 86_400_000) * 86_400_000)
 }
 
 /**

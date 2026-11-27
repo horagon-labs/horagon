@@ -2,10 +2,12 @@ import { Buffer } from 'node:buffer'
 import {
   heartbeat,
   insertTrades,
+  listOps,
   markAtaClosed,
   putEvidence,
   recordSponsoredAtas,
   schema,
+  sponsorReserve,
   sponsorSpentSince,
   updateMarket,
 } from '@horagon/db'
@@ -29,7 +31,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createApp } from '../src/app'
 import { pmAmmFaucet } from '../src/faucet'
 import { DEFAULT_SPONSOR_LIMITS } from '../src/sponsor/policy'
-import { hashIp, MarketSet } from '../src/sponsor/submit'
+import { exposureLamports, hashIp, MarketSet } from '../src/sponsor/submit'
 import { validateSponsoredTransaction } from '../src/sponsor/validate'
 import { GAME_ID, makeEnv, program, type TestEnv, tokenAccount } from './helpers'
 
@@ -394,6 +396,105 @@ describe('POST /tx/submit', () => {
     const res = await post('/tx/submit', { tx: signAsUser(built.tx) })
     expect(res.status).toBe(429)
     expect(env.chain.simulated).toBe(0)
+  })
+
+  /** What the sponsor reserves for one built trade (fees plus the rent of its new ATAs). */
+  async function exposureOf(base64: string): Promise<bigint> {
+    const rent = BigInt(await env.chain.asConnection().getMinimumBalanceForRentExemption(165))
+    const tx = VersionedTransaction.deserialize(Buffer.from(base64, 'base64'))
+    return exposureLamports(tx, rent, inspect(base64).ataCreates)
+  }
+  /** A sponsored trade of the user that landed: its reservation and its indexed trade. */
+  async function landedSponsoredTrade(sig: string) {
+    const wallet = env.user.publicKey.toBase58()
+    await sponsorReserve(env.h.db, {
+      sig,
+      wallet,
+      ipHash: 'h',
+      lamports: 1n,
+      capLamports: 10n ** 18n,
+    })
+    await insertTrades(env.h.db, [
+      {
+        sig,
+        ixIndex: 2,
+        market: env.market.pubkey.toBase58(),
+        wallet,
+        direction: 'usdcToYes',
+        usdcAmount: 1n,
+        usdcDelta: -1n,
+        yesDelta: 1n,
+        noDelta: 0n,
+        fee: 0n,
+        slot: 1n,
+        blockTime: new Date(),
+      },
+    ])
+  }
+  const BET_WORDS = /\b(bet|bets|betting|wager|odds|gambl\w*)\b/i
+
+  it('keeps the reserve slice of the cap for wallets with a sponsored trade that landed', async () => {
+    const x = await exposureOf((await builtTrade()).tx)
+    // Open to every wallet: half a trade. The reserve: one more trade.
+    await replaceEnv({ capSol: Number((x * 3n) / 2n) / 1e9, reserveSol: Number(x) / 1e9 })
+    const refused = await post('/tx/submit', { tx: signAsUser((await builtTrade()).tx) })
+    expect(refused.status).toBe(429)
+    const body = (await refused.json()) as {
+      code: string
+      reason: string
+      detail: string
+      hint: string
+    }
+    expect(body).toMatchObject({ code: 'RATE_LIMITED', reason: 'RESERVE_ONLY' })
+    expect(body.hint).toMatch(/00:00 UTC/)
+    // Words, not a day-long countdown.
+    expect(refused.headers.get('retry-after')).toBeNull()
+    expect(`${body.detail} ${body.hint}`).not.toMatch(BET_WORDS)
+    expect(env.chain.simulated).toBe(0)
+    // The same wallet once one of its sponsored trades landed: the reserve is open to it.
+    await landedSponsoredTrade('S-landed')
+    expect((await post('/tx/submit', { tx: signAsUser((await builtTrade()).tx) })).status).toBe(200)
+    expect(env.chain.sent).toHaveLength(1)
+  })
+
+  it('tells a new wallet the budget is used up, not reserved, once the whole cap is spent', async () => {
+    const x = await exposureOf((await builtTrade()).tx)
+    await replaceEnv({ capSol: Number(x / 2n) / 1e9, reserveSol: Number(x / 4n) / 1e9 })
+    const res = await post('/tx/submit', { tx: signAsUser((await builtTrade()).tx) })
+    expect(res.status).toBe(429)
+    const body = (await res.json()) as { reason?: string; detail: string }
+    expect(body.reason).toBeUndefined()
+    expect(body.detail).toMatch(/used up/)
+  })
+
+  it('logs the 50% and the 80% marks of the daily cap once each', async () => {
+    const x = await exposureOf((await builtTrade()).tx)
+    // 3.5 trades a day: the second passes 50%, the third 80%.
+    await replaceEnv({ capSol: Number((x * 7n) / 2n) / 1e9 })
+    const marks = async () =>
+      (await listOps(env.h.db))
+        .filter((o) => o.action.startsWith('sponsor-cap-'))
+        .map((o) => [o.actor, o.action])
+    expect((await post('/tx/submit', { tx: signAsUser((await builtTrade('20')).tx) })).status).toBe(
+      200,
+    )
+    expect(await marks()).toEqual([])
+    expect((await post('/tx/submit', { tx: signAsUser((await builtTrade('21')).tx) })).status).toBe(
+      200,
+    )
+    expect(await marks()).toEqual([['api', 'sponsor-cap-50']])
+    expect((await post('/tx/submit', { tx: signAsUser((await builtTrade('22')).tx) })).status).toBe(
+      200,
+    )
+    expect((await marks()).sort()).toEqual([
+      ['api', 'sponsor-cap-50'],
+      ['api', 'sponsor-cap-80'],
+    ])
+    const mark = (await listOps(env.h.db)).find((o) => o.action === 'sponsor-cap-80')
+    expect(mark?.detail).toMatchObject({
+      day: new Date().toISOString().slice(0, 10),
+      capLamports: ((x * 7n) / 2n).toString(),
+    })
   })
 
   it('answers a failed send with its signature and keeps the reservation, never echoing the RPC error', async () => {

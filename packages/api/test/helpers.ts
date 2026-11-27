@@ -180,6 +180,8 @@ export async function makeEnv(
   opts: {
     txPerHour?: number
     capSol?: number
+    /** The slice of the cap only wallets with a landed sponsored trade may spend (default 0). */
+    reserveSol?: number
     atasPerWalletDay?: number
     atasPerIpDay?: number
   } = {},
@@ -217,6 +219,7 @@ export async function makeEnv(
     sponsor: {
       keypair: sponsor,
       dailyCapLamports: BigInt(Math.round((opts.capSol ?? 2) * 1e9)),
+      reserveLamports: BigInt(Math.round((opts.reserveSol ?? 0) * 1e9)),
       txPerHour: opts.txPerHour ?? 30,
       atasPerDay: { wallet: opts.atasPerWalletDay ?? 26, ip: opts.atasPerIpDay ?? 78 },
     },

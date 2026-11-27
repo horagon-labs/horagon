@@ -89,6 +89,20 @@ function solAmount(
   return BigInt(lamports)
 }
 
+/** The sponsor's reserve (`SPONSOR_RESERVE_SOL`, default 0.5 SOL): 0 or more, at most the cap. */
+function reserveAmount(env: Record<string, string | undefined>, cap: bigint): bigint {
+  const raw = env.SPONSOR_RESERVE_SOL
+  const sol = raw === undefined || raw.trim() === '' ? 0.5 : Number(raw)
+  const lamports = Math.round(sol * 1e9)
+  if (!Number.isFinite(sol) || !Number.isSafeInteger(lamports) || lamports < 0) {
+    throw new Error('SPONSOR_RESERVE_SOL must be an amount of SOL of 0 or more')
+  }
+  if (BigInt(lamports) > cap) {
+    throw new Error('SPONSOR_RESERVE_SOL must not be more than SPONSOR_DAILY_CAP_SOL')
+  }
+  return BigInt(lamports)
+}
+
 export function depsFromEnv(env: Record<string, string | undefined>, db?: Db): ApiDeps {
   const need = (k: string) => {
     const v = env[k]
@@ -110,6 +124,7 @@ export function depsFromEnv(env: Record<string, string | undefined>, db?: Db): A
     : env.SPONSOR_KEYPAIR
       ? loadKeypairFile('SPONSOR_KEYPAIR', env.SPONSOR_KEYPAIR)
       : undefined
+  const dailyCapLamports = sponsorKeypair ? solAmount(env, 'SPONSOR_DAILY_CAP_SOL', 2) : 0n
   return {
     db: db ?? connectPostgres(need('DATABASE_URL')).db,
     connection: new Connection(rpcUrl, {
@@ -123,7 +138,8 @@ export function depsFromEnv(env: Record<string, string | undefined>, db?: Db): A
       ? {
           sponsor: {
             keypair: sponsorKeypair,
-            dailyCapLamports: solAmount(env, 'SPONSOR_DAILY_CAP_SOL', 2),
+            dailyCapLamports,
+            reserveLamports: reserveAmount(env, dailyCapLamports),
             txPerHour: wholeNumber(env, 'SPONSOR_TX_PER_HOUR', 30, 1),
             // 0 is allowed: the sponsor then opens no new token accounts (RATE_LIMITED).
             atasPerDay: {
