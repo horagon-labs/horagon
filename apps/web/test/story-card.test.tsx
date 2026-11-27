@@ -169,6 +169,16 @@ describe('the full story card on real ET 11-25 data (W2, C7-C12, G1)', () => {
     expect(html).not.toContain('data-tape-price')
   })
 
+  it('puts "opened 28%" under its dot where the line climbs off the open, and haloes every label', () => {
+    for (const m of html.matchAll(
+      /<circle cx="([\d.]+)" cy="([\d.]+)" r="2.5"[^>]*><\/circle><text x="[\d.]+" y="([\d.]+)"[^>]*>opened 28%/g,
+    )) {
+      expect(Number(m[3])).toBeGreaterThan(Number(m[2]))
+    }
+    expect(html.match(/<circle cx="[\d.]+" cy="[\d.]+" r="2.5"/g)).toHaveLength(2)
+    expect(html.match(/<text [^>]*paint-order="stroke"/g)).toHaveLength(2 * (4 + 3))
+  })
+
   it('rests a readout on the low with a 96 px dial and an ink ▲ from sm (C11)', () => {
     expect(html).toMatch(/class="[^"]*hidden[^"]*sm:flex[^"]*" data-readout/)
     expect(t).toContain('Q3 5:41 · 63–74')

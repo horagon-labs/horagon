@@ -44,7 +44,18 @@ const HALO = { paintOrder: 'stroke', strokeWidth: 3, strokeLinejoin: 'round' } a
 /** A label's baseline above a point, or under it when the top edge is too close. */
 const above = (y: number, top = 10) => (y - 6 >= top ? y - 6 : y + 13)
 
-function TapeSvg({ tape, box, className }: { tape: Tape; box: typeof NARROW; className: string }) {
+function TapeSvg({
+  tape,
+  box,
+  openedBelow,
+  className,
+}: {
+  tape: Tape
+  box: typeof NARROW
+  /** The line climbs off the open: its label goes under the dot, clear of the line. */
+  openedBelow: boolean
+  className: string
+}) {
   const { w, h, pad } = box
   const top = pad.top
   const bottom = h - pad.bottom
@@ -56,6 +67,8 @@ function TapeSvg({ tape, box, className }: { tape: Tape; box: typeof NARROW; cla
   // line rises on both sides of a low, so the space right above it is clear).
   const lowY = low ? (low.y + 15 <= bottom ? low.y + 15 : low.y - 9) : 0
   const lowX = low ? Math.min(Math.max(low.x, left + 12), right - 12) : 0
+  const openedY =
+    openedBelow && tape.opened.y + 13 <= bottom - 2 ? tape.opened.y + 13 : above(tape.opened.y)
   return (
     <svg
       viewBox={`0 0 ${w} ${h}`}
@@ -101,13 +114,7 @@ function TapeSvg({ tape, box, className }: { tape: Tape; box: typeof NARROW; cla
         />
       )}
       <circle cx={tape.opened.x} cy={tape.opened.y} r={2.5} className="fill-ink" />
-      <text
-        x={tape.opened.x + 5}
-        y={above(tape.opened.y)}
-        fontSize={box.font}
-        {...HALO}
-        className={text}
-      >
+      <text x={tape.opened.x + 5} y={openedY} fontSize={box.font} {...HALO} className={text}>
         {tape.opened.label}
       </text>
       <text
@@ -164,6 +171,9 @@ export function StoryCard({ story, now, variant = 'full', rows }: StoryCardProps
   const narrow = full ? tapeModel(game, NARROW) : null
   const wide = full ? tapeModel(game, WIDE) : null
   const low = game.low
+  // Where the model climbs off the open, "opened 28%" sits under its dot.
+  const early = game.model.slice(0, Math.max(2, Math.ceil(game.model.length * 0.15)))
+  const openedBelow = early.some(([, p]) => p > game.openedBps / 10_000 + 0.02)
   const agentAt = s.tally ? s.tally.parts[2].lastIndexOf('reference agent') : -1
   return (
     <section
@@ -198,8 +208,8 @@ export function StoryCard({ story, now, variant = 'full', rows }: StoryCardProps
             <span>{narrow.caption}</span>
             <span className="font-mono">{narrow.legend.join('  ')}</span>
           </figcaption>
-          <TapeSvg tape={narrow} box={NARROW} className="sm:hidden" />
-          <TapeSvg tape={wide} box={WIDE} className="hidden sm:block" />
+          <TapeSvg tape={narrow} box={NARROW} openedBelow={openedBelow} className="sm:hidden" />
+          <TapeSvg tape={wide} box={WIDE} openedBelow={openedBelow} className="hidden sm:block" />
         </figure>
       )}
       {full && s.line2 && <p className="text-13 text-ink-muted">{s.line2}</p>}
