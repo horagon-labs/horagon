@@ -3,9 +3,11 @@ import {
   type DraftRow,
   getDraft,
   getGame,
+  getMarketIdReservation,
   listOps,
   listSnapshots,
   putEvidence,
+  reserveMarketId,
   setDraftState,
   setFeatured,
   updateMarket,
@@ -129,6 +131,8 @@ let fetches: string[]
 let alerts: Array<[string, string]>
 let logs: LogLine[]
 let marketId: bigint
+/** The ids the keeper draws for new markets, in order; `marketId` once they run out. */
+let draws: bigint[]
 let gm: string
 let deps: KeeperDeps
 let keeper: Keeper
@@ -178,7 +182,9 @@ beforeEach(async () => {
   fetches = []
   alerts = []
   logs = []
-  marketId = await marketIdFor('NBA', '401910007', 0)
+  // A random id, as the keeper draws it: not the one derived from the game (spec 5.1).
+  marketId = 0x1d2c_3b4a_5968_7786n
+  draws = []
   accounts = new Map([[program.config.toBase58(), account(configBytes())]])
   current = {
     league: 'NBA',
@@ -275,6 +281,7 @@ beforeEach(async () => {
     sigma: 13,
     priority: { normal: 10_000, halt: 200_000 },
     feedEverySecs: 0,
+    newMarketId: () => draws.shift() ?? marketId,
   }
   keeper = new Keeper(deps)
 })
@@ -591,6 +598,83 @@ describe('a market on chain with no row', () => {
     expect(alerts).toEqual([])
     expect((await listOps(h.db)).map((o) => o.action)).toEqual(['adopt'])
     expect(await row()).toMatchObject({ status: 'open' })
+  })
+})
+
+describe('market ids', () => {
+  const GAME = 'nba-401910007'
+  const row = async () => (await getGame(h.db, GAME))?.markets[0]
+  /** Someone else's pm-AMM market at the PDA of `id` (initialize_market is open to anyone). */
+  const squat = (id: bigint) =>
+    accounts.set(program.addresses(id).market.toBase58(), {
+      data: Buffer.alloc(8),
+      owner: Keypair.generate().publicKey,
+      lamports: 1,
+      executable: false,
+      rentEpoch: 0,
+    })
+
+  it('stores the drawn id before the create is sent, and the row gets that id', async () => {
+    const sender = deps.sender
+    const send = sender.send.bind(sender)
+    let storedAtSend: string | null | undefined
+    sender.send = async (spec) => {
+      storedAtSend = await getMarketIdReservation(h.db, GAME, 0)
+      return send(spec)
+    }
+    expect(types(await keeper.tick())).toEqual(['create'])
+    expect(storedAtSend).toBe(marketId.toString())
+    expect(await row()).toMatchObject({ marketId: marketId.toString(), status: 'open' })
+    expect(await getMarketIdReservation(h.db, GAME, 0)).toBe(marketId.toString())
+  })
+
+  it('reuses the stored id after a restart, so a create that landed unrecorded is adopted', async () => {
+    await reserveMarketId(h.db, { gameId: GAME, kind: 0, marketId: marketId.toString() })
+    accounts.set(gm, account(gameMarketBytes(marketId, STATUS.open)))
+    // The restarted keeper would draw another id: it must not.
+    draws = [0x7777n]
+    const restarted = new Keeper(deps)
+    expect(types(await restarted.tick())).toEqual(['create'])
+    expect(sends).toEqual([])
+    expect((await listOps(h.db)).map((o) => o.action)).toEqual(['adopt'])
+    expect(await row()).toMatchObject({ marketId: marketId.toString(), status: 'open' })
+    expect(draws).toEqual([0x7777n])
+  })
+
+  it('replaces a stored id whose pm-AMM market someone else created, with an alert', async () => {
+    const taken = 0x5151_5151n
+    squat(taken)
+    draws = [taken]
+    expect(types(await keeper.tick())).toEqual(['create'])
+    expect(sends).toEqual([`create ${GAME}`])
+    expect(alerts.map(([k]) => k)).toEqual([`market-id-taken:${GAME}`])
+    expect(await getMarketIdReservation(h.db, GAME, 0)).toBe(marketId.toString())
+    expect(await row()).toMatchObject({ marketId: marketId.toString() })
+    const ops = await listOps(h.db)
+    expect(ops.map((o) => o.action).sort()).toEqual(['create', 'market-id-replaced'])
+    expect(ops.find((o) => o.action === 'market-id-replaced')?.detail).toEqual({
+      from: taken.toString(),
+      to: marketId.toString(),
+    })
+  })
+
+  it('is not blocked when every id derived from the game is taken', async () => {
+    for (let salt = 0; salt <= 9; salt++) squat(await marketIdFor('NBA', '401910007', 0, salt))
+    expect(types(await keeper.tick())).toEqual(['create'])
+    expect(sends).toEqual([`create ${GAME}`])
+    expect(alerts).toEqual([])
+    expect(await row()).toMatchObject({ marketId: marketId.toString(), status: 'open' })
+  })
+
+  it('adopts a market created under a derived id before ids were random, storing nothing', async () => {
+    const legacy = await marketIdFor('NBA', '401910007', 0, 2)
+    const legacyGm = deriveGameMarket(legacy, program.programId).toBase58()
+    accounts.set(legacyGm, account(gameMarketBytes(legacy, STATUS.halted)))
+    expect(types(await keeper.tick())).toEqual(['create'])
+    expect(sends).toEqual([])
+    expect((await listOps(h.db)).map((o) => o.action)).toEqual(['adopt'])
+    expect(await row()).toMatchObject({ marketId: legacy.toString(), status: 'halted' })
+    expect(await getMarketIdReservation(h.db, GAME, 0)).toBeNull()
   })
 })
 
