@@ -66,6 +66,11 @@ export interface HoragonClientOptions {
   retries?: number
   /** Between GET retries (default 300 ms, doubled each time). */
   retryDelayMs?: number
+  /**
+   * fetch's `cache` mode for every request; unset keeps fetch's default. A browser poll can ask
+   * `no-cache`: the server first, the browser's copy only on a 304 (web board, first-screen G4).
+   */
+  cache?: RequestInit['cache']
 }
 
 interface RequestOpts {
@@ -119,6 +124,7 @@ export class HoragonClient {
   private readonly submitTimeoutMs: number
   private readonly retries: number
   private readonly retryDelayMs: number
+  private readonly cache: RequestInit['cache'] | undefined
 
   constructor(opts: HoragonClientOptions) {
     this.base = opts.baseUrl.replace(/\/+$/, '')
@@ -127,6 +133,7 @@ export class HoragonClient {
     this.submitTimeoutMs = opts.submitTimeoutMs ?? 30_000
     this.retries = opts.retries ?? 2
     this.retryDelayMs = opts.retryDelayMs ?? 300
+    this.cache = opts.cache
   }
 
   readonly games = {
@@ -354,6 +361,7 @@ export class HoragonClient {
             ? { accept: 'application/json' }
             : { 'content-type': 'application/json' },
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+        ...(this.cache === undefined ? {} : { cache: this.cache }),
         signal: AbortSignal.timeout(
           opts.exactTimeoutMs ?? Math.min(this.timeoutMs, opts.timeoutMs ?? this.timeoutMs),
         ),

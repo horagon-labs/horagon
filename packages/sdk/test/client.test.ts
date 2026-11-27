@@ -78,6 +78,39 @@ describe('HoragonClient', () => {
   })
 })
 
+describe('HoragonClient cache mode (first-screen G4)', () => {
+  // The web board's poll asks the server first each tick (`no-cache`): `/games` answers
+  // `s-maxage=1, stale-while-revalidate=5`, and a browser would show each tick the answer it
+  // fetched in the background one tick earlier.
+  const inits = () => {
+    const seen: Array<RequestInit | undefined> = []
+    const fetchImpl = (async (_url: string, init?: RequestInit) => {
+      seen.push(init)
+      return json({ games: [] })
+    }) as typeof fetch
+    return { seen, fetchImpl }
+  }
+
+  it('passes the cache mode with every request when set', async () => {
+    const s = inits()
+    const c = new HoragonClient({
+      baseUrl: 'https://h.test',
+      fetch: s.fetchImpl,
+      cache: 'no-cache',
+    })
+    await c.games.list()
+    expect(s.seen[0]?.cache).toBe('no-cache')
+    expect(s.seen[0]?.method).toBe('GET')
+  })
+
+  it("leaves fetch's own default when unset", async () => {
+    const s = inits()
+    const c = new HoragonClient({ baseUrl: 'https://h.test', fetch: s.fetchImpl })
+    await c.games.list()
+    expect(s.seen[0]).not.toHaveProperty('cache')
+  })
+})
+
 describe('HoragonClient.me (R7)', () => {
   const WALLET = '11111111111111111111111111111111'
   const game = {
