@@ -19,6 +19,7 @@ import {
   ttlCache,
   within,
 } from './initial'
+import { type LastNight, loadLastNight } from './last-night'
 
 let app: ReturnType<typeof createApp> | undefined
 
@@ -111,5 +112,28 @@ export function verifyTarget(market: string): Promise<VerifyTarget | null | unde
       }
     },
     (t) => t !== undefined,
+  )
+}
+
+/** How long / keeps last night's strip. */
+const LAST_NIGHT_TTL_MS = 60_000
+const lastNights = ttlCache<LastNight | null>(LAST_NIGHT_TTL_MS)
+
+/**
+ * "Last night on the dial" for / (R10). Null when there is no such night, or the API was late or
+ * failed; only a found night is kept, for 60 s. Never throws.
+ */
+export function initialLastNight(): Promise<LastNight | null> {
+  const now = Math.floor(Date.now() / 1000)
+  return lastNights(
+    'last-night',
+    async () => {
+      try {
+        return await loadLastNight(serverClient(), now)
+      } catch {
+        return null
+      }
+    },
+    (n) => n !== null,
   )
 }

@@ -72,18 +72,34 @@ export interface Settled {
   finalizedAt?: number
 }
 
-export function gameMarketBytes(marketId: bigint, status: number, x: Settled = {}): Buffer {
+/** The game a GameMarket is for: MEM@CLE, NBA, kind 0, at S unless a test says otherwise. */
+export interface GameFields {
+  kind?: number
+  gameId?: string
+  league?: string
+  home?: string
+  away?: string
+  tipoff?: number
+}
+
+export function gameMarketBytes(
+  marketId: bigint,
+  status: number,
+  x: Settled = {},
+  g: GameFields = {},
+): Buffer {
+  const tipoff = g.tipoff ?? S
   return new BorshWriter()
     .fixed(Uint8Array.from(HORAGON_ACCOUNT_DISCRIMINATORS.GameMarket), 8)
     .pubkey(program.addresses(marketId).market)
     .u64(marketId)
-    .u8(0)
-    .fixed(asciiField('NBA', 8, 'league'), 8)
-    .string('401910007', 16)
-    .fixed(asciiField('CLE', 4, 'home'), 4)
-    .fixed(asciiField('MEM', 4, 'away'), 4)
-    .i64(S)
-    .i64(END)
+    .u8(g.kind ?? 0)
+    .fixed(asciiField(g.league ?? 'NBA', 8, 'league'), 8)
+    .string(g.gameId ?? '401910007', 16)
+    .fixed(asciiField(g.home ?? 'CLE', 4, 'home'), 4)
+    .fixed(asciiField(g.away ?? 'MEM', 4, 'away'), 4)
+    .i64(tipoff)
+    .i64(tipoff + DEFAULT_TIMINGS.endOffsetSecs)
     .u64(300_000_000n)
     .u8(status)
     .option<number>(x.outcome ?? null, (w, v) => w.u8(v))

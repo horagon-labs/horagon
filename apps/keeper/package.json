@@ -13,7 +13,8 @@
     "agent": "tsx src/agent-main.ts",
     "ops": "tsx src/ops/cli.ts",
     "elo:build": "tsx scripts/elo-build.ts",
-    "local:fund": "tsx scripts/local-fund.ts"
+    "local:fund": "tsx scripts/local-fund.ts",
+    "study": "tsx scripts/study.ts"
   },
   "dependencies": {
     "@horagon/db": "workspace:*",
