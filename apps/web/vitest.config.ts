@@ -1,6 +1,15 @@
+import { fileURLToPath } from 'node:url'
 import { defineConfig } from 'vitest/config'
 
 export default defineConfig({
+  resolve: {
+    alias: {
+      // Next resolves `server-only` to an empty module on the server; the tests run there too.
+      'server-only': fileURLToPath(
+        new URL('./node_modules/next/dist/compiled/server-only/empty.js', import.meta.url),
+      ),
+    },
+  },
   // tsconfig keeps JSX for Next ("preserve"); the .tsx tests need React's automatic runtime.
   oxc: { jsx: { runtime: 'automatic', importSource: 'react' } },
   test: {

@@ -2,7 +2,7 @@
 // go into the first HTML, so neither page opens on "Setting the dial…" and a link unfurler or a
 // crawler sees real content. Everything here is best effort: a slow or failing API leaves the
 // value out, and the page's own poll loads it in the browser as before.
-import type { Game, GameDetail, HoragonClient, RecordResponse } from '@horagon/sdk'
+import type { Game, GameDetail, HoragonClient, Night, RecordResponse } from '@horagon/sdk'
 import { etNextDay, etNight, isHoragonError } from '@horagon/sdk'
 import { nightOver, type Upcoming, upcomingOf } from '../chrono/board'
 import { isTonight } from '../format'
@@ -155,4 +155,19 @@ export async function loadRecord(
   timeoutMs = INITIAL_TIMEOUT_MS,
 ): Promise<RecordResponse | null> {
   return (await within(client.record(), timeoutMs)) ?? null
+}
+
+/** How long / keeps a night's story: GET /nights is cached 10 min at the edge too. */
+export const STORY_TTL_MS = 600_000
+
+/**
+ * One ET night for the story card (first-screen W1): GET /nights/{date} under the first frame's
+ * cap. Null when the API failed or was late; the card then shows its compact form. Never throws.
+ */
+export async function loadNight(
+  client: Pick<HoragonClient, 'nights'>,
+  date: string,
+  timeoutMs = INITIAL_TIMEOUT_MS,
+): Promise<Night | null> {
+  return (await within(client.nights(date), timeoutMs)) ?? null
 }

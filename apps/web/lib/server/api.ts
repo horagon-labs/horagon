@@ -5,7 +5,7 @@
 // copy, next/dist/compiled/server-only) fails the build if a client component imports this.
 import 'server-only'
 import { createApp, depsFromEnv } from '@horagon/api'
-import type { Game, PracticeResponse, RecordResponse } from '@horagon/sdk'
+import type { Game, Night, NightGame, PracticeResponse, RecordResponse } from '@horagon/sdk'
 import { HoragonClient } from '@horagon/sdk/client'
 import { isHoragonError } from '@horagon/sdk/errors'
 import { lookupTarget, type VerifyTarget } from '../verify-target'
@@ -16,12 +16,15 @@ import {
   type InitialGame,
   loadBoard,
   loadGame,
+  loadNight,
   loadRecord,
   RECORD_TTL_MS,
+  STORY_TTL_MS,
   ttlCache,
   within,
 } from './initial'
 import { type LastNight, loadLastNight } from './last-night'
+import { storyOfNight } from './story'
 
 let app: ReturnType<typeof createApp> | undefined
 
@@ -177,5 +180,32 @@ export function initialRecord(): Promise<RecordResponse | null> {
       }
     },
     (r) => r !== null,
+  )
+}
+
+const stories = ttlCache<{ night: Night; game: NightGame } | null>(STORY_TTL_MS)
+
+/**
+ * The story card's night on / (first-screen W1): GET /nights/{date} for the ET `date`, and the
+ * game it tells (`pickStory`). Only a found story is kept, for 10 min. Null when the night has no
+ * story, or the API failed or was slower than `timeoutMs` (what is left of the first frame's
+ * budget); the card then shows its compact form. Never throws.
+ */
+export function initialStory(
+  date: string,
+  timeoutMs = INITIAL_TIMEOUT_MS,
+): Promise<{ night: Night; game: NightGame } | null> {
+  return stories(
+    `story:${date}`,
+    async () => {
+      try {
+        const night = await loadNight(serverClient(), date, timeoutMs)
+        return night ? storyOfNight(night) : null
+      } catch {
+        // depsFromEnv throws without its environment (a local build): no story.
+        return null
+      }
+    },
+    (s) => s !== null,
   )
 }
