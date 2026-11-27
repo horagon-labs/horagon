@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Ships the committed HEAD to the VPS and restarts the keeper. It installs the reference agent's
+# Ships the committed HEAD to the VPS and restarts the keeper, and the Practice process
+# (horagon-practice) once it has been enabled by hand. It installs the reference agent's
 # unit (horagon-agent) but never enables, starts or restarts it: a running agent keeps the
 # previous revision until it is restarted by hand (a restart also clears its anomaly stops), and
 # the script prints which. Needs no git remote: the tree goes over ssh as a tarball. Run it in
@@ -95,7 +96,7 @@ corepack pnpm install --frozen-lockfile --filter @horagon/keeper...
 corepack pnpm --filter @horagon/sdk build
 mkdir -p ~/.config/systemd/user
 cp ops/systemd/horagon-keeper.service ops/systemd/horagon-watchdog.service \
-  ops/systemd/horagon-watchdog.timer ops/systemd/horagon-agent.service ~/.config/systemd/user/
+  ops/systemd/horagon-watchdog.timer ops/systemd/horagon-agent.service   ops/systemd/horagon-practice.service ~/.config/systemd/user/
 systemctl --user daemon-reload
 systemctl --user enable --now horagon-watchdog.timer
 # Enabled so the keeper comes back after a VPS reboot (lingering starts the user manager).
@@ -103,6 +104,14 @@ systemctl --user enable horagon-keeper
 systemctl --user restart horagon-keeper
 sleep 5
 systemctl --user --no-pager status horagon-keeper | head -n 12
+# The Practice process (R8): restarted with the keeper once it was enabled by hand (runbook,
+# "Practice"); never enabled here.
+if systemctl --user --quiet is-enabled horagon-practice; then
+  systemctl --user restart horagon-practice
+  echo "horagon-practice: restarted on $1"
+else
+  echo "horagon-practice: not enabled (systemctl --user enable --now horagon-practice, by hand)"
+fi
 # The reference agent: installed, never enabled, started or restarted here. A restart would
 # silently clear the markets its anomaly check stopped, so it stays a manual step.
 if systemctl --user --quiet is-active horagon-agent; then

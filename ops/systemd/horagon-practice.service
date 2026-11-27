@@ -1,0 +1,33 @@
+# User unit: ~/.config/systemd/user/horagon-practice.service on the VPS (user horagon).
+# The Practice process (R8): replays a recorded game at 6x as league PRACTICE at 10, 12, 14, 16,
+# 18 and 20:00 UTC, with its own keeper for PRACTICE games only. Same env file and attestor as
+# the keeper; nothing counts a PRACTICE market. ops/deploy-keeper.sh installs this unit and
+# restarts it only once it is enabled: enable and start it by hand the first time
+# (docs/runbook.md, "Practice"). It refuses to start without PRACTICE_SOURCE_URL or
+# HORAGON_PUBLIC_URL in .env.keeper. FLAG_PRACTICE off starts no new run.
+[Unit]
+Description=Horagon Practice replays (devnet, league PRACTICE)
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=600
+StartLimitBurst=10
+
+[Service]
+Type=simple
+WorkingDirectory=%h/horagon/apps/keeper
+EnvironmentFile=%h/horagon/.env.keeper
+# Node 22 and pnpm live in ~/.local/bin, which must stay first in PATH: the VPS also has an
+# older system Node.
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+Environment=NODE_ENV=production
+ExecStart=%h/horagon/apps/keeper/node_modules/.bin/tsx src/practice-main.ts
+Restart=on-failure
+RestartSec=10
+# On SIGTERM it ends the round in progress; every send carries an isDone check against chain
+# state, so the next start re-plans from the chain, as the keeper does.
+KillSignal=SIGTERM
+TimeoutStopSec=120
+MemoryMax=512M
+
+[Install]
+WantedBy=default.target

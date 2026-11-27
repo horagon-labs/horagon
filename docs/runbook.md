@@ -586,6 +586,9 @@ transaction: `create <gameId>`, `halt <gameId> (<rule>)`, `propose <gameId>` (au
 | `archive`                      | `The raw ESPN archive could not be written`, or `ESPN archive retention failed`                                                                                                         | 3 h               | Markets are not affected. Check the VPS's free disk space and `apps/keeper/data/archive`                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | `heartbeat`                    | `Keeper heartbeat is <n> s old during a game night`                                                                                                                                     | 15 min (watchdog) | From the watchdog: no keeper heartbeat for 120 s between 90 min before a tip-off and 4 h after. Read the log, then restart (G)                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | `watchdog`                     | `Watchdog cannot read the keeper heartbeat`                                                                                                                                             | every run (2 min) | The database does not answer the watchdog, so the keeper likely fails too (`tick-failing`). Check Supabase and `DATABASE_URL`                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `practice-failing`             | `The keeper's practice step failed <n> rounds in a row` | 3 h | The Practice process (horagon-practice) keeps failing its round: read `journalctl --user -u horagon-practice -n 50`. It never touches an NBA market. If it cannot be fixed now, stop it (Practice, below). |
+| `practice-sol-floor`           | `Practice paused: the attestor holds <n> SOL, under the floor of <n>` | 24 h | No Practice run starts while the attestor holds less than PRACTICE_SOL_FLOOR (default 1.0 SOL), so NBA nights keep their SOL. Top up the attestor from the devnet faucet if more runs are wanted; the next slot starts by itself. |
+| `practice-challenged:<gameId>` | `Practice AWAY@HOME (<gameId>) was challenged` | 3 h | A guardian challenged a Practice result: no new run starts until it is proposed again. The recording is a real game of 2026-11-18 ET: check its box score and propose as in A (`horagon-ops propose <gameId> --box-score <url> --score <h>-<a>`). |
 
 ## After the last game
 
@@ -601,8 +604,8 @@ the production keeper runs `KEEPER_FEED=espn` only.
 A replay never runs on the production keeper. Replay games are league NBA, like real ones: on
 devnet each replay market is a counted NBA market under `docs/metrics.md`, the public board shows
 it as one of that night's games, and the reference agent trades it (`AGENT_PRACTICE` does not
-change that: it is about league PRACTICE, which nothing creates yet). A replay is for a local
-Surfpool run, with a local database.
+change that: it is about league PRACTICE, which only the Practice process creates, below). A
+replay is for a local Surfpool run, with a local database.
 
 `KEEPER_FEED=replay REPLAY_TAG=<tag> REPLAY_TIPOFF=<ISO time>` plays the fixtures of
 `tests/fixtures/replay/` as games whose earliest tip-off is at `REPLAY_TIPOFF` (for example
@@ -610,3 +613,35 @@ Surfpool run, with a local database.
 are `nba-<espnId><tag>` and the feed's source URL is `https://horagon.invalid/replay/...`. Use a
 new tag for every run, so its markets never collide with an earlier one. `REPLAY_SPEED` (1 to
 60) plays game time that many times faster.
+
+## Practice (R8)
+
+The Practice process (horagon-practice, `apps/keeper/src/practice-main.ts`) replays one of the
+12 recorded games of `tests/fixtures/replay/` at 6x as a game of league PRACTICE, so a judge or a
+fan finds a working loop at any hour. Nothing counts a PRACTICE market: `docs/metrics.md` counts
+league NBA only. It runs its own keeper for PRACTICE games, and the main keeper runs NBA games
+only, so neither ever touches the other's markets. The main keeper's indexer indexes both.
+
+- **When.** A run starts at 10, 12, 14, 16, 18 or 20:00 UTC (up to 10 min late after a
+  restart). Its market opens at once with 300 mUSDC, the replayed tip-off is 10 min later,
+  end_ts 30 min after that. The keeper halts at the buzzer, drafts, proposes the recording's
+  final score itself (evidence source replay, linking the file under PRACTICE_SOURCE_URL),
+  and finalizes after the 15-min window: about 55 min from the start.
+- **Guards.** Before a run starts, in this order: FLAG_PRACTICE on (else `flag-off`), no other
+  Practice run unsettled (`run-unsettled`), no NBA market open or opening between the start and
+  90 min after it (`nba-window`: real nights first), both balances read (`balance-unread`), the
+  attestor at or over PRACTICE_SOL_FLOOR (`sol-floor`, pages `practice-sol-floor`), and the
+  treasury plus the keeper wallet holding the next 36 h of NBA seeds plus 300 mUSDC
+  (`seed-short`). A failed guard skips that slot and logs why; the next slot tries again.
+- **Heartbeat.** Row `practice`: its round, `nextAt` (the next tip-off no NBA window blocks;
+  null with the flag off), the last skip reason (`skipped`) and its failure count.
+- **Turn off.** `horagon-ops flag off FLAG_PRACTICE` starts no new run; a run in flight still
+  halts, proposes and finalizes. To stop the process: `systemctl --user stop horagon-practice`
+  (a run in flight then waits; the main keeper never settles it, so start it again later or
+  propose by hand as in A).
+- **Start the first time.** PRACTICE_SOURCE_URL in `~/horagon/.env.keeper` (the public
+  `tests/fixtures/replay` folder of the repo), then
+  `systemctl --user enable --now horagon-practice`. ops/deploy-keeper.sh restarts it on every
+  deploy once it is enabled.
+- **The agent.** The reference agent trades a PRACTICE market only with AGENT_PRACTICE=1 and a
+  live run (AGENT_DRY_RUN=0). Until then the game page says no one else trades the replay.

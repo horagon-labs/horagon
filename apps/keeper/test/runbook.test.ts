@@ -76,6 +76,22 @@ const INDIRECT: Array<{ file: string; matches: (expr: string) => boolean; keys: 
         ),
     },
     {
+      // The Practice process's failure streak (R8): `practice-failing`.
+      file: 'practice-main.ts',
+      matches: (expr) => expr === 'alert.key',
+      keys: () =>
+        sources.flatMap(({ text }) =>
+          [...text.matchAll(/new FailureStreak\(\s*'([a-z-]+)'/g)].map((m) => `${m[1]}-failing`),
+        ),
+    },
+    {
+      // The Practice Keeper's alerter (practice/round.ts) forwards the keys of the Keeper it
+      // wraps, which tick.ts already sends: no key of its own.
+      file: 'practice/round.ts',
+      matches: (expr) => expr === 'key',
+      keys: () => [],
+    },
+    {
       // The `alert` actions of the planner and of `stuckAlerts` (tick.ts), whose key is a `key:`
       // property or a `const key =` (`unconfirmed:` gets the challenge round appended).
       file: 'tick.ts',
@@ -194,6 +210,16 @@ const NOT_ALERT_WORDS = new Set([
   'unchecked',
   'balldontlie',
   'second-source',
+  // the Practice process (R8): its unit, its heartbeat row and fields, its skip reasons
+  'horagon-practice',
+  'practice',
+  'skipped',
+  'flag-off',
+  'run-unsettled',
+  'nba-window',
+  'balance-unread',
+  'sol-floor',
+  'seed-short',
   // other words
   'devnet',
   'horagon',
