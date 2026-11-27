@@ -60,7 +60,15 @@ export function practiceKeeperAlerts(alerts: Alerter): Alerter {
 export interface PracticeKeeperInput
   extends Pick<
     KeeperDeps,
-    'db' | 'program' | 'attestor' | 'log' | 'now' | 'sigma' | 'priority' | 'feedEverySecs'
+    | 'db'
+    | 'program'
+    | 'attestor'
+    | 'log'
+    | 'now'
+    | 'sigma'
+    | 'priority'
+    | 'feedEverySecs'
+    | 'newMarketId'
   > {
   sender: TxSender
   feed: Feed
@@ -72,7 +80,8 @@ export interface PracticeKeeperInput
 
 /**
  * The Practice process's Keeper: PRACTICE games only, timings at 6x, 300 mUSDC seeds, and
- * auto-propose for PRACTICE with no second source (its period sums are still checked).
+ * auto-propose for PRACTICE with no second source (its period sums are still checked). Its
+ * creates take the same path as the main keeper's: a random market id stored before the send.
  */
 export function practiceKeeper(i: PracticeKeeperInput): Keeper {
   return new Keeper({
@@ -89,6 +98,9 @@ export function practiceKeeper(i: PracticeKeeperInput): Keeper {
     sigma: i.sigma,
     priority: i.priority,
     feedEverySecs: i.feedEverySecs ?? 5,
+    // Absent: R9's random id, stored before the create is sent, as on an NBA night. A Practice
+    // market lives on devnet too, so an id anyone could compute could be squatted the same way.
+    newMarketId: i.newMarketId,
     leagues: ['PRACTICE'],
     autoPropose: {
       mode: 'on',

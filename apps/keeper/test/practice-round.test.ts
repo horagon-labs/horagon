@@ -6,10 +6,13 @@ import {
   type GameWithMarkets,
   getEvidence,
   getGame,
+  getMarketIdReservation,
+  listOps,
   setFlag,
   upsertScheduledGames,
 } from '@horagon/db'
 import { createTestDb } from '@horagon/db/testing'
+import { marketIdFor } from '@horagon/sdk'
 import type { ReplayGame } from '@horagon/sdk/replay'
 import pino from 'pino'
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
@@ -28,7 +31,8 @@ import {
 } from '../src/practice/round'
 import { PRACTICE_FIXTURES_DIR, PracticeFeed } from '../src/practice/runs'
 import { LAMPORTS_PER_MARKET } from '../src/treasury'
-import { PracticeChain, program, STATUS } from './practice-chain'
+import { account } from './chain-fixtures'
+import { createdMarketId, PracticeChain, program, STATUS } from './practice-chain'
 
 const silent = pino({ level: 'silent' })
 const RATINGS: Ratings = { asOf: '2026-11-17', sigma: 13, teams: {} }
@@ -73,6 +77,8 @@ let lamports: bigint
 let authority: bigint
 let funds: bigint
 let arena: PracticeArena
+/** Market ids the Practice keeper draws, in order; empty means R9's own random draw. */
+let draws: bigint[]
 
 function arenaOf(over: Partial<PracticeArenaDeps> = {}): PracticeArena {
   const feed = new PracticeFeed({
@@ -93,6 +99,7 @@ function arenaOf(over: Partial<PracticeArenaDeps> = {}): PracticeArena {
     priority: { normal: 10_000, halt: 200_000 },
     evidenceUri: (id) => `${PUBLIC}/api/v1/evidence/${id}/winner`,
     feedEverySecs: 0,
+    ...(draws.length > 0 && { newMarketId: () => draws.shift() ?? 0n }),
   })
   return new PracticeArena({
     db: h.db,
@@ -123,6 +130,7 @@ beforeEach(async () => {
   authority = SOL
   funds = 5_000_000_000n
   await setFlag(h.db, 'FLAG_PRACTICE', true, 'test')
+  draws = []
   arena = arenaOf()
 })
 afterEach(async () => {
@@ -186,6 +194,41 @@ describe('a Practice round', () => {
     expect(alerts).toEqual([])
     // The whole loop: 10 min to tip-off, 30 to end_ts, 15 of window, so 55 min from the slot.
     expect(now - SLOT).toBeLessThanOrEqual(55 * 60 + 10)
+  })
+
+  it('creates its market under a random id stored before the create is sent (R9)', async () => {
+    await arena.round()
+    let storedAtSend: string | null = null
+    const send = chain.sender.send.bind(chain.sender)
+    chain.sender.send = async (spec) => {
+      if (spec.label === `create ${ID}`) {
+        storedAtSend = await getMarketIdReservation(h.db, ID, 0)
+        expect(createdMarketId(spec).toString()).toBe(storedAtSend)
+      }
+      return send(spec)
+    }
+    expect(await roundsTo(SLOT + 5)).toEqual([`create ${ID}`])
+    expect(storedAtSend).not.toBeNull()
+    const id = (await getGame(h.db, ID))?.markets[0]?.marketId
+    expect(id).toBe(storedAtSend)
+    expect(chain.market(ID)?.marketId.toString()).toBe(id)
+    // Never an id anyone could compute from the game.
+    for (let salt = 0; salt <= 9; salt++)
+      expect(id).not.toBe((await marketIdFor('PRACTICE', '401910007p0', 0, salt)).toString())
+  })
+
+  it('replaces a squatted id with a fresh one and pages market-id-taken, as on an NBA night', async () => {
+    const taken = 7_000_000_000_000_000_001n
+    const fresh = 7_000_000_000_000_000_002n
+    draws = [taken, fresh]
+    arena = arenaOf()
+    chain.accounts.set(program.addresses(taken).market.toBase58(), account(Buffer.alloc(16)))
+    await arena.round()
+    expect(await roundsTo(SLOT + 5)).toEqual([`create ${ID}`])
+    expect(await getMarketIdReservation(h.db, ID, 0)).toBe(fresh.toString())
+    expect((await getGame(h.db, ID))?.markets[0]?.marketId).toBe(fresh.toString())
+    expect(alerts.map(([k]) => k)).toContain(`market-id-taken:${ID}`)
+    expect((await listOps(h.db)).map((o) => o.action)).toContain('market-id-replaced')
   })
 
   it('names the run from the count of Practice games, cycling the recordings', async () => {
