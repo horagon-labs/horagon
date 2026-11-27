@@ -88,6 +88,21 @@ describe('GameScreen (spec 4.2)', () => {
       />,
     )
 
+  it('ticks the challenge countdown with the screen clock (R6 part B)', () => {
+    const timed = { ...proposal, challengeEndsAt: NOW + 754 }
+    const html = renderToStaticMarkup(
+      <GameScreen
+        game={detail({ status: 'final', resolutions: [timed] })}
+        history={history()}
+        dial={gameDial(game({ status: 'final' }), market({ status: 'proposed' }), null, null, NOW)}
+        now={NOW}
+        stale={false}
+        right={null}
+      />,
+    )
+    expect(html).toContain('final in 12:34 unless a guardian challenges')
+  })
+
   it('stacks Scorebug, Dial, Tape, the crown block and the ResolutionCard in that order', () => {
     const html = screen()
     const order = [
@@ -260,7 +275,9 @@ describe('dev gallery (spec 6.2)', () => {
     expect(html).toContain('>Buy CLE 77¢</button>')
     expect(html).toContain('closes in 4:12')
     expect(html).toContain('Get 1,000 play mUSDC')
-    expect(html).toContain('Trading closed. The result goes on-chain after a box-score check.')
+    expect(html).toContain(
+      'Trading closed. The result goes on-chain automatically 3 h after tip-off, then a guardian has 15 minutes to challenge it.',
+    )
     expect(html).toContain('<dialog aria-label="Buy CLE"')
   })
 })

@@ -156,7 +156,7 @@ describe('pusherMode (spec 3.2, 4.3, 6.1)', () => {
   it('says one line once trading is over, and nothing once there is a result', () => {
     expect(mode({ state: 'closed' })).toEqual({
       kind: 'line',
-      text: 'Trading closed. The result goes on-chain after a box-score check.',
+      text: 'Trading closed. The result goes on-chain automatically 3 h after tip-off, then a guardian has 15 minutes to challenge it.',
     })
     expect(mode({ state: 'pre', secsLeft: null })).toEqual({
       kind: 'line',

@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest'
 import { PositionCard, type PositionCardProps } from '../components/chrono/position-card'
 import { ResolutionCard } from '../components/chrono/resolution-card'
 import { ErrorText } from '../components/error-text'
-import { detail, market, portfolio, position } from '../lib/chrono/fixtures'
+import { detail, market, NOW, portfolio, position } from '../lib/chrono/fixtures'
 import { milestones } from '../lib/chrono/resolution'
 
 const noop = () => {}
@@ -31,7 +31,7 @@ function resolution(over: Partial<Resolution> = {}): Resolution {
   }
 }
 
-const marks = (r: Resolution) => milestones(r).map((m) => [m.label, m.mark])
+const marks = (r: Resolution) => milestones(r, NOW).map((m) => [m.label, m.mark])
 
 describe('milestones (spec 3.2, 4.3)', () => {
   it('waits on everything while the market trades', () => {
@@ -51,6 +51,19 @@ describe('milestones (spec 3.2, 4.3)', () => {
     expect(marks(resolution({ status: 'challenged' }))[1]).toEqual(['Result under review', 'now'])
   })
 
+  it('times the challenge window while proposed, and says when it closed (R6 part B)', () => {
+    const timed = resolution({ challengeEndsAt: NOW + 754 })
+    expect(milestones(timed, NOW)[1]).toEqual({
+      label: 'Challenge window · 12:34 left',
+      mark: 'now',
+      sig: null,
+    })
+    expect(milestones(timed, NOW + 754)[1]?.label).toBe('Challenge window closed')
+    expect(milestones(resolution(), NOW)[1]?.label).toBe('Challenge window')
+    const review = resolution({ status: 'challenged', challengeEndsAt: null })
+    expect(milestones(review, NOW)[1]?.label).toBe('Result under review')
+  })
+
   it('is done once finalized, and adds the recycle when there is one', () => {
     const done = resolution({ status: 'recycled', finalizeSig: SIG, recycleSig: SIG })
     expect(marks(done)).toEqual([
@@ -65,7 +78,7 @@ describe('milestones (spec 3.2, 4.3)', () => {
 describe('ResolutionCard (spec 3.2)', () => {
   it('links the evidence with its sha256 and the market account', () => {
     const html = renderToStaticMarkup(
-      <ResolutionCard game={detail({ resolutions: [resolution()] })} state="proposed" />,
+      <ResolutionCard game={detail({ resolutions: [resolution()] })} state="proposed" now={NOW} />,
     )
     expect(html).toContain('Result evidence (JSON)')
     expect(html).toContain(`sha256 ${'a'.repeat(64)}`)
@@ -75,21 +88,49 @@ describe('ResolutionCard (spec 3.2)', () => {
     expect(html).toContain('Challenge window')
   })
 
+  it('counts the challenge window down on its own clock (R6 part B)', () => {
+    const timed = resolution({ challengeEndsAt: NOW + 754 })
+    const card = (now: number) =>
+      renderToStaticMarkup(
+        <ResolutionCard game={detail({ resolutions: [timed] })} state="proposed" now={now} />,
+      )
+    expect(card(NOW)).toContain('Result proposed · final in 12:34 unless a guardian challenges')
+    expect(card(NOW)).toContain('Challenge window · 12:34 left')
+    expect(card(NOW + 1)).toContain('final in 12:33')
+    expect(card(NOW + 754)).toContain('Challenge window closed · finalizing')
+  })
+
+  it('links /verify for the market beside the evidence (R6 part B)', () => {
+    const html = renderToStaticMarkup(
+      <ResolutionCard game={detail({ resolutions: [resolution()] })} state="proposed" now={NOW} />,
+    )
+    const evidence = html.indexOf('Result evidence (JSON)')
+    const verify = html.indexOf(`href="/verify/${market().pubkey}"`)
+    expect(verify).toBeGreaterThan(evidence)
+    expect(html).toContain('Verify this result')
+    // Nothing proposed yet: nothing to verify.
+    const open = resolution({ status: 'open', evidenceHash: null, evidenceUrl: null })
+    const none = renderToStaticMarkup(
+      <ResolutionCard game={detail({ resolutions: [open] })} state="live" now={NOW} />,
+    )
+    expect(none).not.toContain('/verify/')
+  })
+
   it('names the winner once there is an outcome, and shows nothing without a resolution', () => {
     const won = resolution({ status: 'finalized', outcome: 'yes', finalizeSig: SIG })
     const final = detail({ status: 'final', resolutions: [won] })
-    expect(renderToStaticMarkup(<ResolutionCard game={final} state="resolved" />)).toContain(
-      'Resolved: CLE won',
-    )
-    expect(renderToStaticMarkup(<ResolutionCard game={detail()} state="live" />)).toBe('')
+    expect(
+      renderToStaticMarkup(<ResolutionCard game={final} state="resolved" now={NOW} />),
+    ).toContain('Resolved: CLE won')
+    expect(renderToStaticMarkup(<ResolutionCard game={detail()} state="live" now={NOW} />)).toBe('')
   })
 
   it('says the status from the dial state, never the raw "open" of a closed market (R5)', () => {
     const open = resolution({ status: 'open' })
     const final = detail({ status: 'final', homeScore: 105, awayScore: 107, resolutions: [open] })
-    const html = renderToStaticMarkup(<ResolutionCard game={final} state="closed" />)
+    const html = renderToStaticMarkup(<ResolutionCard game={final} state="closed" now={NOW} />)
     expect(html).toContain(
-      'Final MEM 107–105 CLE. The result goes on-chain after a box-score check.',
+      'Final MEM 107–105 CLE. The result goes on-chain automatically 3 h after tip-off, then a guardian has 15 minutes to challenge it.',
     )
     expect(html).not.toContain('Winner market')
   })

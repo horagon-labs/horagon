@@ -6,13 +6,14 @@ import {
   finalWords,
   homeWonOnScore,
   liveNumber,
+  proposedLine,
   resolutionStatus,
   rowSubject,
   toWin,
 } from './chrono/copy'
 import { type DialState, deriveDialState } from './chrono/state'
 import { etClock, etDayLabel } from './chrono/time'
-import { countdown, percent, usdc } from './format'
+import { percent, usdc } from './format'
 
 /** The nights a fan aims at; a test pins it to the SDK's NIGHTS_TARGET. */
 export const NIGHTS_TARGET = 3
@@ -108,16 +109,6 @@ export function callLine(p: MePosition, g: Pick<Game, 'status'>): string | null 
   if (g.status === 'postponed' || g.status === 'canceled') return `${head} · not scored`
   if (c.result === null || c.points === null) return `${head} · pending`
   return `${head} · ${c.result} · ${pointsText(c.points)}`
-}
-
-/**
- * The proposed result's line (R6 part B moves it to lib/chrono/copy.ts with this signature): the
- * challenge countdown, then "finalizing" once it ran out, or no time when the window is unknown.
- */
-export function proposedLine(challengeEndsAt: number | null, now: number): string {
-  if (challengeEndsAt === null) return 'Result proposed'
-  if (challengeEndsAt - now <= 0) return 'Challenge window closed · finalizing'
-  return `Result proposed · final in ${countdown(challengeEndsAt, now)} unless a guardian challenges`
 }
 
 /**

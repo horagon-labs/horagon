@@ -9,6 +9,7 @@ import { NightChip } from '../components/chrono/night-chip'
 import { KeyBackup } from '../components/key-backup'
 import { MeScreen, type MeScreenProps } from '../components/me-view'
 import { WalletProvider } from '../components/wallet'
+import { proposedLine } from '../lib/chrono/copy'
 import {
   at,
   game,
@@ -33,7 +34,6 @@ import {
   PRACTICE_NOTE,
   pointsText,
   positionLine,
-  proposedLine,
   SCORE_RULE,
   STATUS_TEXT,
   statusOf,
@@ -175,7 +175,9 @@ describe('each status line, from the dial state', () => {
       'Result proposed · final in 12:34 unless a guardian challenges',
     )
     expect(statusOf(p(NOW), proposed, NOW).line).toBe('Challenge window closed · finalizing')
-    expect(statusOf(p(null), proposed, NOW).line).toBe('Result proposed')
+    expect(statusOf(p(null), proposed, NOW).line).toBe(
+      'Result proposed: the challenge window is open',
+    )
     expect(proposedLine(NOW + 754, NOW)).toBe(
       'Result proposed · final in 12:34 unless a guardian challenges',
     )

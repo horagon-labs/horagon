@@ -168,12 +168,16 @@ describe('no "halted" for a normal close (item 2)', () => {
 
   it('labels the halt transaction "Closed" once the game is final, "Halted" before', () => {
     const final = renderToStaticMarkup(
-      <ResolutionCard game={detail({ ...over, resolutions: [resolution] })} state="closed" />,
+      <ResolutionCard
+        game={detail({ ...over, resolutions: [resolution] })}
+        state="closed"
+        now={NOW}
+      />,
     )
     expect(final).toMatch(/>Closed<\/a>/)
     expect(final).not.toContain('Halted')
     const mid = renderToStaticMarkup(
-      <ResolutionCard game={detail({ resolutions: [resolution] })} state="halted" />,
+      <ResolutionCard game={detail({ resolutions: [resolution] })} state="halted" now={NOW} />,
     )
     expect(mid).toMatch(/>Halted<\/a>/)
     expect(haltLinkLabel({ status: 'final' })).toBe('Closed')
@@ -511,7 +515,7 @@ describe('the last post-buzzer words (refix)', () => {
       challengeEndsAt: null,
     }
     const card = renderToStaticMarkup(
-      <ResolutionCard game={detail({ ...over, resolutions: [r] })} state="closed" />,
+      <ResolutionCard game={detail({ ...over, resolutions: [r] })} state="closed" now={NOW} />,
     )
     expect(card).toContain(final.replaceAll("'", '&#x27;'))
     expect(card).not.toMatch(/after a halt/)

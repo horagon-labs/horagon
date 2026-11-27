@@ -3,7 +3,7 @@
 // over the words follow the scoreboard, then the result on-chain: "Final · CHA lost · result
 // pending", then "Resolved: MEM won". A losing side is never shown as "wins".
 import type { Game, MarketStatus, Outcome } from '@horagon/sdk'
-import { percent } from '../format'
+import { countdown, percent } from '../format'
 import type { DialState } from './state'
 
 export type VerdictGame = Pick<Game, 'home' | 'away' | 'status' | 'homeScore' | 'awayScore'>
@@ -138,24 +138,53 @@ export const MODEL_HINT = 'Model: live win chance from score and clock'
 /** Why nothing trades once the game is final, open market or halted (R1, R5c). */
 export const BUZZER_CLOSED = 'Trading closed at the final buzzer.'
 
-/** After the close, before a result: who checks, and what comes next. */
-const RESULT_NEXT = 'The result goes on-chain after a box-score check.'
+/**
+ * After the close, before a result: what comes next (R6). The attestor proposes once ESPN's Final
+ * has held 60 s and end_ts (tip-off + 3 h) has passed; never a promise of minutes after the buzzer.
+ */
+const RESULT_NEXT =
+  'The result goes on-chain automatically 3 h after tip-off, then a guardian has 15 minutes to challenge it.'
 export const CLOSED_LINE = `Trading closed. ${RESULT_NEXT}`
 
 type StatusGame = VerdictGame & Pick<Game, 'status'>
+
+/** The window before a proposed result: when the API knows it (`Resolution.challengeEndsAt`). */
+const OPEN_WINDOW = 'Result proposed: the challenge window is open'
+
+/**
+ * A proposed result's line (R6 part B; R7's /me uses the same words): the challenge countdown,
+ * then "finalizing" once it ran out (the keeper finalizes on its next tick), or the open-window
+ * words when the end is unknown (the API never guesses the window).
+ */
+export function proposedLine(challengeEndsAt: number | null, now: number): string {
+  if (challengeEndsAt === null) return OPEN_WINDOW
+  if (challengeEndsAt - now <= 0) return 'Challenge window closed · finalizing'
+  return `Result proposed · final in ${countdown(challengeEndsAt, now)} unless a guardian challenges`
+}
+
+/** When a proposed result's window ends, and the clock it is read against. */
+export interface WindowTiming {
+  challengeEndsAt: number | null
+  now: number
+}
 
 /**
  * The ResolutionCard's status, from the dial's state rather than the raw chain status, so it
  * never says "open" next to a dial that says trading closed (audit finding 11).
  */
-export function resolutionStatus(state: DialState, g: StatusGame, outcome: Outcome | null): string {
+export function resolutionStatus(
+  state: DialState,
+  g: StatusGame,
+  outcome: Outcome | null,
+  timing?: WindowTiming,
+): string {
   switch (state) {
     case 'resolved':
       return outcome ? resolvedWords(g, outcome === 'yes') : 'Result final'
     case 'challenged':
       return 'Result under review'
     case 'proposed':
-      return 'Result proposed: the challenge window is open'
+      return timing ? proposedLine(timing.challengeEndsAt, timing.now) : OPEN_WINDOW
     case 'void':
       return g.status === 'canceled' ? 'Game canceled' : 'Game postponed'
     case 'halted':

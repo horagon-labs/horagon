@@ -58,7 +58,9 @@ describe('header, rows and panels (review §4.8)', () => {
     const r = resolution()
     for (const html of [
       renderToStaticMarkup(<Scorebug game={detail()} run={null} />),
-      renderToStaticMarkup(<ResolutionCard game={detail({ resolutions: [r] })} state="proposed" />),
+      renderToStaticMarkup(
+        <ResolutionCard game={detail({ resolutions: [r] })} state="proposed" now={NOW} />,
+      ),
       card(),
     ]) {
       const section = classAt(html, '<section')
@@ -316,7 +318,7 @@ function resolution(over: Partial<Resolution> = {}): Resolution {
 
 describe('resolution milestones by shape (review §4.7)', () => {
   const html = renderToStaticMarkup(
-    <ResolutionCard game={detail({ resolutions: [resolution()] })} state="proposed" />,
+    <ResolutionCard game={detail({ resolutions: [resolution()] })} state="proposed" now={NOW} />,
   )
   const dot = (mark: string) => {
     const li = html.slice(html.indexOf(`data-mark="${mark}"`))

@@ -86,7 +86,7 @@ export function GameScreen(p: GameScreenProps) {
         </div>
         <div className="space-y-6" data-column="right">
           {p.right}
-          <ResolutionCard game={game} state={dial.state} />
+          <ResolutionCard game={game} state={dial.state} now={p.now} />
         </div>
       </div>
       <details className="rounded-card border border-line p-4 text-13">
