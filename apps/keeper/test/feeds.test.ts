@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { espnFeed, espnStatus, FeedError, parseEspnScoreboard, RawArchive } from '../src/feeds/espn'
 import { loadReplayDir, rebuildPeriods, replayFeed } from '../src/feeds/replay'
 import { type FeedGame, periodsConsistent } from '../src/feeds/types'
+import { isHornFrame } from '../src/planner'
 
 const scoreboard = JSON.parse(
   await readFile(new URL('./fixtures/espn-scoreboard-2026-11-18.json', import.meta.url), 'utf8'),
@@ -27,6 +28,48 @@ describe('ESPN scoreboard', () => {
       [35, expect.any(Number)],
     ])
     expect(games[2]?.clockSecs).toBeNull()
+  })
+
+  it('reads ESPN halftime (period 2, 0.0) as 0: the web shows Half, never a frozen Q2 0:01', () => {
+    const { games } = parseEspnScoreboard(scoreboard)
+    expect(games[1]).toMatchObject({ externalId: '401910009', status: 'live', period: 2 })
+    expect(games[1]?.clockSecs).toBe(0)
+    // Only period 4 or later at 0 s is the horn: halftime never starts the horn hold.
+    expect(games[1] && isHornFrame(games[1])).toBe(false)
+  })
+
+  it('reads 0 at 0.0 except in progress in Q4 or an overtime (1), and none read as null', () => {
+    type Status = { clock?: number; period: number; type: { name: string } }
+    type Ev = { competitions: Array<{ status: Status }> }
+    /** The live game's clockSecs with ESPN's clock (undefined: none), status name and period. */
+    const at = (clock: number | undefined, name?: string, period?: number) => {
+      const body = structuredClone(scoreboard)
+      const s = (body.events[0] as Ev).competitions[0]?.status
+      if (!s) throw new Error('fixture')
+      if (clock === undefined) delete s.clock
+      else s.clock = clock
+      if (name) s.type.name = name
+      if (period !== undefined) s.period = period
+      return parseEspnScoreboard(body).games[0]?.clockSecs
+    }
+    expect(at(0.4)).toBe(1)
+    expect(at(0.1)).toBe(1)
+    expect(at(45.3)).toBe(45)
+    expect(at(undefined)).toBeNull()
+    expect(at(undefined, 'STATUS_IN_PROGRESS', 4)).toBeNull()
+    // The end of Q1 to Q3 at 0.0 reads 0 (the web's End Q1), in progress or not.
+    expect(at(0, 'STATUS_IN_PROGRESS', 1)).toBe(0)
+    expect(at(0, 'STATUS_IN_PROGRESS', 3)).toBe(0)
+    expect(at(0, 'STATUS_HALFTIME', 2)).toBe(0)
+    // Free throws or a review at 0.0 of Q4 or an overtime are still play: a tie goes to overtime.
+    expect(at(0, 'STATUS_IN_PROGRESS', 4)).toBe(1)
+    expect(at(0, 'STATUS_IN_PROGRESS', 5)).toBe(1)
+    expect(at(0, 'STATUS_IN_PROGRESS', 7)).toBe(1)
+    expect(at(0.3, 'STATUS_IN_PROGRESS', 4)).toBe(1)
+    // ESPN's end of a period is the horn, whatever the clock says.
+    expect(at(0.1, 'STATUS_END_PERIOD', 3)).toBe(0)
+    expect(at(0, 'STATUS_END_PERIOD', 4)).toBe(0)
+    expect(at(0, 'STATUS_END_PERIOD', 5)).toBe(0)
   })
 
   it('maps GS, NY, NO, SA, UTAH and WSH to NBA tricodes', () => {
@@ -359,6 +402,7 @@ describe('replay feed', () => {
   it('parses ESPN and NBA clocks', () => {
     expect(clockToSecs('11:16')).toBe(676)
     expect(clockToSecs('45.3')).toBe(45)
+    expect(clockToSecs('0.1')).toBe(1)
     expect(clockToSecs('PT05M30.00S')).toBe(330)
     expect(clockToSecs('garbage')).toBe(0)
   })

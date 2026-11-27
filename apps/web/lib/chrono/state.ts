@@ -40,7 +40,16 @@ export const CLOSING_SECS = 300
 export const isTrading = (state: DialState): boolean =>
   state === 'pre' || state === 'live' || state === 'closing'
 
-type GameFields = Pick<Game, 'status'>
+type GameFields = Pick<Game, 'status'> &
+  Partial<Pick<Game, 'period' | 'clockSecs' | 'homeScore' | 'awayScore'>>
+
+/** The horn frame (A2, R8): live, period 4 or later, clock 0, scores apart (stop.ts says why). */
+const hornFrame = (g: GameFields): boolean =>
+  g.status === 'live' &&
+  (g.period ?? 0) >= 4 &&
+  g.clockSecs === 0 &&
+  g.homeScore !== undefined &&
+  g.homeScore !== g.awayScore
 type MarketFields = Pick<MarketSummary, 'status' | 'endTs' | 'priceTs'>
 
 /**
@@ -59,8 +68,9 @@ export const stillTrades = (state: DialState, game: GameFields, hasMarket: boole
  * The final buzzer (R1, R5c): the keeper halts a market on the first Final read, so a market
  * under a final game is closed, with the final caption, whatever its own status says: before
  * end_ts, and also in the seconds before the keeper's halt reaches the index, so the dial never
- * offers a trade on a known result. Only a halt while the game is still on the court is the
- * amber "Trading halted" (row 5).
+ * offers a trade on a known result. The keeper also halts on the horn held 10 s (R8): the horn
+ * frame is that same close, before its halt lands as after (R8 refix). Only a halt while the
+ * game is still on the court is the amber "Trading halted" (row 5).
  */
 export function deriveDialState(
   game: GameFields,
@@ -74,6 +84,8 @@ export function deriveDialState(
   // Row 10: no market yet; it opens 60 min before tip-off (`started` says when it never did).
   if (!market) return 'pre'
   if (game.status === 'final') return 'closed'
+  // The horn frame is the same close, halted or not yet: the keeper holds it 10 s first.
+  if (hornFrame(game)) return 'closed'
   if (market.status === 'halted') return 'halted'
   const now = effectiveTime(nowSecs, market.priceTs ?? 0)
   if (now >= market.endTs) return 'closed'

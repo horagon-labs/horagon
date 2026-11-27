@@ -18,6 +18,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useWallet } from '../components/wallet'
 import { api } from './api'
 import { clearedByFaucet, errorEffect, quoteError } from './chrono/errors'
+import { isHornFrame } from './chrono/stop'
 import { awaitFill, createFillTracker, fillLine, holding } from './fill'
 import { checkTrade, type TradeCheck, tradeReady } from './trade-form'
 import { DEFAULT_SLIPPAGE_BPS, type TradeStage, whenStillOk } from './trade-shared'
@@ -161,6 +162,7 @@ export function useTrade(game: GameDetail, market: MarketSummary, opts: TradeOpt
       shares: positionOn(s)?.shares,
       marketStatus: market.status,
       gameStatus: game.status,
+      hornFrame: isHornFrame(game),
       endTs: market.endTs,
       nowSecs: effectiveTime(Date.now() / 1000, market.priceTs ?? 0),
     })

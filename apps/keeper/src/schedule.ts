@@ -48,10 +48,15 @@ export interface ScheduleDeps {
   now: () => number
 }
 
-/** Finals the DB has recorded since the ratings file, applied in order. */
+/** NBA finals the DB has recorded since the ratings file, applied in order (never a replay, R8). */
 export async function currentRatings(db: Db, base: Ratings, nowSecs: number): Promise<Ratings> {
   const from = new Date(`${base.asOf}T00:00:00Z`)
-  const rows = await listGames(db, { from, to: new Date(nowSecs * 1000), statuses: ['final'] })
+  const rows = await listGames(db, {
+    from,
+    to: new Date(nowSecs * 1000),
+    statuses: ['final'],
+    leagues: ['NBA'],
+  })
   const results: GameResult[] = rows.map((g) => ({
     date: g.gameDate,
     home: g.home,
@@ -87,6 +92,7 @@ export async function scheduleTick(
     const existing = await listGames(deps.db, {
       from: new Date(`${date}T00:00:00Z`),
       to: new Date(new Date(`${date}T00:00:00Z`).getTime() + 2 * 86_400_000),
+      leagues: ['NBA'],
     })
     const alreadyChosen = existing.some((g) => g.gameDate === date && g.featured)
     if (!alreadyChosen) {

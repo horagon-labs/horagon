@@ -183,3 +183,28 @@ After a deploy whose keeper adds the `trades.bot_memo` column (migrate first:
 `pnpm --filter @horagon/db db:migrate`), run `horagon-ops backfill-bot-memo` until it reports 0
 left, so trades indexed before the column existed get their memo flag (`docs/runbook.md`, "Before
 you start"). A deploy never restarts the agent.
+
+## Practice (once, then every deploy)
+
+The Practice process (R8, `horagon-practice`) runs beside the keeper on the VPS with the same
+`.env.keeper`. No migration: `games.league` exists. Each step waits for the user's word.
+
+1. Deploy the keeper between nights (the league split and the horn halt ship with it):
+   `bash ops/deploy-keeper.sh`. It installs `horagon-practice.service` but does not enable it.
+2. Add one line to `~/horagon/.env.keeper` on the VPS: `PRACTICE_SOURCE_URL=` and the public
+   https URL of the repo's `tests/fixtures/replay` folder on main. The repo's address stays out
+   of the code. `HORAGON_PUBLIC_URL` must be set too (auto-propose already needs it).
+3. `systemctl --user enable --now horagon-practice`, then
+   `journalctl --user -u horagon-practice -n 20 -o cat`: it logs `practice started` with 12
+   recordings. From then on every keeper deploy restarts it.
+4. Deploy the web (above): the `PRACTICE` plate, `/practice` and the strip on `/` ship with it.
+5. `horagon-ops flag on FLAG_PRACTICE`: the next slot (10, 12, 14, 16, 18 or 20:00 UTC) starts
+   a run unless an NBA market is near.
+6. Watch the first run end to end (`horagon-ops status`, the `practice` heartbeat, the game
+   page): create, live, the halt at the buzzer, the propose about 40 min after the start, the
+   finalize 15 min later.
+7. Keep SOL in both wallets a run uses. The Authority PDA pays each run's market rent (about
+   0.036 SOL, up to 6 runs a day): no run starts unless it still holds 2 NBA nights of markets
+   after the run's own, so top it up with `horagon-ops fund-authority <sol>` if more runs are
+   wanted. The attestor pays the fees: no run starts under PRACTICE_SOL_FLOOR (1.0 SOL); top it
+   up from the devnet faucet.

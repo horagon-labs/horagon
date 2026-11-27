@@ -6,11 +6,18 @@ import { canVibrate, type Feel, type Vibrator } from './feel'
 export const STEP_BUZZ_MS = 5
 export const CONFIRM_BUZZ_MS = 20
 
-/** Vibrates for `ms` when the viewer allows it and the device can (Android; not iOS Safari). */
-export function buzz(feel: Feel, ms: number, nav: Vibrator | undefined = globalThis.navigator) {
+/**
+ * Vibrates for `ms`, or a pattern (the Buzzer stop's [30, 80, 30]), when the viewer allows it
+ * and the device can (Android; not iOS Safari).
+ */
+export function buzz(
+  feel: Feel,
+  ms: number | readonly number[],
+  nav: Vibrator | undefined = globalThis.navigator,
+) {
   if (!feel.haptics || !canVibrate(nav)) return false
   try {
-    return nav?.vibrate?.(ms) ?? false
+    return nav?.vibrate?.(typeof ms === 'number' ? ms : [...ms]) ?? false
   } catch {
     return false
   }

@@ -7,11 +7,12 @@ const S = 1_795_000_000
 /** A game tipping off at `tip`, with a winner market in `market` state (null: none yet). */
 function game(
   id: string,
-  o: { tip?: number; status?: string; market?: string | null; kind?: number },
+  o: { tip?: number; status?: string; market?: string | null; kind?: number; league?: string },
 ): GameWithMarkets {
   const market = o.market === undefined ? 'open' : o.market
   return {
     id,
+    ...(o.league ? { league: o.league } : {}),
     away: 'MEM',
     home: 'CLE',
     scheduledTipoff: new Date((o.tip ?? S) * 1000),
@@ -24,6 +25,12 @@ const ids = (games: GameWithMarkets[], now: number) =>
   deployBlockers(games, now).map((b) => b.gameId)
 
 describe('deployBlockers', () => {
+  it('never counts a Practice run: the main keeper does not run it (R8)', () => {
+    const run = game('practice-401910007p0', { league: 'PRACTICE', market: 'open' })
+    expect(ids([run], S + 600)).toEqual([])
+    expect(ids([game('nba-1', { league: 'NBA', market: 'open' })], S + 600)).toEqual(['nba-1'])
+  })
+
   it('blocks from tip-off - 60 min, before the market exists', () => {
     const g = game('nba-1', { status: 'scheduled', market: null })
     expect(ids([g], S - 3_601)).toEqual([])

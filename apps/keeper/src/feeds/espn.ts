@@ -5,6 +5,7 @@
 import { appendFile, mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { errorSummary } from '@horagon/sdk'
+import { secsLeft } from '@horagon/sdk/replay'
 import { z } from 'zod'
 import { easternDate, type Feed, type FeedGame, type FeedSnapshot, type FeedStatus } from './types'
 
@@ -83,6 +84,20 @@ function points(score: string | undefined, optional: boolean): number | null {
   return Number(score)
 }
 
+/**
+ * A live game's seconds left (`secsLeft`: under a second reads 1). 0 is the horn of a period:
+ * ESPN's end of a period, halftime, or 0.0 in Q1 to Q3 (the web shows Half or End Q1). In Q4 or an
+ * overtime, a game not at ESPN's end of a period reads 1 at 0.0: free throws or a review at the
+ * horn can tie the game, and overtime must find the market open. No clock is null, never 0: a
+ * missing field must not read as the horn (R8).
+ */
+function liveClock(s: { clock?: number; period: number; type: { name: string } }): number | null {
+  if (s.type.name === 'STATUS_END_PERIOD') return 0
+  if (s.clock === undefined) return null
+  const left = secsLeft(s.clock)
+  return s.period >= 4 ? Math.max(1, left) : left
+}
+
 export interface ParseResult {
   games: FeedGame[]
   /** Events skipped because they did not match the expected shape. */
@@ -137,7 +152,7 @@ export function parseEspnScoreboard(body: unknown): ParseResult {
       tipoff,
       status,
       period: c.status.period,
-      clockSecs: status === 'live' ? Math.max(0, Math.round(c.status.clock ?? 0)) : null,
+      clockSecs: status === 'live' ? liveClock(c.status) : null,
       homeScore,
       awayScore,
       periods,

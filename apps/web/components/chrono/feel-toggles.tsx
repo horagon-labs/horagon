@@ -1,6 +1,8 @@
 'use client'
-// The three feel switches in the wallet sheet (spec 2.5), saved by lib/chrono/feel.ts. Haptics
-// shows only where navigator.vibrate exists; it is on by default there.
+// The feel switches in the wallet sheet (spec 2.5), saved by lib/chrono/feel.ts. Haptics shows
+// only where navigator.vibrate exists; it is on by default there. Clutch dim (A2, R8) is on by
+// default.
+import { CLUTCH_SWITCH } from '../../lib/chrono/clutch'
 import { canVibrate, type Feel, useFeel } from '../../lib/chrono/feel'
 
 const MOTION = { system: null, on: true, off: false } as const
@@ -32,6 +34,15 @@ export function FeelForm(p: { feel: Feel; onChange: (next: Feel) => void; vibrat
           type="checkbox"
           checked={feel.sound}
           onChange={(e) => p.onChange({ ...feel, sound: e.target.checked })}
+          className={box}
+        />
+      </label>
+      <label className={row}>
+        {CLUTCH_SWITCH}
+        <input
+          type="checkbox"
+          checked={feel.clutchDim}
+          onChange={(e) => p.onChange({ ...feel, clutchDim: e.target.checked })}
           className={box}
         />
       </label>

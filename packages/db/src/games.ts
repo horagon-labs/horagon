@@ -94,19 +94,33 @@ async function withMarkets(db: Db, rows: GameRow[]): Promise<GameWithMarkets[]> 
   return rows.map((g) => ({ ...g, markets: ms.filter((m) => m.gameId === g.id) }))
 }
 
-/** Games whose tip-off is in [from, to), optionally filtered by status, earliest first. */
+/**
+ * Games whose tip-off is in [from, to), optionally filtered by status and league, earliest
+ * first. The keeper and the Practice process each list their own league (R8); an absent or
+ * empty `leagues` lists every league.
+ */
 export async function listGames(
   db: Db,
-  q: { from: Date; to: Date; statuses?: string[] },
+  q: { from: Date; to: Date; statuses?: string[]; leagues?: readonly string[] },
 ): Promise<GameWithMarkets[]> {
   const where = [gte(games.scheduledTipoff, q.from), lt(games.scheduledTipoff, q.to)]
   if (q.statuses && q.statuses.length > 0) where.push(inArray(games.status, q.statuses))
+  if (q.leagues && q.leagues.length > 0) where.push(inArray(games.league, [...q.leagues]))
   const rows = await db
     .select()
     .from(games)
     .where(and(...where))
     .orderBy(asc(games.scheduledTipoff), asc(games.id))
   return withMarkets(db, rows)
+}
+
+/** Every game of one league, whatever its date: the Practice process numbers its runs with it. */
+export async function countGames(db: Db, league: string): Promise<number> {
+  const rows = await db
+    .select({ n: sql<number>`count(*)::int` })
+    .from(games)
+    .where(eq(games.league, league))
+  return rows[0]?.n ?? 0
 }
 
 export async function getGame(db: Db, id: string): Promise<GameWithMarkets | null> {

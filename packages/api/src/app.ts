@@ -35,6 +35,7 @@ import {
   MeResponseSchema,
   marketKindName,
   PositionsResponseSchema,
+  PracticeResponseSchema,
   PubkeySchema,
   QuoteRequestSchema,
   QuoteSchema,
@@ -57,6 +58,7 @@ import { claimFaucet } from './faucet'
 import { flagsOf, provideFlags, requireFlags } from './flags'
 import { healthOpsReader } from './health-ops'
 import { MeQuerySchema, meFor, positionsAndNights } from './me'
+import { practiceFor } from './practice'
 import { ApiError, problemResponse } from './problem'
 import {
   buildClaims,
@@ -208,6 +210,8 @@ export function createApp(deps: ApiDeps) {
   )
   // My Game-day (R7): 404 problem+json while FLAG_ME is off, before any input check.
   app.use('/me/*', requireFlags('FLAG_ME'))
+  // Practice (R8): 404 problem+json while FLAG_PRACTICE is off.
+  app.use('/practice', requireFlags('FLAG_PRACTICE'))
   app.onError((err, c) => {
     const rid = c.get('requestId')
     // Hono's 4xx are the client's mistake: answer them, nothing to log.
@@ -247,9 +251,11 @@ export function createApp(deps: ApiDeps) {
       const range = q.date
         ? etDayRange(q.date)
         : { from: etDayRange(night).from, to: etDayRange(etNextDay(night)).to }
+      // NBA only: a Practice replay is never one of the night's games (R8).
       const games = await listGames(deps.db, {
         ...range,
         ...(q.status ? { statuses: q.status } : {}),
+        leagues: ['NBA'],
       })
       const prices = await latestPrices(
         deps.db,
@@ -488,6 +494,18 @@ export function createApp(deps: ApiDeps) {
     async (c) => {
       const { wallet } = c.req.valid('json')
       return c.json(await claimFaucet(deps, wallet, clientIp(c.req.raw.headers)), 200)
+    },
+  )
+
+  app.openapi(
+    createRoute({
+      method: 'get',
+      path: '/practice',
+      responses: { 200: json(PracticeResponseSchema, 'The Practice run in flight and the next') },
+    }),
+    async (c) => {
+      c.header('cache-control', cacheShort)
+      return c.json(await practiceFor(deps.db, deps.now()), 200)
     },
   )
 

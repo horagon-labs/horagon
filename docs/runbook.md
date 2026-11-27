@@ -171,7 +171,7 @@ names, and every game while auto-propose is off or dry (its `draft:` then prints
      about 28 min before `end_ts` (S + 3h00m). Its market stays halted meanwhile. A `draft:`
      sent before `end_ts` already gives that time, in UTC and ET (`proposing opens at ...`).
    - It refuses a score that differs from the draft (`box score <h>-<a> differs from the draft
-     ...`). When the box score is right and ESPN is wrong, add
+...`). When the box score is right and ESPN is wrong, add
      `--periods <home>-<away>,<home>-<away>,...` (each period, overtime included, 4 to 12; they
      must add up to `--score`). Your reading then replaces the keeper's draft.
    - Success prints `proposed YES|NO for AWAY@HOME (<signature>)` and
@@ -192,10 +192,10 @@ then how it ended (the signature, and the block height when it ended unresolved)
 publishes evidence whose hash the chain may not hold:
 
 - A re-run with the same inputs sends the evidence already stored (it prints `sending the
-  evidence an earlier propose stored (sha256 ...)`). This is the safe retry after exit status 3.
+evidence an earlier propose stored (sha256 ...)`). This is the safe retry after exit status 3.
 - A re-run with different inputs (score, periods, box-score URL, notice, or a new keeper draft)
   is refused with exit status 1: `the stored evidence (sha256 ...) was sealed from other inputs
-  ...`. After a challenge this refusal is expected (C).
+...`. After a challenge this refusal is expected (C).
 
 Steps:
 
@@ -239,7 +239,7 @@ read when it ended unresolved (about a minute); 5 min after it ended when no hei
    may still land holds `--replace-evidence` back until it expires (about a minute); one that
    landed does not.
 5. The second form of the alert, `... was challenged and has been re-proposed (now <status>).
-   Check the new proposal.`, means a new proposal is already on chain: check it with `status`.
+Check the new proposal.`, means a new proposal is already on chain: check it with `status`.
 
 ### D. Postponed, canceled or not played
 
@@ -458,10 +458,13 @@ ssh "$HORAGON_VPS" systemctl --user stop horagon-agent
   the `agent` row) and the markets left wait for the next round's read. Each round starts at the
   market after the last one decided, wrapping around, so the markets late in the list (by
   `end_ts`, then address) get their turn on a busy night.
-- **The horn.** At the end of Q4 or an overtime, ESPN shows the game still live with 0 s on the
-  clock for up to about two minutes before Final, and the model already reads 0 or 1. The agent
-  skips a game that reads period 4 or later at 0 s (skip reason `horn`), so it never buys a
-  decided game before the keeper halts its market on the Final read.
+- **The horn.** At the end of Q4 or an overtime, ESPN can show the game still live for up to about
+  two minutes before Final, and the model already reads 0 or 1. In Q4 or an overtime the keeper
+  reads 0 s only from ESPN's end of a period (`STATUS_END_PERIOD`). A game still in progress there
+  at 0.0 (free throws or a review at the horn) reads 1 s, since a tie there goes to overtime.
+  Halftime and 0.0 in Q1 to Q3 read 0 s (the board shows Half or End Q1), and only period 4 or
+  later at 0 s is ever the horn. The agent skips a game that reads period 4 or later at 0 s (skip
+  reason `horn`), so it never buys a decided game before the keeper halts its market.
 - **When it cannot run.** A start that fails (a bad `AGENT_*` line, the key file, the cluster
   check, a database that does not answer), or a loop that ends on an error, logs
   `agent failed to start: ...` (or `agent stopped on an error: ...`), pages `agent-down` and
@@ -680,7 +683,7 @@ without the cold key.
 
    Exit 0 and "matches --expect": done. Exit 1 prints the authority on chain instead. The same
    field shows as "Authority" in `solana program show HtDJ3vfx8vtFSmskm2Ks39kBMuDmFZH3H2B173BB9qHF
-   --url https://api.devnet.solana.com`. The script decodes the ProgramData account itself: a u32
+--url https://api.devnet.solana.com`. The script decodes the ProgramData account itself: a u32
    tag 3, the u64 slot of the last deploy, then an optional 32-byte authority.
 
 5. Leave `Config.admin` as it is (the deployer). The program sets it once, in
@@ -763,6 +766,10 @@ transaction: `create <gameId>`, `halt <gameId> (<rule>)`, `propose <gameId>` (au
 | `archive`                         | `The raw ESPN archive could not be written`, or `ESPN archive retention failed`                                                                                                         | 3 h               | Markets are not affected. Check the VPS's free disk space and `apps/keeper/data/archive`                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | `heartbeat`                       | `Keeper heartbeat is <n> s old during a game night`                                                                                                                                     | 15 min (watchdog) | From the watchdog: no keeper heartbeat for 120 s between 90 min before a tip-off and 4 h after. Read the log, then restart (G)                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | `watchdog`                        | `Watchdog cannot read the keeper heartbeat`                                                                                                                                             | every run (2 min) | The database does not answer the watchdog, so the keeper likely fails too (`tick-failing`). Check Supabase and `DATABASE_URL`                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `practice-failing`                | `The keeper's practice step failed <n> rounds in a row`                                                                                                                                 | 3 h               | The Practice process (horagon-practice) keeps failing its round: read `journalctl --user -u horagon-practice -n 50`. It never touches an NBA market. If it cannot be fixed now, stop it (Practice, below).                                                                                                                                                                                                                                                                                                                                                     |
+| `practice-sol-floor`              | `Practice paused: the attestor holds <n> SOL, under the floor of <n>`                                                                                                                   | 24 h              | No Practice run starts while the attestor holds less than PRACTICE_SOL_FLOOR (default 1.0 SOL), so NBA nights keep the SOL that pays their fees. Top up the attestor from the devnet faucet if more runs are wanted; the next slot starts by itself. Market rent is the Authority's: `practice-sol-authority`.                                                                                                                                                                                                                                                 |
+| `practice-sol-authority`          | `Practice paused: the Authority holds <n> SOL, under 2 NBA nights of markets plus one Practice market (<n>)`                                                                            | 24 h              | The Authority PDA pays every market's rent (about 0.036 SOL, Practice runs included), so no run starts unless it would still cover 2 NBA nights of markets (the `sol-authority` reserve) after its own. Top up the Authority: `horagon-ops fund-authority <sol>` (G: check before repeating it). Topping up the attestor does not help here.                                                                                                                                                                                                                   |
+| `practice-challenged:<gameId>`    | `Practice AWAY@HOME (<gameId>) was challenged`                                                                                                                                          | 3 h               | A guardian challenged a Practice result: no new run starts until it is proposed again. The recording is a real game of 2026-11-18 ET: check its box score and propose as in A (`horagon-ops propose <gameId> --box-score <url> --score <h>-<a>`).                                                                                                                                                                                                                                                                                                              |
 
 ## After the last game
 
@@ -778,12 +785,49 @@ the production keeper runs `KEEPER_FEED=espn` only.
 A replay never runs on the production keeper. Replay games are league NBA, like real ones: on
 devnet each replay market is a counted NBA market under `docs/metrics.md`, the public board shows
 it as one of that night's games, and the reference agent trades it (`AGENT_PRACTICE` does not
-change that: it is about league PRACTICE, which nothing creates yet). A replay is for a local
-Surfpool run, with a local database.
+change that: it is about league PRACTICE, which only the Practice process creates, below). A
+replay is for a local Surfpool run, with a local database.
 
 `KEEPER_FEED=replay REPLAY_TAG=<tag> REPLAY_TIPOFF=<ISO time>` plays the fixtures of
 `tests/fixtures/replay/` as games whose earliest tip-off is at `REPLAY_TIPOFF` (for example
 `2026-11-22T23:00:00Z`). The tag is 1 to 6 letters or digits, starting with a letter; game ids
 are `nba-<espnId><tag>` and the feed's source URL is `https://horagon.invalid/replay/...`. Use a
-new tag for every run, so its markets never collide with an earlier one. `REPLAY_SPEED` (1 to
-60) plays game time that many times faster.
+new tag for every run, so its markets never collide with an earlier one. `REPLAY_SPEED` (1 to 60) plays game time that many times faster.
+
+## Practice (R8)
+
+The Practice process (horagon-practice, `apps/keeper/src/practice-main.ts`) replays one of the
+12 recorded games of `tests/fixtures/replay/` at 6x as a game of league PRACTICE, so a judge or a
+fan finds a working loop at any hour. Nothing counts a PRACTICE market: `docs/metrics.md` counts
+league NBA only. It runs its own keeper for PRACTICE games, and the main keeper runs NBA games
+only, so neither ever touches the other's markets. The main keeper's indexer indexes both.
+
+- **When.** A run starts at 10, 12, 14, 16, 18 or 20:00 UTC (up to 10 min late after a
+  restart). Its market opens at once with 300 mUSDC, the replayed tip-off is 10 min later,
+  end_ts 30 min after that. The keeper halts at the buzzer, drafts, proposes the recording's
+  final score itself (evidence source replay, linking the file under PRACTICE_SOURCE_URL),
+  and finalizes after the 15-min window: about 55 min from the start.
+- **Guards.** Before a run starts, in this order: FLAG_PRACTICE on (else `flag-off`), no other
+  Practice run unsettled (`run-unsettled`), no NBA market open or opening between the start and
+  90 min after it (`nba-window`: real nights first), every balance read (`balance-unread`), the
+  attestor at or over PRACTICE_SOL_FLOOR for fees (`sol-floor`, pages `practice-sol-floor`),
+  the Authority PDA, which pays each market's rent, still holding the `sol-authority` reserve
+  (2 NBA nights of markets) after the run's own market (`sol-authority`, pages
+  `practice-sol-authority`), and the treasury plus the keeper wallet holding the next 36 h of NBA
+  seeds plus 300 mUSDC (`seed-short`). A failed guard skips that slot and logs why; the next slot
+  tries again.
+- **Heartbeat.** Row `practice`: its round, `nextAt`, the last skip reason (`skipped`) and its
+  failure count. `nextAt` is the next tip-off the guards will not skip: null with the flag off,
+  while a balance guard fails (`sol-floor`, `sol-authority`, `seed-short`, rechecked every
+  minute, so a top-up shows within one), and while a run is challenged or still unsettled 90 min
+  after its start. `/` and `/practice` show it, so neither promises a run that cannot start.
+- **Turn off.** `horagon-ops flag off FLAG_PRACTICE` starts no new run; a run in flight still
+  halts, proposes and finalizes. To stop the process: `systemctl --user stop horagon-practice`
+  (a run in flight then waits; the main keeper never settles it, so start it again later or
+  propose by hand as in A).
+- **Start the first time.** PRACTICE_SOURCE_URL in `~/horagon/.env.keeper` (the public
+  `tests/fixtures/replay` folder of the repo), then
+  `systemctl --user enable --now horagon-practice`. ops/deploy-keeper.sh restarts it on every
+  deploy once it is enabled.
+- **The agent.** The reference agent trades a PRACTICE market only with AGENT_PRACTICE=1 and a
+  live run (AGENT_DRY_RUN=0). Until then the game page says no one else trades the replay.

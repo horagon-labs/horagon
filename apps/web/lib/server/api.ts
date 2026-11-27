@@ -5,7 +5,7 @@
 // copy, next/dist/compiled/server-only) fails the build if a client component imports this.
 import 'server-only'
 import { createApp, depsFromEnv } from '@horagon/api'
-import type { Game } from '@horagon/sdk'
+import type { Game, PracticeResponse } from '@horagon/sdk'
 import { HoragonClient } from '@horagon/sdk/client'
 import { isHoragonError } from '@horagon/sdk/errors'
 import { lookupTarget, type VerifyTarget } from '../verify-target'
@@ -48,6 +48,7 @@ function serverClient(): HoragonClient {
 }
 
 const boards = ttlCache<InitialBoard>(INITIAL_TTL_MS)
+const practices = ttlCache<PracticeResponse | null>(INITIAL_TTL_MS)
 const games = ttlCache<InitialGame>(INITIAL_TTL_MS)
 
 /** The board's first frame (see lib/server/initial.ts). Never throws. */
@@ -80,6 +81,24 @@ export function initialGame(id: string): Promise<InitialGame> {
       }
     },
     (g) => g.game !== undefined || g.missing,
+  )
+}
+
+/**
+ * GET /practice for the strip on `/`, /practice and a Practice game's counterparty line (R8).
+ * Null with FLAG_PRACTICE off (NOT_FOUND), and when the API failed or was slow. Never throws.
+ */
+export function initialPractice(): Promise<PracticeResponse | null> {
+  return practices(
+    'practice',
+    async () => {
+      try {
+        return (await within(serverClient().practice(), INITIAL_TIMEOUT_MS)) ?? null
+      } catch {
+        return null
+      }
+    },
+    (p) => p !== null,
   )
 }
 

@@ -3,6 +3,7 @@ import { PgDialect } from 'drizzle-orm/pg-core'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import {
   atasClosedAway,
+  countGames,
   type Db,
   type DbHandle,
   gamesByIds,
@@ -194,6 +195,25 @@ describe('games', () => {
     expect((await listGames(h.db, { from, to, statuses: ['live'] })).map((g) => g.id)).toEqual([
       'nba-1',
     ])
+  })
+
+  it('filters listGames by league and counts the games of a league (R8)', async () => {
+    await upsertScheduledGames(h.db, [
+      game('nba-1'),
+      game('practice-401910007p0', { league: 'PRACTICE', externalId: '401910007p0' }),
+      game('practice-401910015p1', { league: 'PRACTICE', externalId: '401910015p1' }),
+    ])
+    const from = new Date(0)
+    const to = new Date('2030-01-01')
+    const ids = async (leagues?: string[]) =>
+      (await listGames(h.db, { from, to, ...(leagues ? { leagues } : {}) })).map((g) => g.id)
+    expect(await ids(['NBA'])).toEqual(['nba-1'])
+    expect(await ids(['PRACTICE'])).toEqual(['practice-401910007p0', 'practice-401910015p1'])
+    expect(await ids()).toHaveLength(3)
+    expect(await ids([])).toHaveLength(3)
+    expect(await countGames(h.db, 'PRACTICE')).toBe(2)
+    expect(await countGames(h.db, 'NBA')).toBe(1)
+    expect(await countGames(h.db, 'WNBA')).toBe(0)
   })
 
   it('gamesByIds reads the asked games with their markets, earliest tip-off first (R7)', async () => {

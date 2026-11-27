@@ -50,6 +50,7 @@ import { type Feed, type FeedGame, gameIdOf } from './feeds/types'
 import {
   type Action,
   type GameState,
+  isHornFrame,
   plan,
   type Score,
   type SecondSourceState,
@@ -79,6 +80,8 @@ export interface AutoProposeDeps {
   evidenceUri: (gameId: string) => string
   /** balldontlie; null without BALLDONTLIE_API_KEY (the verdict is then `off`). */
   secondSource: SecondSource | null
+  /** The leagues it proposes (default NBA); the Practice process passes PRACTICE (R8). */
+  leagues?: readonly string[]
 }
 
 export interface KeeperDeps {
@@ -102,6 +105,11 @@ export interface KeeperDeps {
   autoPropose?: AutoProposeDeps
   /** Draws the id of a new market (default `randomMarketId`); tests pin it. */
   newMarketId?: () => bigint
+  /**
+   * The leagues this keeper runs (default NBA). The Practice process runs its own Keeper with
+   * ['PRACTICE'] (R8), so the main keeper never touches a replay's market.
+   */
+  leagues?: readonly string[]
 }
 
 /** Ids in a row whose PDAs someone else took before the create gives up for this tick. */
@@ -139,6 +147,8 @@ interface Observed {
   game: FeedGame
   seenAt: number
   finalSince: number | null
+  /** Since when the horn frame has held with this score and period (R8), else null. */
+  hornSince: number | null
   url: string
 }
 
@@ -470,7 +480,20 @@ export class Keeper {
           prev.game.awayScore === g.awayScore
         const finalSince =
           g.status === 'final' ? (stillFinal ? (prev?.finalSince ?? now) : now) : null
-        this.observed.set(id, { game: g, seenAt: now, finalSince, url: snap.url })
+        const stillHorn =
+          prev !== undefined &&
+          isHornFrame(prev.game) &&
+          prev.game.period === g.period &&
+          prev.game.homeScore === g.homeScore &&
+          prev.game.awayScore === g.awayScore
+        const hornSince = isHornFrame(g) ? (stillHorn ? (prev?.hornSince ?? now) : now) : null
+        this.observed.set(id, {
+          game: g,
+          seenAt: now,
+          finalSince,
+          hornSince,
+          url: g.sourceUrl ?? snap.url,
+        })
         const row = rows.get(id)
         if (row && (!prev || !sameLive(prev.game, g)))
           await this.persistLive(row, g, snap.fetchedAt)
@@ -551,6 +574,7 @@ export class Keeper {
     const games = await listGames(this.d.db, {
       from: new Date((now - 8 * 86_400) * 1000),
       to: new Date((now + 36 * 3600) * 1000),
+      leagues: this.d.leagues ?? ['NBA'],
     })
     await this.observe(now, new Map(games.map((g) => [g.id, g])))
     const [chain, disputeWindowSecs] = await Promise.all([
@@ -568,6 +592,7 @@ export class Keeper {
           feed: obs?.game ?? null,
           feedSeenAt: obs?.seenAt ?? null,
           finalSince: obs?.finalSince ?? null,
+          hornSince: obs?.hornSince ?? null,
           draft: market ? await getDraft(this.d.db, g.id) : null,
         }
       }),
@@ -587,6 +612,7 @@ export class Keeper {
       seeds: this.d.seeds,
       disputeWindowSecs,
       autoPropose: this.d.autoPropose?.mode ?? 'off',
+      autoProposeLeagues: this.d.autoPropose?.leagues ?? ['NBA'],
     })
     // The plan comes halts first, then syncs: the drift syncs join right after the halts.
     const halts = planned.filter((a) => a.type === 'halt')
@@ -1293,7 +1319,10 @@ export class Keeper {
     // The keeper proposes this one itself: from max(Final held 60 s, end_ts).
     const auto = this.d.autoPropose
     const own =
-      auto?.mode === 'on' && a.status === 'final' && roundOf(s) === 0 && g.league === 'NBA'
+      auto?.mode === 'on' &&
+      a.status === 'final' &&
+      roundOf(s) === 0 &&
+      (auto.leagues ?? ['NBA']).includes(g.league)
     const from =
       own && endTs !== null
         ? {

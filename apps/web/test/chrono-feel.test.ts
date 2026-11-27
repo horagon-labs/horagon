@@ -30,15 +30,20 @@ const blocked = {
 }
 
 describe('feel preferences (spec 2.5)', () => {
-  it('defaults to haptics on, sound off, motion from the system', () => {
-    expect(DEFAULT_FEEL).toEqual({ haptics: true, sound: false, reducedMotion: null })
+  it('defaults to haptics on, sound off, motion from the system, clutch dim on (R8)', () => {
+    expect(DEFAULT_FEEL).toEqual({
+      haptics: true,
+      sound: false,
+      reducedMotion: null,
+      clutchDim: true,
+    })
     expect(loadFeel(store())).toEqual(DEFAULT_FEEL)
     expect(loadFeel(null)).toEqual(DEFAULT_FEEL)
   })
 
   it('round-trips through storage', () => {
     const s = store()
-    const feel: Feel = { haptics: false, sound: true, reducedMotion: true }
+    const feel: Feel = { haptics: false, sound: true, reducedMotion: true, clutchDim: false }
     saveFeel(s, feel)
     expect(loadFeel(s)).toEqual(feel)
   })
@@ -49,6 +54,7 @@ describe('feel preferences (spec 2.5)', () => {
       haptics: true,
       sound: true,
       reducedMotion: null,
+      clutchDim: true,
     })
   })
 
@@ -86,6 +92,7 @@ describe('createFeelStore', () => {
       haptics: false,
       sound: false,
       reducedMotion: null,
+      clutchDim: true,
     })
     off()
     feel.set(DEFAULT_FEEL)

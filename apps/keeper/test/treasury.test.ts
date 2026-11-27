@@ -13,6 +13,7 @@ import type { Alerter } from '../src/alerts'
 import type { SendSpec } from '../src/executor'
 import { DEFAULT_SEEDS } from '../src/planner'
 import {
+  authorityReserve,
   isMissingAccount,
   KEEPER_MIN_LAMPORTS,
   LAMPORTS_PER_MARKET,
@@ -367,6 +368,18 @@ describe('treasury', () => {
     await expect(treasuryTick(f.deps(h.db))).resolves.toEqual({ moved: 0n, target: 0n })
     expect(f.alerts).toEqual([])
     expect(f.logs.some(([l, m]) => l === 'warn' && m.includes('SOL balance check'))).toBe(true)
+  })
+})
+
+describe('authorityReserve', () => {
+  const at = (iso: string) => ({ scheduledTipoff: new Date(iso) })
+  it("keeps 2 nights of markets: the next game date's games, 4 at least", () => {
+    expect(authorityReserve([])).toBe(2n * 4n * LAMPORTS_PER_MARKET)
+    // Five games on 2026-12-06 ET (the 00:30 UTC tip-off is still that evening), one the next day.
+    const night = ['2026-12-07T00:00Z', '2026-12-07T00:30Z', '2026-12-07T01:00Z']
+    const games = [...night, '2026-12-07T02:00Z', '2026-12-07T03:00Z', '2026-12-08T00:00Z']
+    expect(authorityReserve(games.map(at))).toBe(2n * 5n * LAMPORTS_PER_MARKET)
+    expect(authorityReserve(night.map(at))).toBe(2n * 4n * LAMPORTS_PER_MARKET)
   })
 })
 

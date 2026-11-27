@@ -1,8 +1,9 @@
 // Replays games recorded by spike S4 (`tests/fixtures/replay/*.json`) as a live feed, shifted
-// so the recorded tip-off lands at a chosen time. For a local Surfpool run only: replay games are
-// league NBA, so on devnet their markets would be counted NBA markets (docs/metrics.md) on the
-// public board, traded by the reference agent; a replay never runs on the production keeper
-// (docs/runbook.md, "Replay"). Each run gets its own `tag`, so its markets never collide with
+// so the recorded tip-off lands at a chosen time. By default replay games are league NBA, for a
+// local Surfpool run only: on devnet their markets would be counted NBA markets (docs/metrics.md)
+// on the public board, so a league-NBA replay never runs on the production keeper
+// (docs/runbook.md, "Replay"). The Practice process (R8) replays under league PRACTICE, which
+// nothing counts. Each run gets its own `tag`, so its markets never collide with
 // real games or an earlier run. The fixture format and its quirks: `@horagon/sdk/replay`.
 import { readdir, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -12,7 +13,14 @@ import {
   type ReplayGame,
   ReplayGameSchema,
 } from '@horagon/sdk/replay'
-import { easternDate, type Feed, type FeedGame, type FeedSnapshot, type FeedStatus } from './types'
+import {
+  easternDate,
+  type Feed,
+  type FeedGame,
+  type FeedSnapshot,
+  type FeedStatus,
+  type League,
+} from './types'
 
 export async function loadReplayDir(dir: string): Promise<ReplayGame[]> {
   const names = (await readdir(dir)).filter((n) => n.endsWith('.json')).sort()
@@ -58,6 +66,10 @@ export interface ReplayOptions {
    * Game time runs this many times faster than wall time (default 1), on a local Surfpool run.
    */
   speed?: number
+  /** The league the replayed games report (default NBA); the Practice process passes PRACTICE. */
+  league?: League
+  /** Each game's public data page (`FeedGame.sourceUrl`), by its recording; absent, none. */
+  sourceUrlOf?: (fixture: ReplayGame) => string
 }
 
 export function replayFeed(fixtures: readonly ReplayGame[], opts: ReplayOptions): Feed {
@@ -90,7 +102,7 @@ export function replayFeed(fixtures: readonly ReplayGame[], opts: ReplayOptions)
     const frame = seen.at(-1)
     const status = frame ? STATUS[frame.status] : 'scheduled'
     return {
-      league: 'NBA',
+      league: opts.league ?? 'NBA',
       externalId: g.externalId,
       gameDate: g.gameDate,
       home: g.fixture.home,
@@ -103,6 +115,7 @@ export function replayFeed(fixtures: readonly ReplayGame[], opts: ReplayOptions)
       awayScore: frame?.awayScore ?? 0,
       periods: frame?.periods ?? rebuildPeriods(seen),
       cup: false,
+      ...(opts.sourceUrlOf ? { sourceUrl: opts.sourceUrlOf(g.fixture) } : {}),
     }
   }
 

@@ -73,6 +73,16 @@ export const DEFAULT_TIMINGS: Timings = {
   secondSourceWaitSecs: 600,
 }
 
+/**
+ * The horn frame (Q4 or an overtime at 0:00, not tied) must hold this long before the keeper
+ * halts on it (R8): a frame ESPN shows for a moment, or that a review takes back, does not close
+ * the market. The hold is measured between feed reads, from the first read of the frame to the
+ * latest read that still shows it, never against the tick clock: the main keeper ticks every 5 s
+ * but reads ESPN every 15 s, so one read of the frame never halts. A planner constant, not a
+ * KEEPER_TIMINGS field.
+ */
+export const HORN_HOLD_SECS = 10
+
 /** Must match the program's MIN_MARKET_SECS. */
 export const MIN_MARKET_SECS = 300
 export const MIN_PRICE_BPS = 500
@@ -98,6 +108,11 @@ export interface GameState {
   feedSeenAt: number | null
   /** Unix seconds since the feed has reported Final with the current score, unbroken. */
   finalSince: number | null
+  /**
+   * Unix seconds since the feed has shown the horn frame (`isHornFrame`) with the current score
+   * and period, unbroken (R8). Absent or null: not at the horn.
+   */
+  hornSince?: number | null
   draft: DraftRow | null
   /**
    * The score of the proposal on chain, from the stored evidence whose hash is on chain: what the
@@ -135,7 +150,7 @@ export interface Score {
   away: number
 }
 
-export type HaltRule = 'final-before-end' | 'postponed' | 'not-started' | 'feed-silent'
+export type HaltRule = 'final-before-end' | 'horn' | 'postponed' | 'not-started' | 'feed-silent'
 
 export type Action =
   | {
@@ -191,6 +206,11 @@ export interface PlanInput {
   disputeWindowSecs: number
   /** Auto-propose (R6); absent means off. */
   autoPropose?: AutoProposeMode
+  /**
+   * The leagues auto-propose covers (default NBA). Only the Practice process passes PRACTICE,
+   * for its own replays (R8).
+   */
+  autoProposeLeagues?: readonly string[]
 }
 
 const ORDER: Record<Action['type'], number> = {
@@ -209,6 +229,16 @@ const ORDER: Record<Action['type'], number> = {
 
 export function priceBps(p0: number): number {
   return Math.min(MAX_PRICE_BPS, Math.max(MIN_PRICE_BPS, Math.round(p0 * 10_000)))
+}
+
+/**
+ * The horn of Q4 or an overtime: live, period 4 or later, 0:00 on the clock, and not tied (a tie
+ * goes to overtime). The game is over unless a review puts time back.
+ */
+export function isHornFrame(
+  f: Pick<FeedGame, 'status' | 'period' | 'clockSecs' | 'homeScore' | 'awayScore'>,
+): boolean {
+  return f.status === 'live' && f.period >= 4 && f.clockSecs === 0 && f.homeScore !== f.awayScore
 }
 
 function periodsAlert(s: GameState, feed: FeedGame): Action {
@@ -355,11 +385,17 @@ function planGame(s: GameState, input: PlanInput): Action[] {
  * postponed result, a round after a challenge, another league, or a feed that no longer holds
  * a consistent Final at the draft's score (spec 7 gives those to a person).
  */
-function autoBlock(s: GameState, draft: DraftRow, chain: GameMarketAccount): string | null {
+function autoBlock(
+  s: GameState,
+  draft: DraftRow,
+  chain: GameMarketAccount,
+  leagues: readonly string[] = ['NBA'],
+): string | null {
   if (draft.status !== 'final') return 'a postponed result is proposed by hand'
   if (chain.challengeCount > 0 || chain.status === 'challenged')
     return 'after a challenge a guardian proposes'
-  if (s.game.league !== 'NBA') return 'auto-propose covers NBA games only'
+  if (!leagues.includes(s.game.league))
+    return `auto-propose covers ${leagues.join(' and ')} games only`
   const feed = s.feed
   const atDraft =
     feed?.status === 'final' &&
@@ -383,7 +419,8 @@ function autoPropose(
 ): Action | null {
   if ((input.autoPropose ?? 'off') === 'off') return null
   if (chain.status !== 'open' && chain.status !== 'halted') return null
-  if (autoBlock(s, draft, chain) !== null || s.finalSince === null) return null
+  if (autoBlock(s, draft, chain, input.autoProposeLeagues) !== null || s.finalSince === null)
+    return null
   const { now, timings: t } = input
   const from = Math.max(s.finalSince + t.finalStableSecs, chain.endTs)
   if (now < from) return null
@@ -424,7 +461,7 @@ function unconfirmedText(
   const cause =
     mode === 'dry'
       ? 'auto-propose is a dry run'
-      : (autoBlock(s, draft, chain) ??
+      : (autoBlock(s, draft, chain, input.autoProposeLeagues) ??
         (second?.verdict === 'mismatch'
           ? `held: ESPN ${draft.awayScore}-${draft.homeScore} vs balldontlie ${second.score.away}-${second.score.home}`
           : s.proposeError
@@ -446,6 +483,15 @@ function haltRule(
 ): HaltRule | null {
   const feed = s.feed
   if (feed?.status === 'final' && now < chain.endTs) return 'final-before-end'
+  if (
+    feed &&
+    isHornFrame(feed) &&
+    s.hornSince != null &&
+    s.feedSeenAt !== null &&
+    s.feedSeenAt - s.hornSince >= HORN_HOLD_SECS &&
+    now < chain.endTs
+  )
+    return 'horn'
   if (feed?.status === 'postponed' || feed?.status === 'canceled') return 'postponed'
   if (now >= tip + t.notStartedSecs && (!feed || feed.status === 'scheduled')) return 'not-started'
   const silent = q4Silence(s, chain, now)

@@ -442,6 +442,19 @@ export const FlagsSchema = z.strictObject({
 /** `GET /api/v1/flags`. */
 export const FlagsResponseSchema = z.object({ flags: FlagsSchema })
 
+/**
+ * `GET /api/v1/practice` (R8, FLAG_PRACTICE): the Practice run in flight (a recorded game
+ * replayed at 6x as league PRACTICE, never counted), the next run's tip-off, and whether the
+ * reference agent trades the replay too.
+ */
+export const PracticeResponseSchema = z.object({
+  current: GameSchema.nullable(),
+  /** The next run's tip-off; null when the Practice process is off or not running. */
+  nextAt: UnixSecondsSchema.nullable(),
+  /** `agent` only while the agent runs live with AGENT_PRACTICE=1; else no one else trades. */
+  counterparty: z.enum(['agent', 'none']),
+})
+
 export type GameStatus = z.infer<typeof GameStatusSchema>
 export type MarketKind = z.infer<typeof MarketKindSchema>
 export type MarketStatus = z.infer<typeof MarketStatusSchema>
@@ -474,6 +487,7 @@ export type FaucetResponse = z.infer<typeof FaucetResponseSchema>
 export type Health = z.infer<typeof HealthSchema>
 export type Problem = z.infer<typeof ProblemSchema>
 export type FlagsResponse = z.infer<typeof FlagsResponseSchema>
+export type PracticeResponse = z.infer<typeof PracticeResponseSchema>
 
 /** On-chain `GameMarket.kind` <-> API name. */
 export const MARKET_KIND_CODE: Readonly<Record<MarketKind, 0 | 1>> = { winner: 0, 'second-half': 1 }

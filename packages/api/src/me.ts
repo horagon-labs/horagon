@@ -244,6 +244,8 @@ export async function meFor(db: Db, input: MeInput): Promise<MeResponse> {
       from: new Date(now * 1000),
       to: new Date((now + NEXT_DAYS * 86_400) * 1000),
       statuses: ['scheduled'],
+      // A team's next game is an NBA game: never a Practice replay (R8).
+      leagues: ['NBA'],
     }),
   ])
   const { trades, claims, keys, markets } = rows
