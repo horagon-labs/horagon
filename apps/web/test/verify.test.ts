@@ -11,7 +11,7 @@ import {
 import { Keypair, PublicKey } from '@solana/web3.js'
 import { describe, expect, it } from 'vitest'
 import { curlLine, rpcAccount, type VerifyDeps, verifyMarket } from '../lib/verify'
-import { lookupTarget } from '../lib/verify-target'
+import { lookupTarget, verifyStatus } from '../lib/verify-target'
 
 const MARKET_ID = 77n
 const MARKET = Keypair.generate().publicKey.toBase58()
@@ -298,5 +298,28 @@ describe('lookupTarget (GET /markets/{market}, then GET /games/{gameId})', () =>
 
   it('is null when the game holds no resolution for the market', async () => {
     expect(await lookupTarget(client([]), MARKET)).toBeNull()
+  })
+})
+
+describe('verifyStatus (the line above the checks)', () => {
+  // 2026-11-29 02:05 UTC is 9:05 PM ET.
+  const END = Date.UTC(2026, 10, 29, 2, 5) / 1000
+  const of = (status: string, windowEndsAt: number | null = null) => ({ status, windowEndsAt })
+  it('says when the challenge window ends, in UTC and ET, and that it ended once past', () => {
+    expect(verifyStatus(of('proposed', END), END - 60)).toBe(
+      'Proposed on chain · the challenge window ends 2026-11-29 02:05 UTC · 9:05 PM ET',
+    )
+    expect(verifyStatus(of('proposed', END), END)).toBe(
+      'Proposed on chain · the challenge window ended 2026-11-29 02:05 UTC · 9:05 PM ET',
+    )
+    expect(verifyStatus(of('proposed'), END)).toBe('Proposed on chain')
+  })
+  it('names the other states plainly', () => {
+    expect(verifyStatus(of('finalized'), END)).toBe('Final on chain')
+    expect(verifyStatus(of('recycled'), END)).toBe('Final on chain')
+    expect(verifyStatus(of('challenged'), END)).toBe('Under review on chain')
+    expect(verifyStatus(of('open'), END)).toBe('Not proposed yet')
+    expect(verifyStatus(of('halted'), END)).toBe('Not proposed yet')
+    expect(verifyStatus(of('missing'), END)).toBeNull()
   })
 })

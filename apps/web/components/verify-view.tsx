@@ -6,36 +6,12 @@ import Link from 'next/link'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '../lib/api'
 import { DISABLED } from '../lib/chrono/controls'
-import { etClock } from '../lib/chrono/time'
 import { PUBLIC_RPC } from '../lib/format'
 import type { VerifyResult } from '../lib/verify'
-import { lookupTarget, type VerifyTarget } from '../lib/verify-target'
+import { lookupTarget, type VerifyTarget, verifyStatus } from '../lib/verify-target'
 
 const LINK = 'text-ink underline underline-offset-4'
 const BUTTON = `min-h-11 rounded-card border border-rule px-4 text-13 font-semibold text-ink ${DISABLED}`
-
-/** "2026-11-29 02:05 UTC · 9:05 PM ET". */
-const both = (ts: number) =>
-  `${new Date(ts * 1000).toISOString().slice(0, 16).replace('T', ' ')} UTC · ${etClock(ts)}`
-
-function statusLine(r: VerifyResult): string | null {
-  switch (r.status) {
-    case 'proposed':
-      return r.windowEndsAt === null
-        ? 'Proposed on chain'
-        : `Proposed on chain · the challenge window ends ${both(r.windowEndsAt)}`
-    case 'finalized':
-    case 'recycled':
-      return 'Final on chain'
-    case 'challenged':
-      return 'Under review on chain'
-    case 'open':
-    case 'halted':
-      return 'Not proposed yet'
-    default:
-      return null
-  }
-}
 
 /** Fetches bytes for the evidence check; a non-2xx answer counts as no answer. */
 async function fetchBytes(url: string): Promise<Uint8Array> {
@@ -111,7 +87,7 @@ export function VerifyView(p: {
     )
   }
 
-  const status = result ? statusLine(result) : null
+  const status = result ? verifyStatus(result, Math.floor(Date.now() / 1000)) : null
   return (
     <section className="mx-auto max-w-3xl space-y-5 py-2">
       <header className="space-y-1">
@@ -181,7 +157,9 @@ export function VerifyView(p: {
                 data-ok={c.ok}
               >
                 <p className="flex items-baseline gap-2 text-13 font-semibold text-ink">
-                  <span className={c.ok ? 'text-ink' : 'text-error'}>
+                  <span
+                    className={`shrink-0 whitespace-nowrap ${c.ok ? 'text-ink' : 'text-error'}`}
+                  >
                     {c.ok ? '✓ Pass' : '✗ Fail'}
                   </span>
                   <span>{c.label}</span>
