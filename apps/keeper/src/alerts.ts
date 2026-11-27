@@ -51,6 +51,7 @@ const PERSON_ALERT_KEYS = [
   'archive',
   'tick-failing',
   'index-failing',
+  'index-rate-limited',
   'evidence-mismatch',
   'source-held',
   'second-source-refused',
