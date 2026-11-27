@@ -15,16 +15,21 @@ export function LastNightStrip({ night }: { night: LastNight }) {
       </h2>
       <ul className="space-y-1.5 border-t border-rule pt-2">
         {night.rows.map((r) => (
-          <li
-            key={r.id}
-            className="flex flex-wrap items-baseline gap-x-2 font-mono text-13 text-ink tabular-nums"
-          >
+          <li key={r.id} className="font-mono text-13 text-ink tabular-nums">
             {r.upset && (
-              <span className="rounded-sm border border-ink px-1 font-sans text-12 font-semibold uppercase leading-4 tracking-wide">
+              <span className="mr-2 inline-block rounded-sm border border-ink px-1 font-sans text-12 font-semibold uppercase leading-4 tracking-wide">
                 UPSET
               </span>
             )}
-            <span>{lastNightRowText(r)}</span>
+            {/* A narrow screen wraps between the parts, never inside one. */}
+            {lastNightRowText(r)
+              .split(' · ')
+              .map((part, i) => (
+                <span key={part}>
+                  {i > 0 && ' · '}
+                  <span className="whitespace-nowrap">{part}</span>
+                </span>
+              ))}
           </li>
         ))}
       </ul>

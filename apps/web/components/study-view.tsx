@@ -37,7 +37,7 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
 }
 
 const Code = ({ children }: { children: ReactNode }) => (
-  <code className="break-all font-mono text-13 text-ink">{children}</code>
+  <code className="break-words font-mono text-13 text-ink">{children}</code>
 )
 
 const dayLabel = new Intl.DateTimeFormat('en-US', {
@@ -56,7 +56,10 @@ const weekday = new Intl.DateTimeFormat('en-US', {
 const score = (v: number | null) => (v === null ? '–' : v.toFixed(3))
 /** A price move as % points with one decimal: "+1.2". */
 const move = (v: number | null) => (v === null ? '–' : `+${(v * 100).toFixed(1)}`)
-const hm = (minutes: number) => `${Math.floor(minutes / 60)} h ${Math.round(minutes % 60)} min`
+const hm = (minutes: number) => {
+  const m = Math.round(minutes % 60)
+  return `${Math.floor(minutes / 60)} h${m === 0 ? '' : ` ${m} min`}`
+}
 /** 180 -> "S+3h00m". */
 const offset = (minutes: number) =>
   `S+${Math.floor(minutes / 60)}h${String(Math.round(minutes % 60)).padStart(2, '0')}m`
@@ -96,14 +99,14 @@ function ScoreTable({ s }: { s: StudySnapshot }) {
         </thead>
         <tbody>
           <tr>
-            <th className={`${TD} font-sans`} scope="row">
+            <th className={`${TD} text-left font-sans font-normal`} scope="row">
               Brier score
             </th>
             <td className={TD}>{score(c.brier)}</td>
             <td className={TD}>{score(c.baselineBrier)}</td>
           </tr>
           <tr>
-            <th className={`${TD} font-sans`} scope="row">
+            <th className={`${TD} text-left font-sans font-normal`} scope="row">
               Log loss
             </th>
             <td className={TD}>{score(c.logLoss)}</td>

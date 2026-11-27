@@ -5,7 +5,7 @@ import type { StudySnapshot } from '@horagon/sdk/study'
 
 const W = 340
 const H = 200
-const PAD = { left: 34, right: 10, top: 12, bottom: 34 }
+const PAD = { left: 34, right: 10, top: 24, bottom: 34 }
 const PLOT_W = W - PAD.left - PAD.right
 const PLOT_H = H - PAD.top - PAD.bottom
 const SVG = 'h-auto w-full max-w-md font-mono'
@@ -79,13 +79,19 @@ export function DepthChart({ depth }: { depth: StudySnapshot['depth'] }) {
       <line
         x1={median}
         x2={median}
-        y1={PAD.top}
+        y1={PAD.top - 6}
         y2={y(0)}
         className="stroke-brass"
         strokeWidth={1.5}
         data-median-final
       />
-      <text x={median - 4} y={PAD.top + 10} textAnchor="end" className="fill-ink-muted" {...TEXT}>
+      <text
+        x={Math.min(median, W - PAD.right - 44)}
+        y={PAD.top - 10}
+        textAnchor="middle"
+        className="fill-ink-muted"
+        {...TEXT}
+      >
         median Final
       </text>
       <path
