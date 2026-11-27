@@ -1,5 +1,6 @@
-// Every page gets a Content-Security-Policy with a fresh nonce (lib/csp.ts). The policy goes on
-// the request too: Next reads the nonce from it while rendering and puts it on its scripts.
+// Every page gets a Content-Security-Policy with a fresh nonce (lib/csp.ts); its connect-src is
+// wider on /verify/<market> only (isVerifyPage). The policy goes on the request too: Next reads
+// the nonce from it while rendering and puts it on its scripts.
 // Pages render per request (the root layout waits for the connection), so no page is served
 // from a build-time HTML file without the nonce.
 import { type NextRequest, NextResponse } from 'next/server'
@@ -12,6 +13,7 @@ export function proxy(request: NextRequest): NextResponse {
     nonce: newNonce(),
     dev: process.env.NODE_ENV === 'development',
     apiBase: API_BASE,
+    pathname: request.nextUrl.pathname,
   })
   const headers = new Headers(request.headers)
   headers.set(HEADER, policy)

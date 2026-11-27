@@ -78,7 +78,8 @@ export function ResolutionCard({
       )}
       {r.evidenceHash && (
         <p>
-          {/* A plain link: the /verify code loads only when it is opened. */}
+          {/* A plain link, never next/link: /verify loads as a new document, so it gets its own
+              policy (connect-src https:, lib/csp.ts), and its code loads only when opened. */}
           <a href={`/verify/${r.market}`} className="inline-flex min-h-11 items-center underline">
             Verify this result
           </a>

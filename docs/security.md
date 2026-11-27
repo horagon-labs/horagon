@@ -84,7 +84,8 @@ Until the operator signs procedure M, the deployer key remains the upgrade autho
 
 The play wallet's secret key lives in the browser's localStorage (`apps/web/lib/burner.ts`), so
 a script injected into a page could read it. Every page is sent with this policy
-(`apps/web/lib/csp.ts`, set by `apps/web/proxy.ts` with a nonce drawn per request):
+(`apps/web/lib/csp.ts`, set by `apps/web/proxy.ts` with a nonce drawn per request; `/verify`
+adds `https:` to `connect-src`, below):
 
 ```
 default-src 'self'; script-src 'self' 'nonce-<per request>' 'strict-dynamic';
@@ -97,9 +98,27 @@ object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'
   action). No `'unsafe-eval'` and no `'unsafe-inline'` for scripts; inline event handlers are
   refused. `next dev` adds `'unsafe-eval'` for React's error overlay, never a production build.
 - `connect-src` is the API base the browser client uses (`NEXT_PUBLIC_API_BASE`, same-origin
-  `/api/v1` by default; an absolute base adds its origin). The browser opens no other
-  connection: no RPC, since the API relays every transaction. A test fails if browser code
-  calls `fetch`, a socket, a beacon or an RPC connection outside the API client.
+  `/api/v1` by default; an absolute base adds its origin). Outside `/verify` the browser opens
+  no other connection: no RPC, since the API relays every transaction. A test fails if browser
+  code calls `fetch`, a socket, a beacon or an RPC connection outside the API client.
+- `/verify/<market>` is the one exception: its `connect-src` adds `https:`. The page checks a
+  result without trusting Horagon, so the viewer's browser reads the market accounts from a
+  Solana RPC the viewer picks (the cluster's public RPC by default, any other pasted in) and
+  fetches the evidence from the URI stored on chain, which may sit on another origin than the
+  site (results written before the domain move name the earlier host), then falls back to the
+  API's copy. None of these hosts can be listed ahead of time, so the page allows any `https:`
+  host and no other scheme (no `http:`, no `wss:`). Only that route is widened (`isVerifyPage`:
+  exactly one path segment after `/verify/`); every other page keeps the list above.
+  The network test allows exactly the verify view's two uses of `fetch`
+  (`apps/web/components/verify-view.tsx`, loaded by the `/verify` page alone), by file, count
+  and reason; a call anywhere else still fails it.
+- A page's policy is fixed when its document loads, and a client-side (`next/link`) move keeps
+  the policy of the page it started on. Every link into `/verify` is therefore a plain `<a>`,
+  which loads a new document with the `/verify` policy; a test fails on a `next/link`, router
+  push or redirect to `/verify`. Leaving `/verify` by its own `next/link` links keeps the wider
+  `connect-src` in that tab until the next full load. The other pages' code opens no new
+  connection, so this only widens what an injected script could reach; the script rules above,
+  which stop the injection, are the same on every page.
 - Styles allow `'unsafe-inline'`: React writes `style=""` attributes into the server HTML
   (motion's first frame) and the chart library adds a `<style>` element at run time; neither
   can carry a nonce. Images and fonts load from this origin only, so an injected style cannot
