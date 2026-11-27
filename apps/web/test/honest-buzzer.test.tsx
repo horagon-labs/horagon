@@ -111,7 +111,9 @@ describe('final means closed (item 1)', () => {
     expect(canTrade(d.state)).toBe(false)
     expect(d.label).toBe('Final, CLE lost, result pending, 77%, model 74%, trading closed')
     expect(d.label).not.toMatch(/open until/)
-    expect(stateLine(d.state, atBuzzer, d.secsLeft, NOW)).toBe('Trading closed · result pending')
+    expect(stateLine(d.state, atBuzzer, d.secsLeft, NOW)).toBe(
+      'Stopped at the buzzer · MEM 110–104 CLE',
+    )
   })
 
   it('refuses the trade with the buzzer line, so Buy is off', () => {
@@ -154,6 +156,9 @@ describe('no "halted" for a normal close (item 2)', () => {
     finalizeSig: null,
     recycleSig: null,
     externalLp: false,
+    gameMarket: 'GameMarket11111111111111111111111111111111',
+    proposedAt: null,
+    challengeEndsAt: null,
   }
 
   it('reads a halted position as "trading closed" in the wallet sheet', () => {
@@ -165,12 +170,16 @@ describe('no "halted" for a normal close (item 2)', () => {
 
   it('labels the halt transaction "Closed" once the game is final, "Halted" before', () => {
     const final = renderToStaticMarkup(
-      <ResolutionCard game={detail({ ...over, resolutions: [resolution] })} state="closed" />,
+      <ResolutionCard
+        game={detail({ ...over, resolutions: [resolution] })}
+        state="closed"
+        now={NOW}
+      />,
     )
     expect(final).toMatch(/>Closed<\/a>/)
     expect(final).not.toContain('Halted')
     const mid = renderToStaticMarkup(
-      <ResolutionCard game={detail({ resolutions: [resolution] })} state="halted" />,
+      <ResolutionCard game={detail({ resolutions: [resolution] })} state="halted" now={NOW} />,
     )
     expect(mid).toMatch(/>Halted<\/a>/)
     expect(haltLinkLabel({ status: 'final' })).toBe('Closed')
@@ -503,9 +512,12 @@ describe('the last post-buzzer words (refix)', () => {
       finalizeSig: null,
       recycleSig: null,
       externalLp: true,
+      gameMarket: 'GameMarket11111111111111111111111111111111',
+      proposedAt: null,
+      challengeEndsAt: null,
     }
     const card = renderToStaticMarkup(
-      <ResolutionCard game={detail({ ...over, resolutions: [r] })} state="closed" />,
+      <ResolutionCard game={detail({ ...over, resolutions: [r] })} state="closed" now={NOW} />,
     )
     expect(card).toContain(final.replaceAll("'", '&#x27;'))
     expect(card).not.toMatch(/after a halt/)

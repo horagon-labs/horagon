@@ -3,7 +3,7 @@ import type { Game, GameHistory } from '@horagon/sdk'
 import { NO_MARKET, started } from '../../lib/chrono/copy'
 import type { Run } from '../../lib/chrono/runs'
 import { type DialState, isTrading } from '../../lib/chrono/state'
-import { cents, countdown, gameClock } from '../../lib/format'
+import { countdown, gameClock, percent } from '../../lib/format'
 
 /**
  * The time ring (light branding review §4.2): live while the market is open, closing included
@@ -71,9 +71,9 @@ export const ringClass = (state: DialState, open: boolean): string =>
 export const needleClass = (state: DialState): string =>
   isTrading(state) ? 'stroke-live' : 'stroke-ash-400'
 
-/** The big number: whole cents with honest edges, or an em dash for no price, never NaN. */
+/** The big number: whole percent with honest edges, or an em dash for no price, never NaN. */
 export const priceDigits = (price: number | null): string =>
-  price === null || !Number.isFinite(price) ? '—' : cents(price).replace('¢', '')
+  price === null || !Number.isFinite(price) ? '—' : percent(price).replace('%', '')
 
 /**
  * A beat (the run flash or the settle) plays only for a new, non-null key on a dial that
@@ -102,12 +102,24 @@ export const runKeyOf = (
 export const beatArmed = (loading: boolean | undefined, key: string | null | undefined): boolean =>
   !loading && key !== undefined
 
-type LineGame = Pick<Game, 'status' | 'period' | 'clockSecs' | 'scheduledTipoff'>
+type LineGame = Pick<
+  Game,
+  | 'status'
+  | 'period'
+  | 'clockSecs'
+  | 'scheduledTipoff'
+  | 'home'
+  | 'away'
+  | 'homeScore'
+  | 'awayScore'
+>
 
 /**
  * The one line under the number (spec 4.3 "Cách hien"); void reuses gameClock's own words. An
  * open market closes at the final buzzer (the keeper halts it on the first Final), so a live
- * one names no time; in its last 5 min before end_ts it closes at end_ts, and counts down.
+ * one names no time; in its last 5 min before end_ts it closes at end_ts, and counts down. In the
+ * scorer's words (culture review strings 13, 14): "Overtime · open until the final buzzer", and
+ * "Stopped at the buzzer · MEM 110–104 CLE" once the game is final.
  */
 export function stateLine(
   state: DialState,
@@ -127,11 +139,15 @@ export function stateLine(
     case 'halted':
       return 'Trading halted'
     case 'closed':
-      return 'Trading closed · result pending'
+      return game.status === 'final'
+        ? `Stopped at the buzzer · ${game.away} ${game.awayScore}–${game.homeScore} ${game.home}`
+        : 'Trading closed · result pending'
     case 'closing':
       return `closes in ${countdown(secsLeft ?? 0, 0)}`
     case 'live':
-      return 'Open until the final buzzer'
+      return game.period >= 5
+        ? 'Overtime · open until the final buzzer'
+        : 'Open until the final buzzer'
     case 'pre': {
       // No market: one opens 60 min before tip-off, so a game already started will not get one.
       if (secsLeft === null) return started(game) ? NO_MARKET : 'Opens 60 min before tip-off'

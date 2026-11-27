@@ -17,11 +17,17 @@ import { CrownSheet } from './crown-sheet'
 import { PositionCard } from './position-card'
 import { Pusher } from './pusher'
 
+/** The price at the horn: the last price once trading stopped, before any result. */
+const horn = (state: GameDial['state'], price: number | null): number | null =>
+  state === 'closed' || state === 'proposed' || state === 'challenged' ? price : null
+
 /** This game's positions with the wallet's own Claim all run. */
 export function GamePositions(p: {
   game: GameDetail
   canSell: boolean
   onSell: (side: Side) => void
+  /** The home side's price at the horn, once trading stopped; null while it trades. */
+  hornPrice?: number | null
 }) {
   const { address, portfolio, startClaims, claiming, claimed, claimError, preparing } = useWallet()
   return (
@@ -36,6 +42,8 @@ export function GamePositions(p: {
       claimed={claimed}
       claimError={claimError}
       onClaim={startClaims}
+      hornPrice={p.hornPrice ?? null}
+      final={p.game.status === 'final'}
     />
   )
 }
@@ -113,12 +121,17 @@ export function MarketBlock(p: {
         <CrownSheet
           open={open && shown}
           onClose={() => setOpen(false)}
-          title={`${t.action === 'buy' ? 'Buy' : 'Sell'} ${t.team}`}
+          title={`${t.action === 'buy' ? 'Back' : 'Sell'} ${t.team}`}
         >
           {crown}
         </CrownSheet>
       )}
-      <GamePositions game={p.game} canSell={trading} onSell={sell} />
+      <GamePositions
+        game={p.game}
+        canSell={trading}
+        onSell={sell}
+        hornPrice={horn(p.dial.state, p.market.price)}
+      />
     </>
   )
 }

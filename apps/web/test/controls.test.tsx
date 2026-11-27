@@ -58,7 +58,9 @@ describe('header, rows and panels (review §4.8)', () => {
     const r = resolution()
     for (const html of [
       renderToStaticMarkup(<Scorebug game={detail()} run={null} />),
-      renderToStaticMarkup(<ResolutionCard game={detail({ resolutions: [r] })} state="proposed" />),
+      renderToStaticMarkup(
+        <ResolutionCard game={detail({ resolutions: [r] })} state="proposed" now={NOW} />,
+      ),
       card(),
     ]) {
       const section = classAt(html, '<section')
@@ -307,13 +309,16 @@ function resolution(over: Partial<Resolution> = {}): Resolution {
     finalizeSig: null,
     recycleSig: null,
     externalLp: false,
+    gameMarket: 'GameMarket11111111111111111111111111111111',
+    proposedAt: null,
+    challengeEndsAt: null,
     ...over,
   }
 }
 
 describe('resolution milestones by shape (review §4.7)', () => {
   const html = renderToStaticMarkup(
-    <ResolutionCard game={detail({ resolutions: [resolution()] })} state="proposed" />,
+    <ResolutionCard game={detail({ resolutions: [resolution()] })} state="proposed" now={NOW} />,
   )
   const dot = (mark: string) => {
     const li = html.slice(html.indexOf(`data-mark="${mark}"`))
@@ -348,6 +353,7 @@ const card = (over: Partial<PositionCardProps> = {}) =>
       claimed={[]}
       claimError={undefined}
       onClaim={noop}
+      final
       {...over}
     />,
   )

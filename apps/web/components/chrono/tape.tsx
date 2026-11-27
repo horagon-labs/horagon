@@ -27,7 +27,7 @@ import {
   periodStarts,
   runMarkers,
   TAPE_FRAME,
-  tapeCents,
+  tapePercent,
   tapeTime,
 } from '../../lib/chrono/tape'
 import { etClock } from '../../lib/chrono/time'
@@ -101,8 +101,8 @@ interface Handles {
 
 const toData = (points: Point[]) =>
   points.map((p) => ({ time: p.time as UTCTimestamp, value: p.value }))
-const priceFormat = { type: 'custom' as const, formatter: tapeCents }
-// Probabilities: always the whole 0-100¢ range, so a move is never exaggerated.
+const priceFormat = { type: 'custom' as const, formatter: tapePercent }
+// Probabilities: always the whole 0-100% range, so a move is never exaggerated.
 const fullRange = () => ({ priceRange: { minValue: 0, maxValue: 1 } })
 // Room after the last point, so the last " ET" tick label is not cut off at the right edge: about
 // half the widest label, in pixels, since fitContent folds a bar offset into the fit (N4).

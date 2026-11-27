@@ -7,7 +7,7 @@
 // wallet's storage has opened (the server render, the first browser render) the wallet part is a
 // neutral "Loading your balance…" line: a returning visitor never sees the set-up state flash.
 // The first wallet action of a page waits for the wallet's key code (R5c): its buttons say so,
-// and a press on Buy or a tick of the box starts that load early (R5c refix).
+// and a press on Back or a tick of the box starts that load early (R5c refix).
 import type { GameDetail, MarketSummary } from '@horagon/sdk'
 import { parseAmount } from '@horagon/sdk/amount'
 import { useState } from 'react'
@@ -16,7 +16,7 @@ import { DISABLED, SELECTED } from '../../lib/chrono/controls'
 import { dialCaption } from '../../lib/chrono/copy'
 import { errorEffect, requoteShown, retryLeft } from '../../lib/chrono/errors'
 import { crownLabel, type DialState } from '../../lib/chrono/state'
-import { cents, explorerTx, usdc } from '../../lib/format'
+import { explorerTx, percent, usdc } from '../../lib/format'
 import { DEFAULT_SLIPPAGE_BPS } from '../../lib/trade-shared'
 import { sendDisabled, sendText } from '../../lib/trade-view'
 import type { Trade } from '../../lib/use-trade'
@@ -81,14 +81,14 @@ export function CrownPanel(p: CrownPanelProps) {
     <div className="space-y-4">
       <Reconnecting stale={p.staleLine ?? false} />
       <fieldset className="flex gap-2">
-        <legend className="sr-only">Buy or sell</legend>
+        <legend className="sr-only">Back or sell</legend>
         <button
           type="button"
           aria-pressed={buying}
           onClick={() => t.setDirection('buy')}
           className={chip}
         >
-          Buy {t.team}
+          Back {t.team}
         </button>
         <button
           type="button"
@@ -138,7 +138,7 @@ export function CrownPanel(p: CrownPanelProps) {
           </dt>
           <dd className="text-right">{usdc(q.amountOut)}</dd>
           <dt className="font-sans text-ash-400">Average price</dt>
-          <dd className="text-right">{cents(q.avgPrice)}</dd>
+          <dd className="text-right">{percent(q.avgPrice)}</dd>
           {buying && (
             <>
               <dt className="font-sans text-ash-400">If {t.team} wins</dt>
@@ -256,7 +256,7 @@ export function CrownPanel(p: CrownPanelProps) {
             {p.funding ? 'Getting play mUSDC…' : preparing ? WALLET_PREPARING : label}
           </button>
           <p className="text-12 text-ash-400">
-            Sets up a play wallet in this browser, then you hold to buy.
+            Sets up a play wallet in this browser, then you hold to call.
           </p>
         </>
       ) : (

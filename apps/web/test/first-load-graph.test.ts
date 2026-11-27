@@ -31,6 +31,8 @@ const ENTRIES = [
   'app/page.tsx',
   'app/game/[id]/page.tsx',
   'app/me/page.tsx',
+  // R6 part B: /verify's checks pull in web3.js, so they load only once its view runs.
+  'app/verify/[market]/page.tsx',
   // Every route's tree also holds the error boundary and the 404 (light branding review §4.12).
   'app/error.tsx',
   'app/not-found.tsx',
@@ -194,6 +196,29 @@ describe('the first load of / and /game/[id] has no web3.js (R5c)', () => {
     expect(read('lib/use-trade.ts')).toContain("import('./trade')")
     expect(read('components/wallet.tsx')).toContain("import('../lib/trade')")
     expect(read('components/wallet.tsx')).toContain("import('../lib/faucet')")
+  })
+
+  it('/verify reaches its checks only by a dynamic import(), and / never reaches it (R6 part B)', () => {
+    const files = [...graph.keys()].map(name)
+    expect(files).toContain('apps/web/components/verify-view.tsx')
+    expect(files).not.toContain('apps/web/lib/verify.ts')
+    expect(readFileSync(join(WEB, 'components/verify-view.tsx'), 'utf8')).toContain(
+      "import('../lib/verify')",
+    )
+    const home = new Set<string>()
+    const walk = (file: string) => {
+      if (home.has(file)) return
+      home.add(file)
+      for (const spec of parse(file).values) {
+        const next = resolveLocal(file, spec)
+        if (next) walk(next)
+      }
+    }
+    walk(join(WEB, 'app/page.tsx'))
+    walk(join(WEB, 'app/layout.tsx'))
+    const reached = [...home].map(name)
+    expect(reached).not.toContain('apps/web/components/verify-view.tsx')
+    expect(reached).not.toContain('apps/web/lib/verify.ts')
   })
 
   it('motion’s animation features load after the first render, not with it (R5c refix)', () => {

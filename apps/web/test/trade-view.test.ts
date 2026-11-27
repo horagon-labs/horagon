@@ -29,8 +29,8 @@ describe('trade view (Chronometer spec 3.3)', () => {
     expect(sendText('no-wallet', null, 'buy', 'CLE')).toBe('Get 1,000 play mUSDC to start')
     expect(sendText('loading', null, 'buy', 'CLE')).toBe('Loading your balance…')
     expect(sendText('ready', 'confirming', 'buy', 'CLE')).toBe('Confirming…')
-    expect(sendText('ready', null, 'buy', 'CLE')).toBe('Buy CLE')
-    expect(sendText('ready', null, 'sell', 'MEM')).toBe('Sell MEM')
+    expect(sendText('ready', null, 'buy', 'CLE')).toBe('Hold to call CLE')
+    expect(sendText('ready', null, 'sell', 'MEM')).toBe('Hold to sell MEM')
   })
 
   it('waits for the balance and for a valid form, and lets a wallet be set up', () => {

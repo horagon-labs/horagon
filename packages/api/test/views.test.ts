@@ -1,5 +1,6 @@
+import type { MarketRow } from '@horagon/db'
 import { describe, expect, it } from 'vitest'
-import { etDayRange, etNextDay, etToday, marketRules } from '../src/views'
+import { etDayRange, etNextDay, etToday, marketRules, toResolution } from '../src/views'
 
 describe('ET game dates', () => {
   it('maps an ET day to its UTC range, across both clock changes', () => {
@@ -35,5 +36,48 @@ describe('market rules (M6)', () => {
     )
     expect(rules).toContain('3 hours after the scheduled tip-off at the latest')
     expect(rules).not.toContain('if the game ends before the market closes')
+  })
+})
+
+describe('toResolution: the proposal time and the challenge window (R6 part B)', () => {
+  const proposedAt = new Date('2026-11-29T01:50:00Z')
+  const row = (over: Partial<MarketRow> = {}): MarketRow =>
+    ({
+      pubkey: 'Market1111111111111111111111111111111111111',
+      gameId: 'nba-1',
+      kind: 0,
+      status: 'proposed',
+      outcome: 'yes',
+      evidenceHash: 'ab'.repeat(32),
+      gameMarketPda: 'GameMarket11111111111111111111111111111111',
+      proposedAt,
+      createSig: null,
+      haltSig: null,
+      proposeSig: null,
+      finalizeSig: null,
+      recycleSig: null,
+      externalLp: false,
+      ...over,
+    }) as MarketRow
+
+  it('gives the game market, the proposal time and its end while proposed', () => {
+    const r = toResolution(row(), 'https://horagon.test', 900)
+    expect(r.gameMarket).toBe('GameMarket11111111111111111111111111111111')
+    expect(r.proposedAt).toBe(proposedAt.getTime() / 1000)
+    expect(r.challengeEndsAt).toBe(proposedAt.getTime() / 1000 + 900)
+  })
+
+  it('gives no end when the window is unread, or once the market is no longer proposed', () => {
+    expect(toResolution(row(), 'https://horagon.test', null).challengeEndsAt).toBeNull()
+    const done = toResolution(row({ status: 'finalized' }), 'https://horagon.test', 900)
+    expect(done.challengeEndsAt).toBeNull()
+    expect(done.proposedAt).toBe(proposedAt.getTime() / 1000)
+    const open = toResolution(
+      row({ status: 'open', proposedAt: null }),
+      'https://horagon.test',
+      900,
+    )
+    expect(open.proposedAt).toBeNull()
+    expect(open.challengeEndsAt).toBeNull()
   })
 })

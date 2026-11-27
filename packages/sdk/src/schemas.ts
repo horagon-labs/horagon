@@ -114,6 +114,15 @@ export const ResolutionSchema = z.object({
   recycleSig: SignatureSchema.nullable(),
   /** Someone besides Horagon deposited liquidity; `halt` withdraws only Horagon's share. */
   externalLp: z.boolean(),
+  /** The Horagon GameMarket account (`/verify` reads it on chain). */
+  gameMarket: PubkeySchema,
+  /** When the result was proposed on chain, as the keeper synced it. */
+  proposedAt: UnixSecondsSchema.nullable(),
+  /**
+   * When the challenge window ends: `proposedAt` + `Config.disputeWindowSecs` read on chain, while
+   * the market is proposed. Null otherwise, and when the window could not be read (never guessed).
+   */
+  challengeEndsAt: UnixSecondsSchema.nullable(),
 })
 
 const CountSchema = z.number().int().nonnegative()

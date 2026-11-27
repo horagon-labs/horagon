@@ -7,6 +7,8 @@ import 'server-only'
 import { createApp, depsFromEnv } from '@horagon/api'
 import type { Game } from '@horagon/sdk'
 import { HoragonClient } from '@horagon/sdk/client'
+import { isHoragonError } from '@horagon/sdk/errors'
+import { lookupTarget, type VerifyTarget } from '../verify-target'
 import {
   INITIAL_TIMEOUT_MS,
   INITIAL_TTL_MS,
@@ -87,4 +89,27 @@ export async function gamesOn(date: string): Promise<Game[] | undefined> {
   } catch {
     return undefined
   }
+}
+
+const targets = ttlCache<VerifyTarget | null | undefined>(INITIAL_TTL_MS)
+
+/**
+ * /verify/[market]'s lookup on the server (R6 part B), for its title and first frame. Null when no
+ * Horagon market has that address; undefined when the API failed or was slow (the view asks again
+ * from the browser). Never throws.
+ */
+export function verifyTarget(market: string): Promise<VerifyTarget | null | undefined> {
+  return targets(
+    `verify:${market}`,
+    async () => {
+      try {
+        return await within(lookupTarget(serverClient(), market), INITIAL_TIMEOUT_MS)
+      } catch (err) {
+        return isHoragonError(err) && (err.code === 'NOT_FOUND' || err.code === 'INVALID_INPUT')
+          ? null
+          : undefined
+      }
+    },
+    (t) => t !== undefined,
+  )
 }

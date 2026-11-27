@@ -268,14 +268,17 @@ export function createApp(deps: ApiDeps) {
       const g = await getGame(deps.db, c.req.valid('param').id)
       if (!g) throw new ApiError('NOT_FOUND', 'No such game')
       const keys = g.markets.map((m) => m.pubkey)
-      const [prices, trades] = await Promise.all([
+      // The window is read on chain only while a result is proposed (kept 600 s, null on failure).
+      const proposed = g.markets.some((m) => m.status === 'proposed')
+      const [prices, trades, windowSecs] = await Promise.all([
         latestPrices(deps.db, keys),
         listMarketTrades(deps.db, keys),
+        proposed ? disputeWindow() : Promise.resolve(null),
       ])
       const memo = await walletsWithBotMemo(deps.db, [...new Set(trades.map((t) => t.wallet))])
       const activity = gameActivity(trades, memo)
       c.header('cache-control', cacheShort)
-      return c.json(toGameDetail(g, prices, deps.publicUrl, activity), 200)
+      return c.json(toGameDetail(g, prices, deps.publicUrl, activity, windowSecs), 200)
     },
   )
 

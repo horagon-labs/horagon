@@ -112,6 +112,7 @@ function GameSample({ stale }: { stale: boolean }) {
           claimed={[]}
           claimError={undefined}
           onClaim={noop}
+          final={game().status === 'final'}
         />
       }
     />
@@ -208,7 +209,7 @@ function CrownDemo() {
       <CrownSheet
         open={open}
         onClose={() => setOpen(false)}
-        title={`${t.action === 'buy' ? 'Buy' : 'Sell'} ${t.team}`}
+        title={`${t.action === 'buy' ? 'Back' : 'Sell'} ${t.team}`}
       >
         {panel}
       </CrownSheet>

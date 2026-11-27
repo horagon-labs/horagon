@@ -93,8 +93,9 @@ export function findRuns(history: GameHistory, market: string): Run[] {
 }
 
 /**
- * "CLE on an 8–0 run · price 74% → 77% in 2 min" (spec 3.2), prices on the running side, or
- * "price held at 62%" when the price did not move (audit section 3: never "62 → 62").
+ * "CLE on an 8–0 run · CLE to win 74% → 77% in 2 min" (spec 3.2, culture review string 9), prices
+ * on the running side, or "the price held at 62%" when it did not move (string 10; audit section
+ * 3: never "62 → 62").
  */
 export function runLine(run: Run, teams: { home: string; away: string }): string {
   // The running side's chance in whole percent, "<1%" and ">99%" at the edges (see format.ts).
@@ -108,8 +109,8 @@ export function runLine(run: Run, teams: { home: string; away: string }): string
   const head = `${teams[run.team]} on ${article} ${run.points}–0 run`
   if (from === null || to === null) return head
   return from === to
-    ? `${head} · price held at ${to}`
-    : `${head} · price ${from} → ${to} in ${mins} min`
+    ? `${head} · the price held at ${to}`
+    : `${head} · ${teams[run.team]} to win ${from} → ${to} in ${mins} min`
 }
 
 /** The newest run, for the Scorebug's line and the Dial's amber flash key. */

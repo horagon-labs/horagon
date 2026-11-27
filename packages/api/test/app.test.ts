@@ -31,6 +31,7 @@ import { pmAmmFaucet } from '../src/faucet'
 import { DEFAULT_SPONSOR_LIMITS } from '../src/sponsor/policy'
 import { hashIp, MarketSet } from '../src/sponsor/submit'
 import { validateSponsoredTransaction } from '../src/sponsor/validate'
+import { configAccount } from './config-account'
 import { GAME_ID, makeEnv, program, type TestEnv, tokenAccount } from './helpers'
 
 let env: TestEnv
@@ -257,6 +258,57 @@ describe('GET /games/{id}: who traded (R2b)', () => {
       lastFanTradeTs: null,
       lastAgentTradeTs: null,
     })
+  })
+})
+
+describe('GET /games/{id}: the proposal and its challenge window (R6 part B)', () => {
+  const proposedAt = new Date('2026-11-20T06:40:00Z')
+  const propose = () =>
+    updateMarket(env.h.db, env.market.pubkey.toBase58(), {
+      status: 'proposed',
+      outcome: 'yes',
+      evidenceHash: 'ab'.repeat(32),
+      proposedAt,
+    })
+  /** How many times the Config account was read. */
+  function configReads() {
+    const spy = vi.spyOn(env.deps.connection, 'getAccountInfo')
+    return () => spy.mock.calls.filter(([k]) => k.equals(program.config)).length
+  }
+  const resolution = async () =>
+    GameDetailSchema.parse(await (await get(`/games/${GAME_ID}`)).json()).resolutions[0]
+
+  it('gives the game market, the proposal time and the window end read on chain', async () => {
+    env.chain.set(program.config, configAccount(900))
+    await propose()
+    const reads = configReads()
+    const r = await resolution()
+    expect(r?.gameMarket).toBe(program.addresses(env.market.decoded.marketId).gameMarket.toBase58())
+    expect(r?.proposedAt).toBe(proposedAt.getTime() / 1000)
+    expect(r?.challengeEndsAt).toBe(proposedAt.getTime() / 1000 + 900)
+    // The window is kept: a second page view reads no Config.
+    await resolution()
+    expect(reads()).toBe(1)
+  })
+
+  it('gives a null end when the Config read fails, and reads again next time', async () => {
+    env.chain.set(program.config, configAccount(900))
+    await propose()
+    env.chain.accountsFail = true
+    const r = await resolution()
+    expect(r?.proposedAt).toBe(proposedAt.getTime() / 1000)
+    expect(r?.challengeEndsAt).toBeNull()
+    env.chain.accountsFail = false
+    expect((await resolution())?.challengeEndsAt).toBe(proposedAt.getTime() / 1000 + 900)
+  })
+
+  it('reads no Config for a game with nothing proposed', async () => {
+    env.chain.set(program.config, configAccount(900))
+    const reads = configReads()
+    const r = await resolution()
+    expect(r?.proposedAt).toBeNull()
+    expect(r?.challengeEndsAt).toBeNull()
+    expect(reads()).toBe(0)
   })
 })
 

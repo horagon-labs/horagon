@@ -196,6 +196,7 @@ describe('yours: ◆ in live, the shape tells it apart (review §3.2 row 15)', (
         claimed={[]}
         claimError={null}
         onClaim={() => {}}
+        final={false}
       />,
     )
     expect(html.match(/<span aria-hidden="true" class="text-live">◆<\/span>/g)).toHaveLength(2)

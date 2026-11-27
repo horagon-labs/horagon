@@ -92,3 +92,11 @@ export function gameMeta(g: GameDetail | undefined, now: number): PageMeta {
 
 /** The full title as a link unfurls it, where the layout's template does not apply. */
 export const fullTitle = (title: string): string => `${title} · ${SITE_NAME}`
+
+/** /verify/[market]: "Verify result · LAC @ MEM", or "Verify result" when the lookup failed. */
+export function verifyMeta(g: Pick<GameDetail, 'home' | 'away'> | undefined): PageMeta {
+  return {
+    title: g ? `Verify result · ${g.away} @ ${g.home}` : 'Verify result',
+    description: `Check a result against the chain in your browser: the account, the evidence and its sha256. ${PLAY_MONEY_NOTICE}`,
+  }
+}

@@ -6,6 +6,7 @@ import {
   homeWonOnScore,
   liveNumber,
   MODEL_HINT,
+  proposedLine,
   resolutionStatus,
   rowSubject,
   toWin,
@@ -110,17 +111,38 @@ describe('resolutionStatus (R5, audit finding 11)', () => {
   it('says the state of the dial, not the raw chain status', () => {
     expect(resolutionStatus('live', game(), null)).toBe('Trading open')
     expect(resolutionStatus('closed', game(), null)).toBe(
-      'Trading closed. The result goes on-chain after a box-score check.',
+      'Trading closed. The result goes on-chain automatically 3 h after tip-off, then a guardian has 15 minutes to challenge it.',
     )
     expect(resolutionStatus('closed', final(105, 107), null)).toBe(
-      'Final MEM 107–105 CLE. The result goes on-chain after a box-score check.',
+      'Final MEM 107–105 CLE. The result goes on-chain automatically 3 h after tip-off, then a guardian has 15 minutes to challenge it.',
     )
     expect(resolutionStatus('proposed', final(105, 107), null)).toBe(
       'Result proposed: the challenge window is open',
     )
     expect(resolutionStatus('challenged', final(105, 107), null)).toBe('Result under review')
-    expect(resolutionStatus('resolved', final(105, 107), 'no')).toBe('Resolved: MEM won')
+    expect(resolutionStatus('resolved', final(105, 107), 'no')).toBe('Result on-chain · MEM won')
     expect(resolutionStatus('void', game({ status: 'canceled' }), null)).toBe('Game canceled')
     expect(resolutionStatus('halted', game(), null)).toBe('Trading halted')
+  })
+})
+
+describe('proposedLine (R6 part B: the challenge window, timed)', () => {
+  it('counts the window down, then says it is finalizing', () => {
+    expect(proposedLine(NOW + 754, NOW)).toBe(
+      'Result proposed · final in 12:34 unless a guardian challenges',
+    )
+    expect(proposedLine(NOW, NOW)).toBe('Challenge window closed · finalizing')
+    expect(proposedLine(NOW - 30, NOW)).toBe('Challenge window closed · finalizing')
+  })
+
+  it('keeps the open-window words when the end is unknown', () => {
+    expect(proposedLine(null, NOW)).toBe('Result proposed: the challenge window is open')
+  })
+
+  it('is the ResolutionCard status of a proposed result', () => {
+    const timing = { challengeEndsAt: NOW + 754, now: NOW }
+    expect(resolutionStatus('proposed', final(105, 107), null, timing)).toBe(
+      'Result proposed · final in 12:34 unless a guardian challenges',
+    )
   })
 })

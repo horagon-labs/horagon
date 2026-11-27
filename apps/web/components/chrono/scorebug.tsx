@@ -36,9 +36,6 @@ export function Scorebug({ game, run }: { game: Game; run: Run | null }) {
         </div>
         <Team side="Home" name={game.home} score={started ? game.homeScore : null} />
       </div>
-      <p className="mt-2 text-center text-12 text-ash-400" data-model-hint>
-        {MODEL_HINT}
-      </p>
       {run && (
         <p className="mt-2 text-center font-mono text-12 text-ash-400" data-run>
           {runLine(run, game)}

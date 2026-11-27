@@ -156,7 +156,7 @@ describe('pusherMode (spec 3.2, 4.3, 6.1)', () => {
   it('says one line once trading is over, and nothing once there is a result', () => {
     expect(mode({ state: 'closed' })).toEqual({
       kind: 'line',
-      text: 'Trading closed. The result goes on-chain after a box-score check.',
+      text: 'Trading closed. The result goes on-chain automatically 3 h after tip-off, then a guardian has 15 minutes to challenge it.',
     })
     expect(mode({ state: 'pre', secsLeft: null })).toEqual({
       kind: 'line',
@@ -190,8 +190,10 @@ describe('Pusher (spec 3.2)', () => {
 
   it('names each side with its price', () => {
     const html = pusher({ kind: 'buy', locked: false, note: null })
-    expect(html).toContain('>Buy CLE 77¢</button>')
-    expect(html).toContain('>Buy MEM 23¢</button>')
+    expect(html).toContain('>Back CLE · 77%</button>')
+    expect(html).toContain('>Back MEM · 23%</button>')
+    // In the Scorebug's order: away on the left, home on the right (culture review A1).
+    expect(html.indexOf('Back MEM')).toBeLessThan(html.indexOf('Back CLE'))
     expect(html).not.toContain('aria-pressed="')
   })
 

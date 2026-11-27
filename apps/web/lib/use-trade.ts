@@ -230,7 +230,20 @@ export function useTrade(game: GameDetail, market: MarketSummary, opts: TradeOpt
       // Nothing was built: the crown's check line says why (the final buzzer, a halt).
       if (r === null) return
       const quotedOut = r.quote?.amountOut
-      const line = (exact: bigint | null) => fillLine(action, team, { quoted: quotedOut, exact })
+      // A buy names the side's price before and after it (the quote's YES prices, flipped for away).
+      const q = r.quote
+      const onSide = (p: number) => (side === 'home' ? p : 1 - p)
+      const call =
+        action === 'buy' && q
+          ? {
+              spent: parseAmount(amount.trim()),
+              avgPrice: q.avgPrice,
+              from: onSide(q.priceBefore),
+              to: onSide(q.priceAfter),
+            }
+          : undefined
+      const line = (exact: bigint | null) =>
+        fillLine(action, team, { quoted: quotedOut, exact }, call)
       shown.current = r.signature
       setDone({ signature: r.signature, text: line(null) })
       // The line says "about" until the portfolio shows what the fill really was.

@@ -57,7 +57,7 @@ describe('a halted market under a final game reads closed (R1 ruling)', () => {
     expect(dial).not.toContain('stroke-dasharray="3 3"')
     expect(dial).toContain('font-mono tabular-nums text-ash-400')
     expect(stateLine(item.state, buzzer, item.secsLeft, NOW)).toBe(
-      'Trading closed · result pending',
+      'Stopped at the buzzer · MEM 110–104 CLE',
     )
     const mini = renderToStaticMarkup(
       <MiniDial price={item.price} timeLeft={item.timeLeft} state={item.state} />,
@@ -108,10 +108,10 @@ describe('a halted market under a final game reads closed (R1 ruling)', () => {
     })
     expect(pusher).toEqual({
       kind: 'line',
-      text: 'Trading closed. The result goes on-chain after a box-score check.',
+      text: 'Trading closed. The result goes on-chain automatically 3 h after tip-off, then a guardian has 15 minutes to challenge it.',
     })
     expect(resolutionStatus(d.state, buzzer, null)).toBe(
-      'Final MEM 110–104 CLE. The result goes on-chain after a box-score check.',
+      'Final MEM 110–104 CLE. The result goes on-chain automatically 3 h after tip-off, then a guardian has 15 minutes to challenge it.',
     )
     const check = checkTrade({
       action: 'buy',

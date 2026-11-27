@@ -1,11 +1,15 @@
 'use client'
 // Your position in this game (spec 3.2): paid, worth now and what it pays if that team wins,
-// with Sell. Claim all is a HoldButton running the wallet's own startClaims, so a claim is
-// still the whole wallet's (one run at a time, every copy shows it).
+// with Sell. Once trading stopped it says where the price stood at the horn, and once there is a
+// result who won, the same way for a win and a loss (culture review strings 15, 18; rule 6). A
+// result for a game that never finished (postponed for good, which resolves NO) names no winner,
+// only that the home side did not win, as the ResolutionCard's line does. Claim all is a
+// HoldButton running the wallet's own startClaims, so a claim is still the whole wallet's (one run
+// at a time, every copy shows it).
 import type { PositionsResponse, Side } from '@horagon/sdk'
 import { parseAmount } from '@horagon/sdk/amount'
 import { signedUsdc } from '../../lib/chrono/controls'
-import { explorerTx, usdc } from '../../lib/format'
+import { explorerTx, percent, usdc } from '../../lib/format'
 import { WALLET_PREPARING } from '../../lib/wallet-copy'
 import { ErrorText } from '../error-text'
 import { HoldButton } from './hold-button'
@@ -23,6 +27,47 @@ export interface PositionCardProps {
   claimed: string[]
   claimError: unknown
   onClaim: () => void
+  /** The home side's price when trading stopped (the horn), or null while it still trades. */
+  hornPrice?: number | null
+  /** The game ended on the court (status final): only then does a result name a winner. */
+  final: boolean
+}
+
+type Row = PositionsResponse['positions'][number]
+
+/** The side's price you paid per share, cost over shares; null without shares. */
+function entryOf(x: Row): string | null {
+  const shares = Number(x.shares)
+  return shares > 0 ? percent(Number(x.costUsdc) / shares) : null
+}
+
+/** The third line: what it pays, where the horn left it, or who won. */
+function standing(
+  x: Row,
+  teams: { home: string; away: string },
+  horn: number | null,
+  final: boolean,
+): string {
+  const team = teams[x.side]
+  const entry = entryOf(x)
+  if (x.outcome !== null) {
+    const homeWon = x.outcome === 'yes'
+    if (!final) {
+      const said = `${teams.home} ${homeWon ? 'won' : 'did not win'}.`
+      return entry === null ? said : `${said} Your call on ${team} at ${entry} stays marked.`
+    }
+    const winner = homeWon ? teams.home : teams.away
+    const won = (x.side === 'home') === homeWon
+    if (entry === null) return `${winner} won.`
+    return won
+      ? `${winner} won. Your call at ${entry} stays marked.`
+      : `${winner} won. Your call on ${team} at ${entry} stays marked.`
+  }
+  if (horn !== null && entry !== null) {
+    const at = percent(x.side === 'home' ? horn : 1 - horn)
+    return `You backed ${team} at ${entry}. At the horn the price had ${team} at ${at}.`
+  }
+  return `pays ${usdc(x.shares)} mUSDC if ${team} wins`
 }
 
 export function PositionCard(p: PositionCardProps) {
@@ -54,10 +99,8 @@ export function PositionCard(p: PositionCardProps) {
                     {/* One ink for gain and loss, the sign printed (review §4.7, u3 D2). */}
                     <span className="text-ivory-100">({signedUsdc(x.pnlUsdc)})</span>
                   </p>
-                  <p className="text-ash-400">
-                    {x.outcome === null
-                      ? `pays ${usdc(x.shares)} mUSDC if ${team} wins`
-                      : `${team} ${(x.side === 'home') === (x.outcome === 'yes') ? 'won' : 'lost'}`}
+                  <p className="font-sans text-ink-muted">
+                    {standing(x, p.teams, p.hornPrice ?? null, p.final)}
                   </p>
                 </div>
                 {p.canSell && (

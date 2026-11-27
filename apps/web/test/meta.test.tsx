@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
 import { ShareCard, ShareGauge } from '../components/share-card'
 import { detail, market, NOW } from '../lib/chrono/fixtures'
-import { fullTitle, gameCard, gameMeta, SITE_DESCRIPTION, siteUrl } from '../lib/meta'
+import { fullTitle, gameCard, gameMeta, SITE_DESCRIPTION, siteUrl, verifyMeta } from '../lib/meta'
 import { shareAction, shareEnv, shareLabel } from '../lib/share'
 
 // CLE (home) 84, MEM (away) 78, Q3 4:12, the winner market at 77% in the fixtures.
@@ -143,5 +143,15 @@ describe('shareAction (R5)', () => {
     expect(shareLabel('copied')).toBe('Link copied')
     expect(shareLabel(null)).toBe('Share')
     expect(shareLabel('failed')).toBe('Share')
+  })
+})
+
+describe('verifyMeta (R6 part B)', () => {
+  it('titles /verify "Verify result · MEM @ CLE", the layout adds " · Horagon"', () => {
+    const m = verifyMeta(detail())
+    expect(m.title).toBe('Verify result · MEM @ CLE')
+    expect(fullTitle(m.title)).toBe('Verify result · MEM @ CLE · Horagon')
+    expect(m.description).toContain(PLAY_MONEY_NOTICE)
+    expect(verifyMeta(undefined).title).toBe('Verify result')
   })
 })

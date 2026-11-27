@@ -57,7 +57,7 @@ export const quoteKey = (
   amount: string | null,
 ): string | null => (amount === null ? null : `quote:${market}:${side}:${action}:${amount}`)
 
-/** The send button's words. */
+/** The send button's words: "Hold to call CLE" (culture review string 7), "Hold to sell MEM". */
 export function sendText(
   ready: Ready,
   stage: TradeStage | null,
@@ -67,7 +67,7 @@ export function sendText(
   if (ready === 'no-wallet') return SET_UP_BUTTON
   if (ready === 'loading') return 'Loading your balance…'
   if (stage) return STAGE_TEXT[stage]
-  return `${action === 'buy' ? 'Buy' : 'Sell'} ${team}`
+  return `Hold to ${action === 'buy' ? 'call' : 'sell'} ${team}`
 }
 
 /** Off while the balance loads, and for a ready wallet with a bad form or a send in flight. */

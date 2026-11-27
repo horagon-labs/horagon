@@ -12,6 +12,12 @@ export const CLUSTER: Cluster =
 /** The local validator the explorer is pointed at on localnet (surfpool default). */
 const LOCAL_RPC = 'http://127.0.0.1:8899'
 
+/**
+ * The public RPC /verify reads by default (R6 part B): the cluster's own, never the server's RPC
+ * URL (which may carry a key). The viewer can paste another.
+ */
+export const PUBLIC_RPC = CLUSTER === 'localnet' ? LOCAL_RPC : 'https://api.devnet.solana.com'
+
 // Edges stay honest while a market trades: under 1 shows "<1", over 99 shows ">99".
 export function whole(p: number | null | undefined, unit: string): string {
   if (p === null || p === undefined) return '–'

@@ -136,7 +136,10 @@ describe('CrownPanel (spec 3.2, 5.5)', () => {
     }
     expect(html).toContain('31.50')
     expect(html).toContain('1.20%')
-    expect(html).toContain('>Buy CLE</button>')
+    expect(html).toContain('>Back CLE</button>')
+    // One unit on the main path: the average price in %, never ¢ (culture review A1).
+    expect(html).toContain('78%')
+    expect(html).not.toContain('¢')
     expect(html).toContain('hold-safe')
     expect(html).toContain('aria-valuenow="25"')
   })

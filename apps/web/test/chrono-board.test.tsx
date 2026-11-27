@@ -56,7 +56,7 @@ describe('boardModel (spec 4.1, 4.4)', () => {
   })
 
   it('keeps the words of the loading and empty boards', () => {
-    expect(boardModel(undefined, undefined, NOW, []).empty).toBe('Loading games…')
+    expect(boardModel(undefined, undefined, NOW, []).empty).toBe('Setting the dial…')
     expect(boardModel([], undefined, NOW, []).empty).toBe('No NBA games in the next 24 hours.')
     expect(boardModel(evening(), undefined, NOW, ['TOR']).empty).toBe(
       'No games for the teams you follow in the next 24 hours.',
@@ -117,7 +117,7 @@ describe('BoardView (spec 4.1, 4.4)', () => {
   it('shows the error text after three failures, without the loading line', () => {
     const html = board({ games: undefined, health: { stale: true, error: new Error('down') } })
     expect(html).toContain('Something went wrong. Try again.')
-    expect(html).not.toContain('Loading games…')
+    expect(html).not.toContain('Setting the dial…')
   })
 
   it('offers "Show all games" when the follows leave tonight empty, and a chip to clear them', () => {
@@ -147,7 +147,7 @@ describe('BoardView (spec 4.1, 4.4)', () => {
 
   it('says the loading and empty lines on the dial and to screen readers', () => {
     const loading = board({ games: undefined })
-    expect(loading.match(/Loading games…/g)).toHaveLength(2)
+    expect(loading.match(/Setting the dial…/g)).toHaveLength(2)
     expect(board({ games: [] })).toContain('<p role="status" class="sr-only">No NBA games')
   })
 })
