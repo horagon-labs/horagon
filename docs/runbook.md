@@ -72,7 +72,7 @@ the alert table; the key itself is in the keeper's `alert` log line (the last co
 | Admin and guardian keys                    | Your machine, `.keys/deployer.json` and `.keys/guardian.json`                                                                                                                                                                                                                                                                                                  |
 | Web app and API v1                         | Vercel; the sponsor key is its `SPONSOR_SECRET_KEY`                                                                                                                                                                                                                                                                                                            |
 | Database                                   | Supabase Postgres (`DATABASE_URL`)                                                                                                                                                                                                                                                                                                                             |
-| `keeper_heartbeats` row `keeper`           | Written by the tick loop every round (5 s): `round`, `actions`, `feed`, the failure streaks `failing.tick` and `failing.index`, and `index.rounds` and `index.busySecs` (L). `status` prints it; `/api/v1/health` reads its age                                                                                                                                |
+| `keeper_heartbeats` row `keeper`           | Written by the tick loop every round (5 s): `round`, `actions`, `feed`, the failure streaks `failing.tick` and `failing.index`, `index.rounds`, `index.busySecs` and `index.lastRoundAt` (L). `status` prints it; `/api/v1/health` reads its age and the index lag                                                                                             |
 | `keeper_heartbeats` row `agent`            | Written by the reference agent after every round (20 s), paused ones too: its round count, dry run or not, paused or not (and until when), the markets it read and the ones it decided, `cut` when the round ended early (`stale`, `stop` or `pause`; null when it decided them all), the swaps it sent, the markets it disabled; `stopped` after a clean stop |
 | `keeper_heartbeats` row `watchdog`         | The time of the watchdog's last `heartbeat` page (`pagedAt`), so a new watchdog run knows when it paged                                                                                                                                                                                                                                                        |
 | `keeper_heartbeats` row `propose:<gameId>` | The `propose` attempts of one game: the evidence hash, the challenge round, and how each send ended. `status` prints the newest one                                                                                                                                                                                                                            |
@@ -109,6 +109,11 @@ the alert table; the key itself is in the keeper's `alert` log line (the last co
 - `ssh "$HORAGON_VPS" systemctl --user status horagon-keeper` shows `active (running)`.
 - `curl -s "$HORAGON_PUBLIC_URL/api/v1/health"` answers `"ok":true`, with
   `keeper.heartbeatAgeSecs` at a few seconds (one round is 5 s; `ok` turns false above 120 s).
+  The ops numbers beside them never change `ok`: `ops.sponsor.lamports`,
+  `ops.treasury.musdc` and `ops.backlog` (markets past `end_ts` with no proposal:
+  `ops.backlog.count`, `ops.backlog.oldestAgeSecs`) as read at `ops.asOf` (kept up to 45 s),
+  and `ops.index.lagSecs` (seconds since the index loop last ended a round). A number it could
+  not read is null, with the reason beside it.
 - The first games have markets (`status` shows `market:open`; they open at S − 60 min): open
   `/` and one game page.
 

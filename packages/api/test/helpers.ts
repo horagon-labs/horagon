@@ -80,6 +80,8 @@ export class FakeChain {
   genesisCalls = 0
   sent: Buffer[] = []
   simulated = 0
+  /** getMultipleAccountsInfo calls. */
+  multipleCalls = 0
 
   set(key: PublicKey, info: AccountInfo<Buffer>) {
     this.accounts.set(key.toBase58(), info)
@@ -93,6 +95,7 @@ export class FakeChain {
         return self.accounts.get(k.toBase58()) ?? null
       },
       async getMultipleAccountsInfo(ks: PublicKey[]) {
+        self.multipleCalls++
         if (self.accountsFail) throw new Error(RPC_FAILURE)
         return ks.map((k) => self.accounts.get(k.toBase58()) ?? null)
       },

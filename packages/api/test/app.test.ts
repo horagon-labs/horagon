@@ -26,7 +26,7 @@ import {
   toPoolState,
 } from '@horagon/sdk'
 import { ASSOCIATED_TOKEN_PROGRAM_ID, TOKEN_PROGRAM_ID } from '@solana/spl-token'
-import { ComputeBudgetProgram, Keypair, VersionedTransaction } from '@solana/web3.js'
+import { ComputeBudgetProgram, Keypair, PublicKey, VersionedTransaction } from '@solana/web3.js'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createApp } from '../src/app'
 import { pmAmmFaucet } from '../src/faucet'
@@ -880,6 +880,68 @@ describe('status, claim, positions, faucet, health', () => {
     expect(first.headers.get('retry-after')).toBe('1200')
     expect((await post('/faucet', { wallet })).status).toBe(429)
     expect(calls).toBe(1)
+  })
+
+  it('adds the ops numbers, read once per 45 s, beside the health checks', async () => {
+    const t = Math.floor(Date.now() / 1000)
+    let now = t
+    env.deps.now = () => now
+    const { sponsor, chain, h, market } = env
+    const p = program
+    chain.set(sponsor.publicKey, {
+      data: Buffer.alloc(0),
+      owner: PublicKey.default,
+      lamports: 3_500_000_000,
+      executable: false,
+      rentEpoch: 0,
+    })
+    chain.set(p.treasury, tokenAccount(DEVNET_MUSDC_MINT, p.authority, 12_345_500_000n))
+    await updateMarket(h.db, market.pubkey.toBase58(), {
+      status: 'halted',
+      endTs: new Date((t - 600) * 1000),
+    })
+    await heartbeat(h.db, 'keeper', { index: { rounds: 9, lastRoundAt: t - 7 } })
+    const ops = async () => ((await (await get('/health')).json()) as { ops: unknown }).ops
+    const before = chain.multipleCalls
+    expect(await ops()).toEqual({
+      asOf: t,
+      sponsor: { lamports: 3_500_000_000 },
+      treasury: { musdc: 12_345.5 },
+      backlog: { count: 1, oldestAgeSecs: 600 },
+      index: { lagSecs: 7 },
+    })
+    expect(chain.multipleCalls - before).toBe(1)
+    // Within 45 s the numbers come from the cache: no RPC read. The index lag is the heartbeat's.
+    now = t + 44
+    chain.set(p.treasury, tokenAccount(DEVNET_MUSDC_MINT, p.authority, 1n))
+    expect(await ops()).toMatchObject({
+      asOf: t,
+      treasury: { musdc: 12_345.5 },
+      index: { lagSecs: 51 },
+    })
+    expect(chain.multipleCalls - before).toBe(1)
+    now = t + 46
+    expect(await ops()).toMatchObject({ asOf: t + 46, treasury: { musdc: 0.000001 } })
+    expect(chain.multipleCalls - before).toBe(2)
+  })
+
+  it('gives null and a reason for an ops number it cannot read, and stays healthy', async () => {
+    env.deps.now = () => Math.floor(Date.now() / 1000)
+    env.chain.accountsFail = true
+    // A keeper from before the index round time was in its heartbeat.
+    await heartbeat(env.h.db, 'keeper', { index: { rounds: 9 } })
+    const res = await get('/health')
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { ok: boolean; ops: Record<string, unknown> }
+    expect(body.ok).toBe(true)
+    expect(body.ops).toMatchObject({
+      sponsor: { lamports: null, reason: 'rpc unavailable' },
+      treasury: { musdc: null, reason: 'rpc unavailable' },
+      // The seeded market is open and past its end_ts by the wall clock.
+      backlog: { count: 1 },
+      index: { lagSecs: null, reason: 'no index round time in the keeper heartbeat' },
+    })
+    expect(JSON.stringify(body)).not.toMatch(/https?:/)
   })
 
   it('is degraded until the keeper heartbeats', async () => {
