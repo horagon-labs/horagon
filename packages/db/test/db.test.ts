@@ -539,17 +539,21 @@ describe('sponsor_reserve', () => {
     expect(await sponsorSpentSince(h.db, new Date(0))).toBe(6_000_000n)
   })
 
-  it('knows a wallet with a sponsored trade that landed', async () => {
-    expect(await sponsoredTradeLanded(h.db, 'W1')).toBe(false)
+  it('knows a wallet with a sponsored trade that landed before a given time', async () => {
+    const today = new Date(new Date().toISOString().slice(0, 10))
+    expect(await sponsoredTradeLanded(h.db, 'W1', today)).toBe(false)
     // Reserved and sent, but not (yet) indexed as a trade: not history.
     await sponsorReserve(h.db, { ...r, wallet: 'W1', sig: 'S1' })
-    expect(await sponsoredTradeLanded(h.db, 'W1')).toBe(false)
+    expect(await sponsoredTradeLanded(h.db, 'W1', today)).toBe(false)
     // A trade the wallet paid for itself is not a sponsored one.
     await insertTrades(h.db, [trade('S9', { wallet: 'W1' })])
-    expect(await sponsoredTradeLanded(h.db, 'W1')).toBe(false)
+    expect(await sponsoredTradeLanded(h.db, 'W1', today)).toBe(false)
+    // Landed today: not history yet, or a burner's first trade would open the reserve to it.
     await insertTrades(h.db, [trade('S1', { wallet: 'W1' })])
-    expect(await sponsoredTradeLanded(h.db, 'W1')).toBe(true)
-    expect(await sponsoredTradeLanded(h.db, 'W2')).toBe(false)
+    expect(await sponsoredTradeLanded(h.db, 'W1', today)).toBe(false)
+    await h.db.execute(sql`update sponsor_log set ts = now() - interval '2 days' where sig = 'S1'`)
+    expect(await sponsoredTradeLanded(h.db, 'W1', today)).toBe(true)
+    expect(await sponsoredTradeLanded(h.db, 'W2', today)).toBe(false)
   })
 
   it('throws instead of guessing when the function returns something unexpected', async () => {

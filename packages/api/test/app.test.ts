@@ -404,16 +404,26 @@ describe('POST /tx/submit', () => {
     const tx = VersionedTransaction.deserialize(Buffer.from(base64, 'base64'))
     return exposureLamports(tx, rent, inspect(base64).ataCreates)
   }
-  /** A sponsored trade of the user that landed: its reservation and its indexed trade. */
-  async function landedSponsoredTrade(sig: string) {
+  /**
+   * A sponsored trade of the user that landed: its reservation and its indexed trade. `daysAgo`
+   * moves the reservation to an earlier UTC day (it then no longer counts against today's cap).
+   */
+  async function landedSponsoredTrade(sig: string, daysAgo = 0) {
     const wallet = env.user.publicKey.toBase58()
-    await sponsorReserve(env.h.db, {
-      sig,
-      wallet,
-      ipHash: 'h',
-      lamports: 1n,
-      capLamports: 10n ** 18n,
-    })
+    if (daysAgo > 0) {
+      const ts = new Date(Date.now() - daysAgo * 86_400_000)
+      await env.h.db
+        .insert(schema.sponsorLog)
+        .values({ sig, wallet, ipHash: 'h', lamports: 1n, ts })
+    } else {
+      await sponsorReserve(env.h.db, {
+        sig,
+        wallet,
+        ipHash: 'h',
+        lamports: 1n,
+        capLamports: 10n ** 18n,
+      })
+    }
     await insertTrades(env.h.db, [
       {
         sig,
@@ -451,10 +461,40 @@ describe('POST /tx/submit', () => {
     expect(refused.headers.get('retry-after')).toBeNull()
     expect(`${body.detail} ${body.hint}`).not.toMatch(BET_WORDS)
     expect(env.chain.simulated).toBe(0)
-    // The same wallet once one of its sponsored trades landed: the reserve is open to it.
-    await landedSponsoredTrade('S-landed')
+    // A sponsored trade that landed today is not history yet: a burner whose first trade came
+    // from the open slice must not reach the reserve once that trade is indexed.
+    await landedSponsoredTrade('S-today')
+    expect((await post('/tx/submit', { tx: signAsUser((await builtTrade()).tx) })).status).toBe(429)
+    // The same wallet with a sponsored trade that landed on an earlier UTC day: the reserve is
+    // open to it.
+    await landedSponsoredTrade('S-landed', 2)
     expect((await post('/tx/submit', { tx: signAsUser((await builtTrade()).tx) })).status).toBe(200)
     expect(env.chain.sent).toHaveLength(1)
+  })
+
+  it('logs the first reserve-only refusal of a UTC day once, for the keeper to page', async () => {
+    const x = await exposureOf((await builtTrade()).tx)
+    await replaceEnv({ capSol: Number((x * 3n) / 2n) / 1e9, reserveSol: Number(x) / 1e9 })
+    const reserveOnly = async () =>
+      (await listOps(env.h.db))
+        .filter((o) => o.action === 'sponsor-reserve-only')
+        .map((o) => [o.actor, o.detail])
+    expect(await reserveOnly()).toEqual([])
+    for (const n of ['30', '31']) {
+      const res = await post('/tx/submit', { tx: signAsUser((await builtTrade(n)).tx) })
+      expect(((await res.json()) as { reason?: string }).reason).toBe('RESERVE_ONLY')
+    }
+    expect(await reserveOnly()).toEqual([
+      [
+        'api',
+        {
+          day: new Date().toISOString().slice(0, 10),
+          spentLamports: '0',
+          capLamports: ((x * 3n) / 2n).toString(),
+          reserveLamports: x.toString(),
+        },
+      ],
+    ])
   })
 
   it('tells a new wallet the budget is used up, not reserved, once the whole cap is spent', async () => {

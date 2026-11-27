@@ -8,6 +8,7 @@ import {
   inArray,
   isNotNull,
   isNull,
+  lt,
   ne,
   or,
   sql,
@@ -102,17 +103,19 @@ export async function sponsorSpentSince(db: Db, since: Date): Promise<bigint> {
 }
 
 /**
- * True when the wallet has a sponsored transaction that landed: one of its `sponsor_log`
- * reservations is an indexed trade (the signature in `trades`). A reservation alone is not
- * history, nor is a trade the wallet paid for itself. Reads `trades_wallet_idx`, then the
+ * True when the wallet has a sponsored transaction that landed and was reserved before `before`
+ * (the start of the UTC day, for the sponsor reserve): one of its `sponsor_log` reservations
+ * from then is an indexed trade (the signature in `trades`). A reservation alone is not history,
+ * nor is a trade the wallet paid for itself, nor one from today: a fresh wallet whose first trade
+ * landed an hour ago must not open the reserve to itself. Reads `trades_wallet_idx`, then the
  * `sponsor_log` primary key.
  */
-export async function sponsoredTradeLanded(db: Db, wallet: string): Promise<boolean> {
+export async function sponsoredTradeLanded(db: Db, wallet: string, before: Date): Promise<boolean> {
   const rows = await db
     .select({ sig: trades.sig })
     .from(trades)
     .innerJoin(sponsorLog, eq(sponsorLog.sig, trades.sig))
-    .where(eq(trades.wallet, wallet))
+    .where(and(eq(trades.wallet, wallet), lt(sponsorLog.ts, before)))
     .limit(1)
   return rows.length > 0
 }

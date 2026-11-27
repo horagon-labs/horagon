@@ -8,8 +8,9 @@
 //   7. sign that same object
 //   8. reserve the worst-case lamports under the daily cap (atomic) -> RATE_LIMITED; the same
 //      signature already reserved is the same transaction again: answer it, send nothing. A
-//      wallet with no sponsored trade that landed reserves under the cap less its reserve slice
-//      (RATE_LIMITED, reason RESERVE_ONLY), so new wallets cannot use the whole day up
+//      wallet with no sponsored trade that landed on an earlier UTC day reserves under the cap
+//      less its reserve slice (RATE_LIMITED, reason RESERVE_ONLY), so new wallets cannot use the
+//      whole day up; the first such refusal of a UTC day logs `sponsor-reserve-only` (paged)
 //   9. simulate with sigVerify; release on failure   -> SLIPPAGE_EXCEEDED, ... PROGRAM_ERROR
 //  10. take the daily ATA budget (wallet and hashed IP); release if it is used up
 //  11. send with skipPreflight and return the signature at once. A send error may come after
@@ -243,8 +244,12 @@ export async function submitSponsored(
   }
   const lamports = exposureLamports(tx, tokenAccountRent, ataCreates)
   const cap = sponsor.dailyCapLamports
-  // The reserve slice is for wallets with a sponsored trade that landed; one read, by index.
-  const held = sponsor.reserveLamports > 0n && !(await sponsoredTradeLanded(deps.db, wallet))
+  // The same day as sponsor_reserve, which counts from 00:00 UTC by the database clock.
+  const dayStart = utcDayStart(Date.now())
+  // The reserve slice is for wallets with a sponsored trade that landed before today (one read,
+  // by index): a trade from today would let a scripted burner open the reserve to itself.
+  const held =
+    sponsor.reserveLamports > 0n && !(await sponsoredTradeLanded(deps.db, wallet, dayStart))
   const reservation = await sponsorReserve(deps.db, {
     sig: signature,
     wallet,
@@ -258,12 +263,13 @@ export async function submitSponsored(
     return { signature }
   }
   if (reservation === 'over_cap') {
-    // The same day as sponsor_reserve, which counts from 00:00 UTC by the database clock.
-    if (held && (await sponsorSpentSince(deps.db, utcDayStart(Date.now()))) + lamports <= cap) {
+    const spent = held ? await sponsorSpentSince(deps.db, dayStart) : 0n
+    if (held && spent + lamports <= cap) {
+      await logReserveOnly(deps, dayStart, { spent, cap, reserve: sponsor.reserveLamports })
       // No retryAfterSecs: a client would show a day-long countdown instead of these words.
       throw new ApiError('RATE_LIMITED', 'Sponsored fees for new wallets are used up for today', {
         reason: 'RESERVE_ONLY',
-        hint: 'They come back at 00:00 UTC. A wallet that has traded here before can still trade.',
+        hint: 'They come back at 00:00 UTC. A wallet with a sponsored trade from an earlier day can still trade.',
       })
     }
     throw new ApiError('RATE_LIMITED', "Today's sponsor budget is used up", {
@@ -312,6 +318,37 @@ export async function submitSponsored(
   deps.log.info({ sig: signature, wallet }, 'sponsored tx sent')
   await logCapMarks(deps, cap)
   return { signature }
+}
+
+/**
+ * Logs `sponsor-reserve-only` on the first reserve-only refusal of a UTC day (the keeper pages
+ * it): from then on new wallets get no sponsored trade until 00:00 UTC, which may come before
+ * the 80% mark. Never throws: the refusal is the answer either way.
+ */
+async function logReserveOnly(
+  deps: ApiDeps,
+  dayStart: Date,
+  at: { spent: bigint; cap: bigint; reserve: bigint },
+): Promise<void> {
+  try {
+    const day = dayStart.toISOString().slice(0, 10)
+    const action = 'sponsor-reserve-only'
+    const wait = await rateLimitTake(deps.db, `once:${action}:${day}`, {
+      capacity: 1,
+      refillPerSec: 1 / 86_400,
+    })
+    if (wait > 0) return
+    const detail = {
+      day,
+      spentLamports: at.spent.toString(),
+      capLamports: at.cap.toString(),
+      reserveLamports: at.reserve.toString(),
+    }
+    await logOps(deps.db, { actor: 'api', action, detail })
+    deps.log.warn({ action, ...detail }, 'sponsor reserve reached: new wallets refused')
+  } catch (e) {
+    deps.log.warn({ error: errorSummary(e) }, 'sponsor reserve-only event not logged')
+  }
 }
 
 /** Shares of the daily cap that log an ops event (and page, through the keeper) once a day. */
