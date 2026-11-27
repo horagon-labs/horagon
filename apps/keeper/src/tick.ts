@@ -39,7 +39,7 @@ import {
   winProbability,
 } from '@horagon/sdk'
 import { toHex } from '@horagon/sdk/evidence'
-import type { Keypair } from '@solana/web3.js'
+import { type AccountInfo, type Keypair, SystemProgram } from '@solana/web3.js'
 import type { Logger } from 'pino'
 import { z } from 'zod'
 import type { Alerter } from './alerts'
@@ -402,6 +402,13 @@ const TREASURY_UNREAD_ALERT_AFTER = 10
  * without it a second challenge round inside that window would go unheard.
  */
 const roundOf = (s: Pick<GameState, 'onchain'>) => s.onchain?.challengeCount ?? 0
+
+/**
+ * An address that was only sent lamports (system-owned, no data) is not an account yet: the
+ * program's `init` takes it over. The same rule as the SDK's fetchGameMarket.
+ */
+const isUnused = (info: AccountInfo<Uint8Array>) =>
+  info.owner.equals(SystemProgram.programId) && info.data.length === 0
 
 export class Keeper {
   private readonly observed = new Map<string, Observed>()
@@ -1002,7 +1009,9 @@ export class Keeper {
    *   salts 0-9: markets created before ids were random) is adopted. Otherwise a random id is
    *   drawn and stored before anything is sent.
    * - An id whose PDAs belong to someone else (a pm-AMM market with no GameMarket of ours: anyone
-   *   may call initialize_market) is replaced by a new random id, with `market-id-taken`.
+   *   may call initialize_market; or an account of another owner at the GameMarket address) is
+   *   replaced by a new random id, with `market-id-taken`. A GameMarket address that was only
+   *   sent lamports is treated as absent (the create's `init` takes it over), never decoded.
    */
   private async marketIdOf(
     g: GameRow,
@@ -1026,11 +1035,15 @@ export class Keeper {
         [a.gameMarket, a.market],
         'confirmed',
       )
-      if (gmInfo) {
-        const existing = decodeGameMarket(gmInfo, this.d.program.programId)
-        if (existing.externalGameId === g.externalId && existing.kind === 0)
-          return { marketId, existing }
+      if (gmInfo && !isUnused(gmInfo)) {
+        // Only an account of our program is decoded: another owner there means the id is taken.
+        if (gmInfo.owner.equals(this.d.program.programId)) {
+          const existing = decodeGameMarket(gmInfo, this.d.program.programId)
+          if (existing.externalGameId === g.externalId && existing.kind === 0)
+            return { marketId, existing }
+        }
       } else if (!ammInfo) {
+        // Absent, or only sent lamports: create_game_market's `init` takes such an address over.
         return { marketId, existing: null }
       }
       const from = marketId

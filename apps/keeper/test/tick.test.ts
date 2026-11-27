@@ -24,7 +24,13 @@ import {
   marketIdFor,
 } from '@horagon/sdk'
 import { asciiField, BorshWriter } from '@horagon/sdk/program'
-import { type AccountInfo, type Connection, Keypair, PublicKey } from '@solana/web3.js'
+import {
+  type AccountInfo,
+  type Connection,
+  Keypair,
+  PublicKey,
+  SystemProgram,
+} from '@solana/web3.js'
 import pino from 'pino'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { ProgramFailure, type SendSpec, type TxSender, UnresolvedAttempt } from '../src/executor'
@@ -656,6 +662,44 @@ describe('market ids', () => {
       from: taken.toString(),
       to: marketId.toString(),
     })
+  })
+
+  it('creates under a stored id whose GameMarket address was only sent lamports', async () => {
+    // A failed create shows the id; anyone may then send lamports to its GameMarket PDA. That is
+    // not an account yet (create_game_market's init takes it over): the id stays, the create goes.
+    await reserveMarketId(h.db, { gameId: GAME, kind: 0, marketId: marketId.toString() })
+    accounts.set(gm, {
+      data: Buffer.alloc(0),
+      owner: SystemProgram.programId,
+      lamports: 890_880,
+      executable: false,
+      rentEpoch: 0,
+    })
+    draws = [0x7777n]
+    expect(types(await keeper.tick())).toEqual(['create'])
+    expect(sends).toEqual([`create ${GAME}`])
+    expect(alerts).toEqual([])
+    expect(await getMarketIdReservation(h.db, GAME, 0)).toBe(marketId.toString())
+    expect(await row()).toMatchObject({ marketId: marketId.toString(), status: 'open' })
+    expect(draws).toEqual([0x7777n])
+  })
+
+  it('replaces a stored id whose GameMarket address another program owns, with an alert', async () => {
+    const taken = 0x5252_5252n
+    await reserveMarketId(h.db, { gameId: GAME, kind: 0, marketId: taken.toString() })
+    accounts.set(deriveGameMarket(taken, program.programId).toBase58(), {
+      data: Buffer.alloc(16),
+      owner: Keypair.generate().publicKey,
+      lamports: 1,
+      executable: false,
+      rentEpoch: 0,
+    })
+    draws = [marketId]
+    expect(types(await keeper.tick())).toEqual(['create'])
+    expect(sends).toEqual([`create ${GAME}`])
+    expect(alerts.map(([k]) => k)).toEqual([`market-id-taken:${GAME}`])
+    expect(await getMarketIdReservation(h.db, GAME, 0)).toBe(marketId.toString())
+    expect(await row()).toMatchObject({ marketId: marketId.toString(), status: 'open' })
   })
 
   it('is not blocked when every id derived from the game is taken', async () => {
