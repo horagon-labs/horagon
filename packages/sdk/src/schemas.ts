@@ -409,6 +409,15 @@ export const HealthSchema = z.object({
       index: z.object({ lagSecs: z.number().nullable(), reason: opsReason }),
     })
     .optional(),
+  /**
+   * The reference agent's mode as its last heartbeat states it (`dryRun`: it decides and sends
+   * nothing), with that beat's age and whether it was the clean stop's. Null with no heartbeat;
+   * it never changes `ok`. Older servers leave it out.
+   */
+  agent: z
+    .object({ dryRun: z.boolean(), stopped: z.boolean(), heartbeatAgeSecs: z.number() })
+    .nullable()
+    .optional(),
 })
 
 /** RFC 9457 problem details, with Horagon's error code (spec section 19.3). */

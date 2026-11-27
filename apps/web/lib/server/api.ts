@@ -8,6 +8,7 @@ import { createApp, depsFromEnv } from '@horagon/api'
 import type { Game, PracticeResponse } from '@horagon/sdk'
 import { HoragonClient } from '@horagon/sdk/client'
 import { isHoragonError } from '@horagon/sdk/errors'
+import type { AgentBeat } from '../agent'
 import { lookupTarget, type VerifyTarget } from '../verify-target'
 import {
   INITIAL_TIMEOUT_MS,
@@ -131,6 +132,32 @@ export function verifyTarget(market: string): Promise<VerifyTarget | null | unde
       }
     },
     (t) => t !== undefined,
+  )
+}
+
+/** How long /agent keeps the agent's mode; the agent beats every 20 s. */
+const AGENT_TTL_MS = 15_000
+/** /health reads the database and the RPC: a little more time than a first frame gets. */
+const AGENT_TIMEOUT_MS = 2_500
+const agents = ttlCache<AgentBeat | null | undefined>(AGENT_TTL_MS)
+
+/**
+ * The reference agent's mode for /agent: GET /health's `agent`, from the agent's own heartbeat.
+ * Null when there is no heartbeat; undefined when the API failed or was slow. Either way the page
+ * says nothing about the mode. Only an answer is kept. Never throws.
+ */
+export function initialAgent(): Promise<AgentBeat | null | undefined> {
+  return agents(
+    'agent',
+    async () => {
+      try {
+        const health = await within(serverClient().health(), AGENT_TIMEOUT_MS)
+        return health === undefined ? undefined : (health.agent ?? null)
+      } catch {
+        return undefined
+      }
+    },
+    (a) => a !== undefined,
   )
 }
 

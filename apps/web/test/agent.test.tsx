@@ -2,14 +2,29 @@ import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { REFERENCE_AGENT_WALLET } from '@horagon/sdk'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { BOT_RATE as COUNT_FANS_BOT_RATE } from '../../../scripts/count-fans.mjs'
 import AgentPage, { metadata } from '../app/agent/page'
 import { alt as ogAlt } from '../app/opengraph-image'
+import { AgentView } from '../components/agent-view'
 import { AgentLine, AgentNote } from '../components/chrono/agent-line'
-import { AGENT_DISCLOSURE, AGENT_PARAMS, activityLine, BOT_RATE } from '../lib/agent'
+import {
+  AGENT_DISCLOSURE,
+  AGENT_FRESH_SECS,
+  AGENT_PARAMS,
+  type AgentBeat,
+  activityLine,
+  agentModeLine,
+  BOT_RATE,
+} from '../lib/agent'
 import { activity } from '../lib/chrono/fixtures'
 import { explorerAddress } from '../lib/format'
+import { initialAgent } from '../lib/server/api'
+
+// The page reads the agent's heartbeat through the in-process API (server only) and waits for
+// the request: both stand in here, so the page renders as a function of the heartbeat.
+vi.mock('../lib/server/api', () => ({ initialAgent: vi.fn() }))
+vi.mock('next/server', () => ({ connection: vi.fn(async () => {}) }))
 
 const WEB = join(import.meta.dirname, '..')
 const AGENT_SRC = join(WEB, '..', 'keeper', 'src', 'agent')
@@ -204,13 +219,67 @@ describe('AgentNote: the line under the board on / (R2b)', () => {
   })
 })
 
-describe('/agent: how the reference agent works (R2b)', () => {
-  const html = renderToStaticMarkup(<AgentPage />)
-  const text = html
+const textOf = (html: string) =>
+  html
     .replace(/<[^>]+>/g, '')
     .replace(/&#x27;/g, "'")
     .replace(/&quot;/g, '"')
     .replace(/&amp;/g, '&')
+
+const beat = (over: Partial<AgentBeat> = {}): AgentBeat => ({
+  dryRun: false,
+  stopped: false,
+  heartbeatAgeSecs: 12,
+  ...over,
+})
+
+const LIVE = 'Its heartbeat says it trades live now: it sends the swaps it decides.'
+const DRY = 'Its heartbeat says it runs as a dry run now: it decides and sends nothing.'
+
+describe("/agent: the agent's mode, from its heartbeat only", () => {
+  /** The page as the server renders it, with `initialAgent` answering `answer`. */
+  const page = async (answer: AgentBeat | null | undefined) => {
+    vi.mocked(initialAgent).mockResolvedValue(answer)
+    return textOf(renderToStaticMarkup(await AgentPage()))
+  }
+
+  it('says live or dry run from a fresh heartbeat, on the server-rendered page', async () => {
+    const live = await page(beat())
+    expect(live).toContain(LIVE)
+    expect(live).not.toContain('dry run')
+    expect(await page(beat({ dryRun: true }))).toContain(DRY)
+  })
+
+  it('says nothing about the mode without a heartbeat, a late API, a stop or a stale beat', async () => {
+    for (const answer of [
+      null,
+      undefined,
+      beat({ stopped: true }),
+      beat({ heartbeatAgeSecs: AGENT_FRESH_SECS + 1 }),
+    ]) {
+      const text = await page(answer)
+      expect(text, JSON.stringify(answer)).not.toMatch(/heartbeat says|dry run|live now/)
+      expect(text).toContain('One team wallet, run as its own process beside the keeper.')
+    }
+    expect(agentModeLine(beat({ heartbeatAgeSecs: AGENT_FRESH_SECS }))).toBe(LIVE)
+  })
+
+  it('no longer claims a mode in a fixed sentence', () => {
+    const text = textOf(renderToStaticMarkup(<AgentView beat={null} />))
+    expect(text).not.toContain('It starts in a dry run')
+    expect(text).not.toContain('Off unless enabled')
+    for (const file of [
+      read(WEB, 'components', 'agent-view.tsx'),
+      read(WEB, 'app', 'agent', 'page.tsx'),
+    ]) {
+      expect(file).not.toMatch(/starts in a dry run|Off unless enabled/)
+    }
+  })
+})
+
+describe('/agent: how the reference agent works (R2b)', () => {
+  const html = renderToStaticMarkup(<AgentView beat={null} />)
+  const text = textOf(html)
   const p = AGENT_PARAMS
 
   it('has its title and description, in its share preview too', () => {
@@ -261,10 +330,8 @@ describe('/agent: how the reference agent works (R2b)', () => {
       `${p.maxPerSwapUsdc} mUSDC a swap`,
       `${p.maxPerGameUsdc.toLocaleString('en-US')} mUSDC and ${p.maxSwapsPerGame} swaps a market`,
       `for ${p.anomalyHoldSecs / 60} min`,
-      'It starts in a dry run: it decides and sends nothing.',
       'never sells',
       'never uses the sponsor',
-      'Off unless enabled',
     ]) {
       expect(text, words).toContain(words)
     }
@@ -296,10 +363,15 @@ describe('/agent: how the reference agent works (R2b)', () => {
     }
   })
 
-  it('is a static page: no connection(), no client module', () => {
+  it('renders per request through the API, with no client module', () => {
     const src = read(WEB, 'app', 'agent', 'page.tsx')
-    expect(src).not.toContain('connection')
-    expect(src).not.toContain("'use client'")
-    expect(src).toMatch(/^import \{ REFERENCE_AGENT_WALLET \} from '@horagon\/sdk'$/m)
+    expect(src).toContain('await connection()')
+    expect(src).toMatch(/^import \{ initialAgent \} from '\.\.\/\.\.\/lib\/server\/api'$/m)
+    expect(src).toContain('<AgentView beat={await initialAgent()} />')
+    const view = read(WEB, 'components', 'agent-view.tsx')
+    for (const s of [src, view]) expect(s).not.toContain("'use client'")
+    expect(view).toMatch(/^import \{ REFERENCE_AGENT_WALLET \} from '@horagon\/sdk'$/m)
+    // initialAgent reads GET /health's `agent`, which the API builds from the agent heartbeat.
+    expect(read(WEB, 'lib', 'server', 'api.ts')).toContain('serverClient().health()')
   })
 })

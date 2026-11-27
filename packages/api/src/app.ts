@@ -56,7 +56,7 @@ import type { ApiDeps } from './deps'
 import { disputeWindowReader } from './dispute-window'
 import { claimFaucet } from './faucet'
 import { flagsOf, provideFlags, requireFlags } from './flags'
-import { healthOpsReader } from './health-ops'
+import { agentBeat, healthOpsReader } from './health-ops'
 import { MeQuerySchema, meFor, positionsAndNights } from './me'
 import { practiceFor } from './practice'
 import { ApiError, problemResponse } from './problem'
@@ -541,9 +541,10 @@ export function createApp(deps: ApiDeps) {
       }
       const heartbeatRead = timed(() => getHeartbeat(deps.db, 'keeper'))
       const ops = healthOps(heartbeatRead.then((r) => (r.ok ? r.value : null)))
-      const [db, rpcSlot] = await Promise.all([
+      const [db, rpcSlot, agentRead] = await Promise.all([
         heartbeatRead,
         timed(() => deps.connection.getSlot('confirmed')),
+        timed(() => getHeartbeat(deps.db, 'agent')),
       ])
       const heartbeat = db.ok ? db.value : null
       const age = heartbeat
@@ -557,6 +558,8 @@ export function createApp(deps: ApiDeps) {
         keeper: { ok: keeperOk, heartbeatAgeSecs: age },
         version: deps.version,
         ops: await ops,
+        // The reference agent's mode, from its own heartbeat; it never changes `ok` (/agent).
+        agent: agentBeat(agentRead.ok ? agentRead.value : null, deps.now()),
       }
       c.header('cache-control', 'no-store')
       return health.ok ? c.json(health, 200) : c.json(health, 503)

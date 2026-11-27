@@ -84,6 +84,31 @@ export function indexLag(
   return { lagSecs: Math.max(0, now - at) }
 }
 
+/** The reference agent's mode as its last heartbeat states it (the `agent` row). */
+export interface AgentBeat {
+  /** The agent's own `dryRun`: true decides and sends nothing, false sends its swaps. */
+  dryRun: boolean
+  /** The beat a clean stop writes last. */
+  stopped: boolean
+  heartbeatAgeSecs: number
+}
+
+/**
+ * The `agent` heartbeat as /health reports it, never changing `ok`: null with no row (the agent
+ * never ran here) or a row that names no mode. The page that shows it decides what is fresh.
+ */
+export function agentBeat(
+  heartbeat: { ts: Date; info: Record<string, unknown> } | null,
+  now: number,
+): AgentBeat | null {
+  if (!heartbeat || typeof heartbeat.info.dryRun !== 'boolean') return null
+  return {
+    dryRun: heartbeat.info.dryRun,
+    stopped: heartbeat.info.stopped === true,
+    heartbeatAgeSecs: Math.max(0, now - Math.floor(heartbeat.ts.getTime() / 1000)),
+  }
+}
+
 /** One per app: the cached part of the ops numbers, read again once older than OPS_TTL_SECS. */
 export function healthOpsReader(deps: ApiDeps) {
   let cached: { at: number; value: Promise<Cached> } | null = null
