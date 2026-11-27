@@ -50,6 +50,7 @@ reachable with it.
 | Sponsor budget drain  | The last `SPONSOR_RESERVE_SOL` (default 0.5) of the daily cap is spent only for wallets with a sponsored trade that landed, so fresh wallets cannot turn sponsored trades off for everyone; the API logs 50% and 80% of the cap once a UTC day and the keeper pages them; the keeper pages a sponsor under 1 SOL; `/api/v1/health` shows the sponsor's lamports                                |
 | Market id squatting   | pm-AMM's `initialize_market` is open to any signer, so an id anyone can compute lets them create the market PDA first. A new market's id is 8 random bytes the keeper stores in `market_id_reservations` before it sends the create; a restart reuses it, and an id whose PDA someone else took is replaced by a fresh one (page `market-id-taken`)                                            |
 | Malicious API input   | zod on every input, unknown fields refused, 64 KB body limit (4 KB for `POST /api/v1/tx/submit`), problem+json errors without RPC URLs or stacks                                                                                                                                                                                                                                               |
+| Script injection      | Every page has a nonce-based CSP with `'strict-dynamic'` (no eval, no inline scripts); the browser connects only to the API base and loads images and fonts from its own origin, so an injected script does not run and cannot send the play wallet's key elsewhere                                                                                                                            |
 | Wrong result          | Two-step resolution (propose, a challenge window, finalize). The attestor compares a Final with balldontlie before it proposes: a disagreement holds it and pages a guardian; a proposal no second source checked (no key, or no answer in 10 min) pages a guardian with a box-score link; a disagreement seen inside the window pages a challenge. After a challenge only a guardian proposes |
 | Feed failure          | No proposal unless ESPN still shows Final at the draft's score with periods that add up; a feed silent 2 min in Q4/OT, or from S + 1h40m (80 min before `end_ts`), alerts the guardian; 10 min in Q4/OT halts the market                                                                                                                                                                       |
 | Key leak through logs | Keeper and `horagon-ops` logs redact `token` and `secretKey` fields (pino); errors are logged as `errorSummary` everywhere (no stack, URLs cut to the host, 300 characters); keys never in URLs; the balldontlie key goes in a request header only, never in a log or an error                                                                                                                 |
@@ -78,6 +79,38 @@ reads the current one from chain. `Config.admin` stays the deployer: the program
 stored admin, never the upgrade authority, so pausing creation, replacing the attestor and
 withdrawing the treasury keep working, and a leaked admin key can no longer change the code.
 Until the operator signs procedure M, the deployer key remains the upgrade authority.
+
+## Content Security Policy
+
+The play wallet's secret key lives in the browser's localStorage (`apps/web/lib/burner.ts`), so
+a script injected into a page could read it. Every page is sent with this policy
+(`apps/web/lib/csp.ts`, set by `apps/web/proxy.ts` with a nonce drawn per request):
+
+```
+default-src 'self'; script-src 'self' 'nonce-<per request>' 'strict-dynamic';
+style-src 'self' 'unsafe-inline'; img-src 'self'; font-src 'self'; connect-src 'self';
+object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'
+```
+
+- Scripts run only with the request's nonce, which Next puts on its own scripts, or when a
+  nonced script loads them (`'strict-dynamic'`: the page chunks, and web3.js on the first wallet
+  action). No `'unsafe-eval'` and no `'unsafe-inline'` for scripts; inline event handlers are
+  refused. `next dev` adds `'unsafe-eval'` for React's error overlay, never a production build.
+- `connect-src` is the API base the browser client uses (`NEXT_PUBLIC_API_BASE`, same-origin
+  `/api/v1` by default; an absolute base adds its origin). The browser opens no other
+  connection: no RPC, since the API relays every transaction. A test fails if browser code
+  calls `fetch`, a socket, a beacon or an RPC connection outside the API client.
+- Styles allow `'unsafe-inline'`: React writes `style=""` attributes into the server HTML
+  (motion's first frame) and the chart library adds a `<style>` element at run time; neither
+  can carry a nonce. Images and fonts load from this origin only, so an injected style cannot
+  send data to another host.
+- `frame-ancestors 'none'` beside `X-Frame-Options: DENY`; `X-Content-Type-Options` and
+  `Referrer-Policy` stay as before (`apps/web/next.config.ts`).
+- A nonce needs a page rendered per request: the root layout waits for the connection, so
+  `/me`, `/agent` and the 404 are no longer prerendered. The share images, icons, manifest,
+  calendar and API are not pages and are unchanged.
+- zod probes `Function('')` before it builds its schemas; `apps/web/instrumentation-client.ts`
+  turns the probe off in the browser so pages log no violation.
 
 ## GitHub Actions
 
@@ -153,7 +186,7 @@ Review this list whenever a dependency is upgraded.
 
 ## Not yet covered (later tiers)
 
-Sign-In With Solana for `/ops`, API keys, general read rate limits, CSP, a `horagon-ops`
+Sign-In With Solana for `/ops`, API keys, general read rate limits, a `horagon-ops`
 command for `update_config` (attestor and guardians), and redaction in the API's logger. A
 second guardian is not set: the config's second guardian slot is empty, and one guardian
 confirms every result.
