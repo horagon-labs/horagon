@@ -1,4 +1,19 @@
-import { and, asc, countDistinct, desc, eq, gte, inArray, isNull, max, ne, or } from 'drizzle-orm'
+import {
+  and,
+  asc,
+  count,
+  countDistinct,
+  desc,
+  eq,
+  gte,
+  inArray,
+  isNull,
+  lt,
+  max,
+  min,
+  ne,
+  or,
+} from 'drizzle-orm'
 import type { Db } from './client'
 import { marketIdReservations, markets, pricePoints, redeemsClaims, trades } from './schema'
 
@@ -249,4 +264,23 @@ export async function marketsByStatus(db: Db, statuses: string[]) {
     .from(markets)
     .where(and(inArray(markets.status, statuses)))
     .orderBy(asc(markets.endTs))
+}
+
+/** Statuses of a market that nobody has proposed an outcome for yet. */
+const UNPROPOSED = ['open', 'halted']
+
+/**
+ * Markets past their `end_ts` with no proposal yet (open or halted): how many, and the `end_ts`
+ * of the oldest. The health endpoint shows it as the resolution backlog.
+ */
+export async function unresolvedBacklog(
+  db: Db,
+  now: Date,
+): Promise<{ count: number; oldestEndTs: Date | null }> {
+  const rows = await db
+    .select({ n: count(), oldest: min(markets.endTs) })
+    .from(markets)
+    .where(and(inArray(markets.status, UNPROPOSED), lt(markets.endTs, now)))
+  const row = rows[0]
+  return { count: Number(row?.n ?? 0), oldestEndTs: row?.oldest ?? null }
 }

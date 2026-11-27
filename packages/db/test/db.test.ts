@@ -36,10 +36,12 @@ import {
   setFeatured,
   setWalletKind,
   sponsoredAtasToCheck,
+  sponsoredTradeLanded,
   sponsorRelease,
   sponsorReserve,
   sponsorSpentSince,
   teamWallets,
+  unresolvedBacklog,
   updateGameLive,
   updateMarket,
   upsertDraft,
@@ -382,6 +384,34 @@ describe('ops tables', () => {
   })
 })
 
+describe('unresolvedBacklog', () => {
+  it('counts the markets past end_ts with no proposal and the age of the oldest', async () => {
+    const now = new Date('2026-11-21T00:00:00Z')
+    expect(await unresolvedBacklog(h.db, now)).toEqual({ count: 0, oldestEndTs: null })
+    await seedGames('nba-1', 'nba-2', 'nba-3', 'nba-4', 'nba-5')
+    const at = (iso: string) => new Date(iso)
+    await upsertMarket(h.db, market('M1', 'nba-1', { endTs: at('2026-11-20T22:00:00Z') }))
+    await upsertMarket(
+      h.db,
+      market('M2', 'nba-2', { endTs: at('2026-11-20T20:00:00Z'), status: 'halted' }),
+    )
+    // Proposed or past it, or not over yet: not backlog.
+    await upsertMarket(
+      h.db,
+      market('M3', 'nba-3', { endTs: at('2026-11-20T10:00:00Z'), status: 'proposed' }),
+    )
+    await upsertMarket(
+      h.db,
+      market('M4', 'nba-4', { endTs: at('2026-11-20T09:00:00Z'), status: 'finalized' }),
+    )
+    await upsertMarket(h.db, market('M5', 'nba-5', { endTs: at('2026-11-21T01:00:00Z') }))
+    expect(await unresolvedBacklog(h.db, now)).toEqual({
+      count: 2,
+      oldestEndTs: at('2026-11-20T20:00:00Z'),
+    })
+  })
+})
+
 describe('market id reservations', () => {
   it('stores the first id for a game and kind, and hands that one back on a later reserve', async () => {
     await seedGames('nba-1')
@@ -492,6 +522,19 @@ describe('sponsor_reserve', () => {
     expect(await sponsorReserve(h.db, { ...r, sig: 'b' })).toBe('reserved')
     expect(await sponsorReserve(h.db, { ...r, sig: 'b' })).toBe('duplicate')
     expect(await sponsorSpentSince(h.db, new Date(0))).toBe(6_000_000n)
+  })
+
+  it('knows a wallet with a sponsored trade that landed', async () => {
+    expect(await sponsoredTradeLanded(h.db, 'W1')).toBe(false)
+    // Reserved and sent, but not (yet) indexed as a trade: not history.
+    await sponsorReserve(h.db, { ...r, wallet: 'W1', sig: 'S1' })
+    expect(await sponsoredTradeLanded(h.db, 'W1')).toBe(false)
+    // A trade the wallet paid for itself is not a sponsored one.
+    await insertTrades(h.db, [trade('S9', { wallet: 'W1' })])
+    expect(await sponsoredTradeLanded(h.db, 'W1')).toBe(false)
+    await insertTrades(h.db, [trade('S1', { wallet: 'W1' })])
+    expect(await sponsoredTradeLanded(h.db, 'W1')).toBe(true)
+    expect(await sponsoredTradeLanded(h.db, 'W2')).toBe(false)
   })
 
   it('throws instead of guessing when the function returns something unexpected', async () => {

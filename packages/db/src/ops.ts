@@ -19,6 +19,7 @@ import {
   rateLimits,
   sponsoredAtas,
   sponsorLog,
+  trades,
   wallets,
 } from './schema'
 
@@ -98,6 +99,22 @@ export async function sponsorSpentSince(db: Db, since: Date): Promise<bigint> {
     .from(sponsorLog)
     .where(gte(sponsorLog.ts, since))
   return BigInt(rows[0]?.total ?? 0)
+}
+
+/**
+ * True when the wallet has a sponsored transaction that landed: one of its `sponsor_log`
+ * reservations is an indexed trade (the signature in `trades`). A reservation alone is not
+ * history, nor is a trade the wallet paid for itself. Reads `trades_wallet_idx`, then the
+ * `sponsor_log` primary key.
+ */
+export async function sponsoredTradeLanded(db: Db, wallet: string): Promise<boolean> {
+  const rows = await db
+    .select({ sig: trades.sig })
+    .from(trades)
+    .innerJoin(sponsorLog, eq(sponsorLog.sig, trades.sig))
+    .where(eq(trades.wallet, wallet))
+    .limit(1)
+  return rows.length > 0
 }
 
 /**
