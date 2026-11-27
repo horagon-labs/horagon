@@ -299,6 +299,16 @@ describe('docs/runbook.md and the alert keys in the code', () => {
       'source-mismatch',
       'source-held',
       'auto-propose-off',
+      // R9: random market ids and the sponsor budget
+      'market-id-taken',
+      'sol-sponsor',
+      'sponsor-cap',
+      'sponsor-reserve-only',
+      // R8: the Practice process
+      'practice-failing',
+      'practice-sol-floor',
+      'practice-sol-authority',
+      'practice-challenged',
     ]) {
       expect(keys).toContain(k)
     }
