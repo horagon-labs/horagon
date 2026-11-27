@@ -29,6 +29,13 @@
       "when": 1795627242150,
       "tag": "0003_trades_bot_memo",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1795759311917,
+      "tag": "0004_market_id_reservations",
+      "breakpoints": true
     }
   ]
 }

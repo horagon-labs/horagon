@@ -10,6 +10,7 @@ import {
   getEvidence,
   getGame,
   getHeartbeat,
+  getMarketIdReservation,
   heartbeat,
   insertPricePoint,
   insertTrades,
@@ -28,6 +29,8 @@ import {
   rateLimitRefund,
   rateLimitTake,
   recordSponsoredAtas,
+  replaceMarketIdReservation,
+  reserveMarketId,
   rowsOf,
   schema,
   setFeatured,
@@ -53,7 +56,7 @@ beforeAll(async () => {
 // Every test starts from empty tables, so each one is self-contained (run alone with -t, or reordered).
 beforeEach(async () => {
   await h.db.execute(
-    sql`truncate table evidence, game_snapshots, resolution_drafts, markets, games, trades, price_points, redeems_claims, wallets, sponsor_log, sponsored_atas, rate_limits, keeper_heartbeats, ops_events restart identity`,
+    sql`truncate table evidence, game_snapshots, resolution_drafts, markets, market_id_reservations, games, trades, price_points, redeems_claims, wallets, sponsor_log, sponsored_atas, rate_limits, keeper_heartbeats, ops_events restart identity`,
   )
 })
 afterAll(async () => {
@@ -104,6 +107,7 @@ const TABLES = [
   'game_snapshots',
   'games',
   'keeper_heartbeats',
+  'market_id_reservations',
   'markets',
   'ops_events',
   'price_points',
@@ -375,6 +379,39 @@ describe('ops tables', () => {
     await setWalletKind(h.db, 'T2', 'team')
     await setWalletKind(h.db, 'T2', 'bot')
     expect(await teamWallets(h.db)).toEqual(['T1'])
+  })
+})
+
+describe('market id reservations', () => {
+  it('stores the first id for a game and kind, and hands that one back on a later reserve', async () => {
+    await seedGames('nba-1')
+    expect(await getMarketIdReservation(h.db, 'nba-1', 0)).toBeNull()
+    expect(await reserveMarketId(h.db, { gameId: 'nba-1', kind: 0, marketId: '111' })).toBe('111')
+    // A restart that drew another id gets the stored one: one market per game and kind.
+    expect(await reserveMarketId(h.db, { gameId: 'nba-1', kind: 0, marketId: '222' })).toBe('111')
+    expect(await getMarketIdReservation(h.db, 'nba-1', 0)).toBe('111')
+    expect(await getMarketIdReservation(h.db, 'nba-1', 1)).toBeNull()
+  })
+
+  it('replaces only the id it was asked to replace', async () => {
+    await seedGames('nba-1')
+    await reserveMarketId(h.db, { gameId: 'nba-1', kind: 0, marketId: '111' })
+    expect(
+      await replaceMarketIdReservation(h.db, { gameId: 'nba-1', kind: 0, from: '111', to: '333' }),
+    ).toBe('333')
+    // A stale replace (another process replaced it first) keeps the current id.
+    expect(
+      await replaceMarketIdReservation(h.db, { gameId: 'nba-1', kind: 0, from: '111', to: '444' }),
+    ).toBe('333')
+    expect(await getMarketIdReservation(h.db, 'nba-1', 0)).toBe('333')
+  })
+
+  it('never stores one id for two games', async () => {
+    await seedGames('nba-1', 'nba-2')
+    await reserveMarketId(h.db, { gameId: 'nba-1', kind: 0, marketId: '111' })
+    await expect(
+      reserveMarketId(h.db, { gameId: 'nba-2', kind: 0, marketId: '111' }),
+    ).rejects.toThrow()
   })
 })
 
