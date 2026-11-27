@@ -16,6 +16,8 @@ export interface TradeFormInput {
   marketStatus: MarketStatus
   /** The game's status: a final game trades no more, halted or not yet (R1, R5c). */
   gameStatus?: GameStatus
+  /** The horn frame (lib/chrono/stop.ts): a halt on it is the close at the buzzer (R8). */
+  hornFrame?: boolean
   endTs: number
   nowSecs: number
 }
@@ -34,6 +36,9 @@ const AMOUNT = /^(0|[1-9]\d{0,11})(\.\d{1,6})?$/
 export function checkTrade(i: TradeFormInput): TradeCheck {
   // The final buzzer closes trading, also before the keeper's halt reaches the index (R5c).
   if (i.gameStatus === 'final') return { ok: false, quote: false, reason: BUZZER_CLOSED }
+  if (i.marketStatus === 'halted' && i.hornFrame) {
+    return { ok: false, quote: false, reason: BUZZER_CLOSED }
+  }
   if (i.marketStatus === 'halted') {
     return { ok: false, quote: false, reason: 'Trading is halted.' }
   }

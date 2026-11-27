@@ -13,9 +13,16 @@ export interface Feel {
   sound: boolean
   /** null follows the system setting (prefers-reduced-motion). */
   reducedMotion: boolean | null
+  /** "Dim the screen in clutch time" (A2, R8), on by default. */
+  clutchDim: boolean
 }
 
-export const DEFAULT_FEEL: Feel = { haptics: true, sound: false, reducedMotion: null }
+export const DEFAULT_FEEL: Feel = {
+  haptics: true,
+  sound: false,
+  reducedMotion: null,
+  clutchDim: true,
+}
 
 type Store = Pick<Storage, 'getItem' | 'setItem'>
 
@@ -29,6 +36,7 @@ export function loadFeel(store: Store | null): Feel {
       haptics: typeof o.haptics === 'boolean' ? o.haptics : DEFAULT_FEEL.haptics,
       sound: typeof o.sound === 'boolean' ? o.sound : DEFAULT_FEEL.sound,
       reducedMotion: typeof o.reducedMotion === 'boolean' ? o.reducedMotion : null,
+      clutchDim: typeof o.clutchDim === 'boolean' ? o.clutchDim : DEFAULT_FEEL.clutchDim,
     }
   } catch {
     return DEFAULT_FEEL
@@ -47,7 +55,7 @@ export const motionReduced = (feel: Feel, systemReduced: boolean): boolean =>
   feel.reducedMotion ?? systemReduced
 
 export interface Vibrator {
-  vibrate?: (pattern: number) => boolean
+  vibrate?: (pattern: number | number[]) => boolean
 }
 
 /** Whether the device can vibrate: the wallet sheet's haptics switch needs it (haptics.ts buzzes). */
