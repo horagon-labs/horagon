@@ -1,7 +1,8 @@
 'use client'
 // The game-day chip on the header (spec 3.2): open positions and what they are worth now,
 // "◆ 3 · 142.50", the ◆ in live like every mark of yours (light branding review §3.2). The wallet
-// button shows it only once a wallet exists.
+// button shows it only once a wallet exists, and it hides at 0 open positions (first-screen C25):
+// "◆ 0 · 0.00" read as a broken chip.
 import type { PositionsResponse } from '@horagon/sdk'
 import { yourHour } from '../../lib/chrono/board'
 
@@ -11,7 +12,7 @@ export function YourHour(p: {
   className?: string
 }) {
   const hour = yourHour(p.portfolio)
-  if (!hour) return null
+  if (!hour || hour.count === 0) return null
   const noun = hour.count === 1 ? 'position' : 'positions'
   return (
     <button
