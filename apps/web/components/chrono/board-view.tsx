@@ -103,7 +103,11 @@ export function BoardView(p: BoardViewProps) {
               ●
             </span>{' '}
             {model.openNow} {model.openNow === 1 ? 'market' : 'markets'} open now ·{' '}
-            <a href="#first-open" className="underline underline-offset-4">
+            {/* min-h-11: a 44 px tap target inside the 13 px line. */}
+            <a
+              href="#first-open"
+              className="inline-flex min-h-11 items-center underline underline-offset-4"
+            >
               Pick a game
             </a>
           </p>

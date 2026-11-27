@@ -320,6 +320,7 @@ describe('the board with markets open (spec §3 S3/S4, C17)', () => {
     expect(html).toMatch(
       /<p [^>]*data-count[^>]*><span aria-hidden="true" class="text-live">●<\/span> 1 market open now · <a href="#first-open"[^>]*>Pick a game<\/a><\/p>/,
     )
+    expect(html).toMatch(/<a href="#first-open" class="[^"]*min-h-11[^"]*">Pick a game<\/a>/)
     expect(html).toMatch(/<a [^>]*id="first-open"[^>]*href="\/game\/nba-401909326"/)
     expect(html.match(/id="first-open"/g)).toHaveLength(1)
     // The open row is the only Live blue number; the pre-open rows stay ink-muted.
