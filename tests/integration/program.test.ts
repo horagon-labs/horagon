@@ -734,7 +734,13 @@ describe.skipIf(!RPC)('horagon program on Surfpool', () => {
     await mintTo(conn, admin, mint, outsiderUsdc, admin, 100n * USDC)
 
     const { id, gm } = await openMarket('o')
-    await send([depositLiquidityIx(outsider.publicKey, gm.market, 100n * USDC)], outsider)
+    // pm-AMM's deposit solves its invariant on chain: it needs the heavy budget, as halt does.
+    await send(
+      [depositLiquidityIx(outsider.publicKey, gm.market, 100n * USDC)],
+      outsider,
+      [],
+      HEAVY_IX_COMPUTE_UNITS,
+    )
     const outsiderLp = deriveLpPosition(gm.market, outsider.publicKey)
     const shares = await lpShares(outsiderLp)
     expect(shares).toBeGreaterThan(0n)
