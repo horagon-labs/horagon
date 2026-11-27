@@ -43,6 +43,7 @@ export function GamePositions(p: {
       claimError={claimError}
       onClaim={startClaims}
       hornPrice={p.hornPrice ?? null}
+      final={p.game.status === 'final'}
     />
   )
 }

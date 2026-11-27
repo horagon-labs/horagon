@@ -353,6 +353,7 @@ const card = (over: Partial<PositionCardProps> = {}) =>
       claimed={[]}
       claimError={undefined}
       onClaim={noop}
+      final
       {...over}
     />,
   )

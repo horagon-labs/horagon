@@ -149,6 +149,7 @@ describe('PositionCard (spec 3.2)', () => {
         claimed={[]}
         claimError={undefined}
         onClaim={noop}
+        final
         {...over}
       />,
     )
@@ -174,6 +175,22 @@ describe('PositionCard (spec 3.2)', () => {
     expect(html).toContain('MEM won. Your call on CLE at 71% stays marked.')
     expect(html).toContain('MEM won. Your call at 71% stays marked.')
     expect(html).not.toContain('pays')
+  })
+
+  it('names no winner for a result that is not a final (a game postponed for good)', () => {
+    // A game postponed past 7 days resolves NO: the home side did not win, nor did the away side.
+    const result = { marketStatus: 'finalized', outcome: 'no' } as const
+    const html = card({
+      canSell: false,
+      final: false,
+      portfolio: portfolio([
+        position({ ...result, valueUsdc: '0' }),
+        position({ ...result, side: 'away', market: 'Mkt2', claimable: true }),
+      ]),
+    })
+    expect(html).toContain('CLE did not win. Your call on CLE at 71% stays marked.')
+    expect(html).toContain('CLE did not win. Your call on MEM at 71% stays marked.')
+    expect(html).not.toContain(' won.')
   })
 
   it('says where the price stood at the horn once trading stopped (culture review string 15)', () => {

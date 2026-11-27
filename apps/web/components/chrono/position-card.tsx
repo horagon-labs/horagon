@@ -1,8 +1,11 @@
 'use client'
 // Your position in this game (spec 3.2): paid, worth now and what it pays if that team wins,
 // with Sell. Once trading stopped it says where the price stood at the horn, and once there is a
-// result who won, the same way for a win and a loss (culture review strings 15, 18; rule 6). Claim all is a HoldButton running the wallet's own startClaims, so a claim is
-// still the whole wallet's (one run at a time, every copy shows it).
+// result who won, the same way for a win and a loss (culture review strings 15, 18; rule 6). A
+// result for a game that never finished (postponed for good, which resolves NO) names no winner,
+// only that the home side did not win, as the ResolutionCard's line does. Claim all is a
+// HoldButton running the wallet's own startClaims, so a claim is still the whole wallet's (one run
+// at a time, every copy shows it).
 import type { PositionsResponse, Side } from '@horagon/sdk'
 import { parseAmount } from '@horagon/sdk/amount'
 import { signedUsdc } from '../../lib/chrono/controls'
@@ -26,6 +29,8 @@ export interface PositionCardProps {
   onClaim: () => void
   /** The home side's price when trading stopped (the horn), or null while it still trades. */
   hornPrice?: number | null
+  /** The game ended on the court (status final): only then does a result name a winner. */
+  final: boolean
 }
 
 type Row = PositionsResponse['positions'][number]
@@ -37,11 +42,20 @@ function entryOf(x: Row): string | null {
 }
 
 /** The third line: what it pays, where the horn left it, or who won. */
-function standing(x: Row, teams: { home: string; away: string }, horn: number | null): string {
+function standing(
+  x: Row,
+  teams: { home: string; away: string },
+  horn: number | null,
+  final: boolean,
+): string {
   const team = teams[x.side]
   const entry = entryOf(x)
   if (x.outcome !== null) {
     const homeWon = x.outcome === 'yes'
+    if (!final) {
+      const said = `${teams.home} ${homeWon ? 'won' : 'did not win'}.`
+      return entry === null ? said : `${said} Your call on ${team} at ${entry} stays marked.`
+    }
     const winner = homeWon ? teams.home : teams.away
     const won = (x.side === 'home') === homeWon
     if (entry === null) return `${winner} won.`
@@ -86,7 +100,7 @@ export function PositionCard(p: PositionCardProps) {
                     <span className="text-ivory-100">({signedUsdc(x.pnlUsdc)})</span>
                   </p>
                   <p className="font-sans text-ink-muted">
-                    {standing(x, p.teams, p.hornPrice ?? null)}
+                    {standing(x, p.teams, p.hornPrice ?? null, p.final)}
                   </p>
                 </div>
                 {p.canSell && (

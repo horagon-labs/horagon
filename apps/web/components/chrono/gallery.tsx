@@ -112,6 +112,7 @@ function GameSample({ stale }: { stale: boolean }) {
           claimed={[]}
           claimError={undefined}
           onClaim={noop}
+          final={game().status === 'final'}
         />
       }
     />
