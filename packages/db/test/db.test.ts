@@ -20,6 +20,7 @@ import {
   listIndexableMarkets,
   listMarketTrades,
   listOps,
+  listOpsSince,
   logOps,
   markAtaClosed,
   markAtasChecked,
@@ -374,6 +375,20 @@ describe('ops tables', () => {
     const events = await listOps(h.db, 2)
     expect(events.map((e) => e.action)).toEqual(['propose', 'create'])
     expect(events[1]?.detail).toEqual({})
+  })
+
+  it('lists the ops events of some actions since a time, oldest first', async () => {
+    await logOps(h.db, { actor: 'api', action: 'sponsor-cap-50' })
+    await logOps(h.db, { actor: 'keeper', action: 'create' })
+    await logOps(h.db, { actor: 'api', action: 'sponsor-cap-80' })
+    await h.db.execute(sql`update ops_events set ts = now() - interval '2 days' where id = 1`)
+    await logOps(h.db, { actor: 'api', action: 'sponsor-cap-50' })
+    const since = new Date(Date.now() - 3_600_000)
+    const events = await listOpsSince(h.db, since, ['sponsor-cap-50', 'sponsor-cap-80'])
+    expect(events.map((e) => [e.id, e.action])).toEqual([
+      [3, 'sponsor-cap-80'],
+      [4, 'sponsor-cap-50'],
+    ])
   })
 
   it('registers team wallets, and a later kind replaces the earlier one', async () => {

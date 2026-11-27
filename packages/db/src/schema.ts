@@ -301,7 +301,7 @@ export const opsEvents = pgTable(
   {
     id: serial('id').primaryKey(),
     ts: ts('ts').notNull().defaultNow(),
-    /** keeper | indexer | guardian | admin | ops */
+    /** keeper | indexer | guardian | admin | ops | api */
     actor: text('actor').notNull(),
     action: text('action').notNull(),
     gameId: text('game_id'),

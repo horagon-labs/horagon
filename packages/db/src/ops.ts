@@ -287,6 +287,16 @@ export async function listOps(db: Db, limit = 100) {
   return db.select().from(opsEvents).orderBy(desc(opsEvents.ts), desc(opsEvents.id)).limit(limit)
 }
 
+/** The events of `actions` logged at or after `since`, oldest first (`ops_events_ts_idx`). */
+export async function listOpsSince(db: Db, since: Date, actions: readonly string[]) {
+  if (actions.length === 0) return []
+  return db
+    .select()
+    .from(opsEvents)
+    .where(and(gte(opsEvents.ts, since), inArray(opsEvents.action, [...actions])))
+    .orderBy(asc(opsEvents.ts), asc(opsEvents.id))
+}
+
 /** Team wallets never count in metrics (spec 6.4); `ops` registers them. */
 export async function setWalletKind(db: Db, pubkey: string, kind: 'human' | 'bot' | 'team') {
   await db
