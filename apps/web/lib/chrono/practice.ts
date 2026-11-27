@@ -1,6 +1,7 @@
 // Practice (R8): a recorded game replayed at 6x as league PRACTICE, never counted. Its words and
-// the pure reads behind the plate, the strip on `/` and the /practice page. A Practice game is
-// told apart by its league only, and every place that shows one says so.
+// the pure reads behind the plate, the strip on `/`, the Practice card that leads the idle face
+// while a run is on (first-screen S6, W8/W8b) and the /practice page. A Practice game is told apart
+// by its league only, and every place that shows one says so.
 import type { Game, PracticeResponse } from '@horagon/sdk'
 import { etClock, inMinutes } from './time'
 
@@ -58,6 +59,25 @@ export interface PracticeStripLine {
   href: string
 }
 
+/** The Practice card's button (first-screen C24): to the run's game page. */
+export const PLAY_ALONG = 'Play along'
+
+/** "Practice game live · MEM @ CLE · Replay": the strip's line, and line 1 of the card (R8). */
+export const practiceLiveLine = (g: Pick<Game, 'home' | 'away'>): string =>
+  `Practice game live · ${matchup(g)} · Replay`
+
+/**
+ * The run on the court (first-screen S6): live, or scheduled and past its tip-off, as the strip
+ * reads it. Null between runs, after the Final, and with the flag off (`null`).
+ */
+export function practiceLive(p: PracticeResponse | null, now: number): Game | null {
+  const c = p?.current
+  if (!c) return null
+  if (c.status === 'live') return c
+  const tip = Math.floor(Date.parse(c.scheduledTipoff) / 1000)
+  return c.status === 'scheduled' && tip <= now ? c : null
+}
+
 /**
  * The strip on `/`: the run on the court, else the next tip-off (a run not yet tipped off, then
  * the Practice process's next slot), else nothing. Null too with the flag off (`null`).
@@ -65,13 +85,11 @@ export interface PracticeStripLine {
 export function practiceStrip(p: PracticeResponse | null, now: number): PracticeStripLine | null {
   if (!p) return null
   const c = p.current
-  if (c?.status === 'live') {
-    return { text: `Practice game live · ${matchup(c)} · Replay`, href: `/game/${c.id}` }
-  }
+  if (c?.status === 'live') return { text: practiceLiveLine(c), href: `/game/${c.id}` }
   if (c?.status === 'scheduled') {
     const tip = Math.floor(Date.parse(c.scheduledTipoff) / 1000)
     if (tip > now) return { text: nextLine(tip, now), href: `/game/${c.id}` }
-    return { text: `Practice game live · ${matchup(c)} · Replay`, href: `/game/${c.id}` }
+    return { text: practiceLiveLine(c), href: `/game/${c.id}` }
   }
   if (p.nextAt !== null && p.nextAt > now)
     return { text: nextLine(p.nextAt, now), href: '/practice' }

@@ -9,9 +9,11 @@
 // "First market opens in 14 h 44 min", then how a market opens; the calendar button sits under
 // the list (C23). While no market is open, an idle face (the story card, W5) takes the dial's
 // slot: first below lg, the list after it and the idle foot after the list; from lg the face and
-// its foot share the left column and the list runs down the right one. When the first market
-// opens under the poll, the Night dial, the count line and the open foot (the compact story)
-// take over with no reload (G4), and TonightBoard hands no idle face again until a reload.
+// its foot share the left column and the list runs down the right one. While a Practice run is on,
+// an idle lead (the Practice card, first-screen S6) comes first of all below lg and tops the
+// list's column from lg. When the first market opens under the poll, the Night dial, the count
+// line and the open foot (the compact story) take over with no reload (G4), and TonightBoard hands
+// no idle face (or lead) again until a reload.
 import type { Game, PositionsResponse } from '@horagon/sdk'
 import type { ReactNode } from 'react'
 import {
@@ -45,6 +47,11 @@ export interface BoardViewProps {
   onSelect: (id: string) => void
   hoverId: string | null
   onHover: (id: string | null) => void
+  /**
+   * The idle lead (first-screen S6, the Practice card): before the idle face below lg, above the
+   * list in the right column from lg. Shown only with the face, while no market is open.
+   */
+  idleLead?: ReactNode
   /** The idle face (first-screen W5): shown in the dial's slot while no market is open. */
   idleFace?: ReactNode
   /** What follows the idle face: under the list below lg, under the face from lg. */
@@ -68,6 +75,10 @@ export function BoardView(p: BoardViewProps) {
   const chips = p.games === undefined ? [] : followChips(model.teams, p.follows)
   // The idle face takes the dial's slot until a market opens; the poll swaps it, no reload.
   const idle = p.idleFace != null && model.openNow === 0
+  // From lg the lead takes the right column's first row, the face spans two rows on the left, the
+  // list starts under the lead and the foot under the face. Below sm the parts stand 12 px apart,
+  // not 16, so the first board row stays above the 375 fold under the lead (§9).
+  const lead = idle && p.idleLead != null
   // On the idle face's rest card (S1): "The dial rests until Sat, Dec 5." then the count, muted.
   const cut = model.rest?.indexOf('. ') ?? -1
   const restLines =
@@ -112,19 +123,37 @@ export function BoardView(p: BoardViewProps) {
   const board = (
     <div
       className={
-        idle
-          ? 'flex flex-col gap-4 sm:gap-6 lg:grid lg:grid-cols-[34rem_minmax(0,1fr)] lg:grid-rows-[auto_1fr] lg:items-start lg:gap-x-8 lg:gap-y-6'
-          : 'flex flex-col gap-4 lg:grid lg:grid-cols-[minmax(0,26rem)_minmax(0,1fr)] lg:items-start lg:gap-8'
+        lead
+          ? 'flex flex-col gap-3 sm:gap-6 lg:grid lg:grid-cols-[34rem_minmax(0,1fr)] lg:grid-rows-[auto_auto_1fr] lg:items-start lg:gap-x-8 lg:gap-y-6'
+          : idle
+            ? 'flex flex-col gap-4 sm:gap-6 lg:grid lg:grid-cols-[34rem_minmax(0,1fr)] lg:grid-rows-[auto_1fr] lg:items-start lg:gap-x-8 lg:gap-y-6'
+            : 'flex flex-col gap-4 lg:grid lg:grid-cols-[minmax(0,26rem)_minmax(0,1fr)] lg:items-start lg:gap-8'
       }
     >
+      {lead && (
+        <div className="min-w-0 lg:col-start-2 lg:row-start-1" data-idle-lead>
+          {p.idleLead}
+        </div>
+      )}
       {idle && (
-        <div className="min-w-0 lg:col-start-1 lg:row-start-1" data-idle-face>
+        <div
+          className={
+            lead
+              ? 'min-w-0 lg:col-start-1 lg:row-span-2 lg:row-start-1'
+              : 'min-w-0 lg:col-start-1 lg:row-start-1'
+          }
+          data-idle-face
+        >
           {p.idleFace}
         </div>
       )}
       <div
         className={
-          idle ? 'min-w-0 space-y-3 lg:col-start-2 lg:row-span-2 lg:row-start-1' : 'space-y-3'
+          lead
+            ? 'min-w-0 space-y-3 lg:col-start-2 lg:row-span-2 lg:row-start-2'
+            : idle
+              ? 'min-w-0 space-y-3 lg:col-start-2 lg:row-span-2 lg:row-start-1'
+              : 'space-y-3'
         }
         data-board-list
       >
@@ -237,7 +266,14 @@ export function BoardView(p: BoardViewProps) {
       </div>
       {idle ? (
         p.idleFoot != null && (
-          <div className="min-w-0 lg:col-start-1 lg:row-start-2" data-idle-foot>
+          <div
+            className={
+              lead
+                ? 'min-w-0 lg:col-start-1 lg:row-start-3'
+                : 'min-w-0 lg:col-start-1 lg:row-start-2'
+            }
+            data-idle-foot
+          >
             {p.idleFoot}
           </div>
         )

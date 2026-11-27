@@ -28,7 +28,8 @@ const storage = () => {
 }
 
 /**
- * `idleFace` and `idleFoot`: the server-rendered story card and what follows it (first-screen W5),
+ * `idleLead`: the Practice card while a run is on (first-screen S6), shown and dropped with the
+ * face. `idleFace` and `idleFoot`: the server-rendered story card and what follows it (W5),
  * built for the server's `state`, shown in the dial's slot until they stop fitting what the poll
  * sees (lib/chrono/board.ts faceGone), and not again on this page. `openFoot`: the compact story
  * and the Practice line, shown under the board once no idle face shows, so the poll swaps them in
@@ -37,6 +38,7 @@ const storage = () => {
 export function TonightBoard({
   initial,
   state,
+  idleLead,
   idleFace,
   idleFoot,
   openFoot,
@@ -44,6 +46,7 @@ export function TonightBoard({
   initial: InitialBoard
   /** The first-screen state the server picked (lib/server/first-screen.ts) and built the faces for. */
   state?: ScreenState
+  idleLead?: ReactNode
   idleFace?: ReactNode
   idleFoot?: ReactNode
   openFoot?: ReactNode
@@ -83,6 +86,7 @@ export function TonightBoard({
       onSelect={setSelectedId}
       hoverId={hoverId}
       onHover={setHoverId}
+      idleLead={gone ? undefined : idleLead}
       idleFace={gone ? undefined : idleFace}
       idleFoot={gone ? undefined : idleFoot}
       openFoot={openFoot}

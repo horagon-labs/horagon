@@ -2,11 +2,12 @@
 // the newest final night takes the board's dial slot: the eyebrow, the plate and what happened,
 // the model's line on a tape with its low ringed, a readout resting on the low (from sm), and the
 // result's proof on /verify. `compact` keeps the eyebrow, line 1 and the proof (S3/S4, under the
-// Night dial). The line draws once on first paint, then the low's ring and the readout fade in
-// (globals.css `.story-draw`, `.story-at-low`; the end frame under reduced motion). A server
-// component with plain links only (next/link from a server component added a client chunk to /,
-// slice 2), no style attribute and no script (R9 CSP) and no Live blue: nothing here is an open
-// market.
+// Night dial). `lg-full` is compact below lg and full from lg (S6: under the Practice card at 375,
+// beside it from lg), with the wide tape alone. The line draws once on first paint, then the low's
+// ring and the readout fade in (globals.css `.story-draw`, `.story-at-low`; the end frame under
+// reduced motion). A server component with plain links only (next/link from a server component
+// added a client chunk to /, slice 2), no style attribute and no script (R9 CSP) and no Live blue:
+// nothing here is an open market.
 import type { Night, NightGame } from '@horagon/sdk'
 import type { PracticeStripLine } from '../lib/chrono/practice'
 import { type LastNightRow, lastNightHeader, nightDayLabel } from '../lib/server/last-night'
@@ -198,7 +199,8 @@ export interface StoryCardProps {
   story: { night: Night; game: NightGame }
   /** Unix seconds: the eyebrow's day words and a proposed result's countdown. */
   now: number
-  variant?: 'full' | 'compact'
+  /** `lg-full`: compact below lg, full from lg (S6, while the Practice card leads). */
+  variant?: 'full' | 'compact' | 'lg-full'
   /** Compact only (S3/S4): the night's other games under the proof (A4). */
   rows?: readonly LastNightRow[]
 }
@@ -206,10 +208,14 @@ export interface StoryCardProps {
 export function StoryCard({ story, now, variant = 'full', rows }: StoryCardProps) {
   const { night, game } = story
   const s = storyLines(game, now)
-  const full = variant === 'full'
+  const full = variant !== 'compact'
+  // From lg only: the tape, the readout, line 2 and the tally hide below lg, and the narrow tape
+  // (below sm) is never shown, so it is not drawn.
+  const lgOnly = variant === 'lg-full'
   const nbox = game.moved ? NARROW_MOVED : NARROW
-  const narrow = full ? tapeModel(game, nbox) : null
+  const narrow = full && !lgOnly ? tapeModel(game, nbox) : null
   const wide = full ? tapeModel(game, WIDE) : null
+  const tape = narrow ?? wide
   const low = game.low
   // Where the model climbs off the open, "opened 28%" sits under its dot.
   const early = game.model.slice(0, Math.max(2, Math.ceil(game.model.length * 0.15)))
@@ -239,7 +245,10 @@ export function StoryCard({ story, now, variant = 'full', rows }: StoryCardProps
       </p>
       {full && s.readout && low && (
         // Fades in with the low's ring, once the line is drawn (G1, spec §4).
-        <div className="hidden items-center gap-4 pt-1 sm:flex story-at-low" data-readout>
+        <div
+          className={`hidden items-center gap-4 pt-1 ${lgOnly ? 'lg:flex' : 'sm:flex'} story-at-low`}
+          data-readout
+        >
           {/* MiniDial is 48 px; its 96 px use here sizes the svg from the box. A model low gets
               the model's ink ▲; a price low the price's needle, ash once trading stopped, so
               each glyph keeps its one meaning and matches the legend (C11). */}
@@ -257,32 +266,36 @@ export function StoryCard({ story, now, variant = 'full', rows }: StoryCardProps
           </div>
         </div>
       )}
-      {narrow && wide && (
-        <figure className="space-y-1" data-story-tape>
+      {tape && wide && (
+        <figure className={lgOnly ? 'hidden space-y-1 lg:block' : 'space-y-1'} data-story-tape>
           {/* In the sans, 8 px apart: caption and legend share one row at 375 where both fit
               ("MIN @ OKC · MIN to win · price and model" 232 px + 98 px), else the legend wraps. */}
           <figcaption className="flex flex-wrap justify-between gap-x-2 text-12 text-ink-muted">
-            <span>{narrow.caption}</span>
-            <span>{narrow.legend.join('  ')}</span>
+            <span>{tape.caption}</span>
+            <span>{tape.legend.join('  ')}</span>
           </figcaption>
-          <TapeSvg
-            tape={narrow}
-            box={nbox}
-            openedBelow={openedBelow}
-            className="sm:hidden"
-            id="story-tape-narrow"
-          />
+          {narrow && (
+            <TapeSvg
+              tape={narrow}
+              box={nbox}
+              openedBelow={openedBelow}
+              className="sm:hidden"
+              id="story-tape-narrow"
+            />
+          )}
           <TapeSvg
             tape={wide}
             box={WIDE}
             openedBelow={openedBelow}
-            className="hidden sm:block"
+            className={lgOnly ? 'block' : 'hidden sm:block'}
             id="story-tape-wide"
           />
         </figure>
       )}
       {full && s.line2 && (
-        <p className={s.tally ? 'mb-0 text-13 text-ink-muted' : 'text-13 text-ink-muted'}>
+        <p
+          className={`${lgOnly ? 'hidden ' : ''}${s.tally ? 'mb-0 ' : ''}text-13 text-ink-muted${lgOnly ? ' lg:block' : ''}`}
+        >
           {s.line2}
         </p>
       )}
@@ -290,7 +303,10 @@ export function StoryCard({ story, now, variant = 'full', rows }: StoryCardProps
         // One row in the sans (263 px for "14 calls · 2 by fans · 12 by the reference agent"),
         // flush between line 2 and the proof: its 44 px link is the row's height and its gap.
         // The link is one atomic box, so "reference agent" never splits across a wrap (§9).
-        <p className="mb-0 text-12 text-ink-muted tabular-nums" data-tally>
+        <p
+          className={`${lgOnly ? 'hidden ' : ''}mb-0 text-12 text-ink-muted tabular-nums${lgOnly ? ' lg:block' : ''}`}
+          data-tally
+        >
           {`${s.tally.parts[0]} · ${s.tally.parts[1]} · ${s.tally.parts[2].slice(0, agentAt)}`}
           <a
             href="/agent"

@@ -4,20 +4,23 @@
 // browser.
 // While no market is open (S1 rest, S2 later, S5 after), the story card is the board's idle face,
 // in the dial's slot, and its foot holds the night's other games (A4), the Practice line (R8) and
-// the sign-off. Once a market is open (S3, S4) the Night dial keeps the slot, and the compact story
-// and the Practice line follow the board; the board gets both, so a market opening under its poll
-// swaps them with no reload. Last, one static line discloses the reference agent.
+// the sign-off. While a Practice run is on (S6, over S1/S2/S5) the Practice card leads the idle
+// face and the story is compact below lg; between runs the foot keeps R8's one line. Once a market
+// is open (S3, S4) the Night dial keeps the slot, and the compact story and the Practice line
+// follow the board; the board gets both, so a market opening under its poll swaps them with no
+// reload. Last, one static line discloses the reference agent.
 import type { Metadata } from 'next'
 import { connection } from 'next/server'
 import { AgentNote } from '../components/chrono/agent-line'
 import { Hero, HowItWorks } from '../components/chrono/hero'
+import { PracticeCard } from '../components/chrono/practice-card'
 import { PracticeStrip } from '../components/chrono/practice-strip'
 import { LastNightStrip } from '../components/last-night'
 import { ProofRail } from '../components/proof-rail'
 import { IdleFoot, StoryCard } from '../components/story-card'
 import { TonightBoard } from '../components/tonight-board'
 import { heroMoved } from '../lib/chrono/board'
-import { practiceStrip } from '../lib/chrono/practice'
+import { practiceLive, practiceStrip } from '../lib/chrono/practice'
 import { HOME_TITLE, SITE_DESCRIPTION } from '../lib/meta'
 import {
   initialBoard,
@@ -69,12 +72,20 @@ export default async function TonightPage() {
   const rows = story ? rowsOfNight(story.night, story.game.id) : []
   const strip = practiceStrip(practice, initial.now)
   const idle = idleState(state) && night !== null
+  // S6: a run on the court leads the idle face; the story is compact below lg, full from lg, and
+  // the foot drops the strip's own "Practice game live" line. Null with FLAG_PRACTICE off.
+  const run = idle ? practiceLive(practice, initial.now) : null
+  const lead =
+    run && practice ? <PracticeCard run={run} counterparty={practice.counterparty} /> : undefined
   const face = !idle ? undefined : story ? (
-    <StoryCard story={story} now={initial.now} />
+    <StoryCard story={story} now={initial.now} variant={run ? 'lg-full' : 'full'} />
   ) : night ? (
     <LastNightStrip night={night} now={initial.now} className="" />
   ) : undefined
-  const foot = idle && night ? <IdleFoot rows={rows} date={night.date} strip={strip} /> : undefined
+  const foot =
+    idle && night ? (
+      <IdleFoot rows={rows} date={night.date} strip={run ? null : strip} />
+    ) : undefined
   return (
     <>
       <Hero moved={heroMoved(initial.games, initial.now, story?.game.moved ?? false)} />
@@ -88,6 +99,7 @@ export default async function TonightPage() {
       <TonightBoard
         initial={initial}
         state={state}
+        idleLead={lead}
         idleFace={face}
         idleFoot={foot}
         openFoot={
