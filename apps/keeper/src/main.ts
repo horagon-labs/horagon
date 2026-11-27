@@ -228,6 +228,7 @@ async function main(): Promise<void> {
               now,
               faucet: (wallet) => faucetClaim(cfg.faucetUrl, wallet),
               priorityMicroLamports: cfg.priority.normal,
+              ...(cfg.sponsor ? { sponsor: cfg.sponsor } : {}),
             }),
           )),
         archive: async () => {

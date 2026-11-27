@@ -16,6 +16,7 @@ import {
   isMissingAccount,
   KEEPER_MIN_LAMPORTS,
   LAMPORTS_PER_MARKET,
+  SPONSOR_MIN_LAMPORTS,
   type TreasuryDeps,
   treasuryTick,
   upcomingSeeds,
@@ -323,6 +324,33 @@ describe('treasury', () => {
     f.sol.delete(attestor.publicKey.toBase58())
     await treasuryTick(f.deps(h.db))
     expect(f.alerts.map(([k]) => k)).toEqual(['sol-authority'])
+  })
+
+  it('alerts a low sponsor (public key only), and reads nothing for it without one', async () => {
+    const sponsor = Keypair.generate().publicKey
+    f.sol.set(sponsor.toBase58(), Number(SPONSOR_MIN_LAMPORTS) - 1)
+    await treasuryTick(f.deps(h.db))
+    expect(f.alerts).toEqual([])
+
+    await treasuryTick({ ...f.deps(h.db), sponsor })
+    expect(f.alerts.map(([k]) => k)).toEqual(['sol-sponsor'])
+    expect(f.alerts[0]?.[1]).toContain(sponsor.toBase58())
+
+    f.alerts.length = 0
+    f.sol.set(sponsor.toBase58(), Number(SPONSOR_MIN_LAMPORTS))
+    await treasuryTick({ ...f.deps(h.db), sponsor })
+    expect(f.alerts).toEqual([])
+
+    // An unreadable sponsor balance skips only its own alert.
+    f.sol.delete(sponsor.toBase58())
+    f.sol.set(attestor.publicKey.toBase58(), Number(KEEPER_MIN_LAMPORTS) - 1)
+    await treasuryTick({ ...f.deps(h.db), sponsor })
+    expect(f.alerts.map(([k]) => k)).toEqual(['sol-keeper'])
+    expect(f.logs).toContainEqual([
+      'warn',
+      'SOL balance check skipped: sponsor',
+      { error: 'rpc down' },
+    ])
   })
 
   it('assumes at least four markets a night, alerts a low keeper wallet and survives faucet and SOL read errors', async () => {
