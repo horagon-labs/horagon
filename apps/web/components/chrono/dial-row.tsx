@@ -36,7 +36,7 @@ export function DialRow(p: {
         <span className="block truncate text-15 text-ivory-100">
           {g.away} @ {g.home}
         </span>
-        <span className="block font-mono text-13 text-ash-400 tabular-nums">
+        <span className="block truncate font-mono text-13 text-ash-400 tabular-nums">
           {g.status === 'scheduled'
             ? `tip-off ${etClock(item.interval.tip)}`
             : `${g.awayScore}–${g.homeScore} · ${gameClock(g)}`}
