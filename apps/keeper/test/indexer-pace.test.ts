@@ -3,7 +3,9 @@
 // its sweep is due, and signature reads are spaced. Chain calls are fakes on a fake clock.
 import {
   type DbHandle,
+  insertTrades,
   listIndexableMarkets,
+  updateMarket,
   upsertMarket,
   upsertScheduledGames,
 } from '@horagon/db'
@@ -53,7 +55,10 @@ describe('indexOnce with an IndexPace', () => {
   /** getTransactions batches: their size and the clock. */
   let txBatches: Array<{ n: number; t: number }>
   /** Each getSignaturesForAddress answer; a function may throw. */
-  let sigAnswer: (market: string, o: { until?: string }) => Array<{ signature: string; err: null }>
+  let sigAnswer: (
+    market: string,
+    o: { until?: string },
+  ) => Array<{ signature: string; err: null; slot?: number }>
   let accountAnswer: () => void
   /** Each getTransactions answer; undefined answers null for every signature. */
   let txAnswer: (sigs: string[]) => unknown[] | undefined
@@ -547,5 +552,129 @@ describe('indexOnce with an IndexPace', () => {
     expect(sigCalls.map((c) => c.market)).toContain(other)
     expect(sent.map((x) => x.key)).not.toContain('index-rate-limited')
     expect(sent.some((x) => x.key.startsWith('index-stuck'))).toBe(false)
+  })
+
+  it('never moves a cursor back when a read fails over to an RPC that is behind it', async () => {
+    const m = await addMarket('open', 0)
+    /** Each endpoint's view of the market's signatures, oldest first, with their slots. */
+    const ahead = [
+      { signature: 'v', slot: 10 },
+      { signature: 'w', slot: 11 },
+      { signature: 'x', slot: 12 },
+    ]
+    let behind = ahead.slice(0, 2)
+    /** getSignaturesForAddress over `list`: an `until` it does not hold reads to the start. */
+    const listing = (list: typeof ahead, o: { until?: string }) => {
+      const k = o.until ? list.findIndex((s) => s.signature === o.until) : -1
+      return list
+        .slice(k + 1)
+        .reverse()
+        .map((s) => ({ ...s, err: null }))
+    }
+    txAnswer = (sigs) => sigs.map(readable)
+    let aDown = false
+    const endpoint = (name: string, host: string, view: () => typeof ahead) => {
+      const base = chain() as unknown as Record<string, (...args: unknown[]) => unknown>
+      const connection = {
+        getMultipleAccountsInfo: base.getMultipleAccountsInfo,
+        getTransactions: base.getTransactions,
+        getSignaturesForAddress: async (a: PublicKey, o: { until?: string }) => {
+          if (host === 'a.example' && aDown) throw new Error('503 Service Unavailable: ')
+          sigCalls.push({ market: a.toBase58(), at: t })
+          return listing(view(), o ?? {})
+        },
+      } as unknown as NonNullable<IndexerDeps['connection']>
+      const p = new IndexPace({
+        log: log(),
+        clock: () => t,
+        random: () => 0,
+        sleep: async (ms) => {
+          t += ms
+        },
+      })
+      return { name, host, connection: () => connection, pace: p }
+    }
+    reads = new IndexReads({
+      endpoints: [
+        endpoint('HORAGON_INDEX_RPC_URL', 'a.example', () => ahead),
+        endpoint('HORAGON_RPC_URL', 'b.example', () => behind),
+      ],
+      log: log(),
+      alerts: alerts(),
+      clock: () => t,
+    })
+    const stops = new Map()
+    const run = () => indexOnce({ ...deps(), stops })
+
+    await run()
+    expect(await cursorOf(m)).toBe('x')
+
+    // a fails; b has not reached x yet and answers `until: x` with w and v.
+    aDown = true
+    data.set(m, Uint8Array.of(1, 99))
+    t += 5_000
+    const batches = txBatches.length
+    await run()
+    expect(await cursorOf(m)).toBe('x')
+    expect(txBatches.length).toBe(batches)
+    expect(warns.some((w) => w.msg.includes('behind'))).toBe(true)
+
+    // b catches up (and has a new signature): the market goes on from x, not from the start.
+    behind = [...ahead, { signature: 'y', slot: 13 }]
+    t += 5_000
+    await run()
+    expect(await cursorOf(m)).toBe('y')
+    expect(txBatches.length).toBe(batches + 1)
+    expect(txBatches.at(-1)?.n).toBe(1)
+    expect(stops.has(m)).toBe(false)
+    expect(sent.some((x) => x.key.startsWith('index-stuck'))).toBe(false)
+  })
+
+  it('after a restart, keeps a cursor from moving back with the slot of the market newest trade', async () => {
+    const m = await addMarket('open', 0)
+    // The last run indexed up to x (slot 12), a trade; this run has seen no listing yet.
+    await updateMarket(h.db, m, { indexCursor: 'x' })
+    await insertTrades(h.db, [
+      {
+        sig: 'x',
+        ixIndex: 0,
+        market: m,
+        wallet: 'W1',
+        direction: 'usdcToYes',
+        usdcAmount: 1n,
+        usdcDelta: -1n,
+        yesDelta: 1n,
+        noDelta: 0n,
+        fee: 0n,
+        slot: 12n,
+        blockTime: new Date(START),
+      },
+    ])
+    let view = [
+      { signature: 'v', slot: 10 },
+      { signature: 'w', slot: 11 },
+    ]
+    // The RPC has not reached x yet: `until: x` reads to the start.
+    sigAnswer = (_market, o) => {
+      const k = o.until ? view.findIndex((s) => s.signature === o.until) : -1
+      return view
+        .slice(k + 1)
+        .reverse()
+        .map((s) => ({ ...s, err: null }))
+    }
+    txAnswer = (sigs) => sigs.map(readable)
+    const stops = new Map()
+    await indexOnce({ ...deps(), stops })
+    expect(await cursorOf(m)).toBe('x')
+    expect(txBatches).toEqual([])
+    expect(warns.some((w) => w.msg.includes('behind'))).toBe(true)
+
+    // It catches up, with a new signature: the market goes on from x.
+    view = [...view, { signature: 'x', slot: 12 }, { signature: 'y', slot: 13 }]
+    t += 5_000
+    await indexOnce({ ...deps(), stops })
+    expect(await cursorOf(m)).toBe('y')
+    expect(txBatches.map((b) => b.n)).toEqual([1])
+    expect(stops.has(m)).toBe(false)
   })
 })

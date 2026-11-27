@@ -14,6 +14,7 @@ import {
   insertPricePoint,
   insertTrades,
   latestPrices,
+  latestTradeSlots,
   listGames,
   listIndexableMarkets,
   listMarketTrades,
@@ -334,6 +335,17 @@ describe('market queries', () => {
     ])
     const rows = await listMarketTrades(h.db, ['M1'])
     expect(rows.map((r) => r.sig)).toEqual(['S1', 'S2', 'S3'])
+  })
+
+  it('gives the slot of each market newest trade', async () => {
+    expect(await latestTradeSlots(h.db, [])).toEqual(new Map())
+    await insertTrades(h.db, [
+      trade('S1', { slot: 7n }),
+      trade('S2', { slot: 9n }),
+      trade('S3', { slot: 8n }),
+      trade('S9', { market: 'M9', slot: 100n }),
+    ])
+    expect(await latestTradeSlots(h.db, ['M1', 'M2'])).toEqual(new Map([['M1', 9n]]))
   })
 })
 

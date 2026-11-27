@@ -246,6 +246,39 @@ describe('MarketMarks', () => {
     expect(marks.due('b', 'y', 60, 30)).toBe(false)
   })
 
+  it('keeps the slot of each cursor through forget, never lower, until the market is dropped', () => {
+    const marks = new MarketMarks()
+    expect(marks.cursorSlot('m')).toBeUndefined()
+    marks.cursorAt('m', 12)
+    marks.cursorAt('m', 11)
+    expect(marks.cursorSlot('m')).toBe(12)
+    marks.forget('m')
+    expect(marks.cursorSlot('m')).toBe(12)
+    marks.cursorAt('m', 13)
+    expect(marks.cursorSlot('m')).toBe(13)
+    marks.retain(new Set(['other']))
+    expect(marks.cursorSlot('m')).toBeUndefined()
+  })
+
+  it('is seeded once after a start, and a written cursor goes past the seed', () => {
+    const marks = new MarketMarks()
+    expect(marks.needsCursorSlot('m')).toBe(true)
+    marks.seedCursorSlot('m', 20)
+    marks.seedCursorSlot('m', 30)
+    expect(marks.needsCursorSlot('m')).toBe(false)
+    expect(marks.cursorSlot('m')).toBe(20)
+    marks.cursorAt('m', 25)
+    expect(marks.cursorSlot('m')).toBe(25)
+    // No trade: nothing known, and not asked again.
+    marks.seedCursorSlot('n', null)
+    expect(marks.needsCursorSlot('n')).toBe(false)
+    expect(marks.cursorSlot('n')).toBeUndefined()
+    marks.cursorAt('n', 3)
+    expect(marks.cursorSlot('n')).toBe(3)
+    marks.retain(new Set())
+    expect(marks.needsCursorSlot('n')).toBe(true)
+  })
+
   it('orders by last index and drops markets no longer indexable', () => {
     const pace = new MarketMarks()
     pace.indexed('a', 'x', 10)

@@ -13,6 +13,7 @@ import {
   insertClaims,
   insertPricePoint,
   insertTrades,
+  latestTradeSlots,
   listIndexableMarkets,
   type MarketRow,
   recordSponsoredAtas,
@@ -392,6 +393,11 @@ export interface IndexerDeps {
 const ACCOUNTS_PER_READ = 100
 /** The stop of a market whose signature list could not be read (not a signature). */
 const SIGNATURE_LIST = '(signature list)'
+/**
+ * The stop of a market whose signature list came from an RPC behind its cursor (not a
+ * signature): the newest signature listed is older than the one the cursor was written to.
+ */
+const RPC_BEHIND = '(index RPC behind)'
 
 type AccountInfos = Awaited<ReturnType<Connection['getMultipleAccountsInfo']>>
 
@@ -508,6 +514,19 @@ async function indexPass(
     due = markets
       .filter((m) => marks.due(m.pubkey, hashes.get(m.pubkey), sweep(m), now))
       .sort((a, b) => marks.lastIndexedAt(a.pubkey) - marks.lastIndexedAt(b.pubkey))
+    // After a start no cursor slot is known yet: the slot of each market's newest trade stands in
+    // (the cursor is written after its rows, so it is at or past it), one query for them all.
+    const unseeded = due.filter((m) => m.indexCursor && marks.needsCursorSlot(m.pubkey))
+    if (unseeded.length > 0) {
+      const slots = await latestTradeSlots(
+        deps.db,
+        unseeded.map((m) => m.pubkey),
+      )
+      for (const m of unseeded) {
+        const slot = slots.get(m.pubkey)
+        marks.seedCursorSlot(m.pubkey, slot === undefined ? null : Number(slot))
+      }
+    }
   }
   const stops = deps.stops ?? defaultStops
   const startedAt = clock?.() ?? 0
@@ -566,7 +585,8 @@ async function pricePoint(
 }
 
 /**
- * A market stopped at `sig` (or at SIGNATURE_LIST: its signatures could not be listed): warn at
+ * A market stopped at `sig` (or at SIGNATURE_LIST: its signatures could not be listed; or at
+ * RPC_BEHIND: they were listed by an RPC behind the cursor): warn at
  * most once a minute per market; from STUCK_AFTER stops on, send `index-stuck` on every stop.
  * The alerter's dedupe throttles it, and re-arms the key after a failed delivery, which is why
  * this must not be a one-shot.
@@ -585,14 +605,21 @@ async function noteStop(deps: IndexerDeps, m: MarketRow, sig: string): Promise<v
       { market: m.pubkey, sig, stops: st.count },
       sig === SIGNATURE_LIST
         ? 'signature list not readable; indexing waits'
-        : 'transaction not readable yet; indexing waits',
+        : sig === RPC_BEHIND
+          ? 'index RPC behind the cursor; indexing waits'
+          : 'transaction not readable yet; indexing waits',
     )
   }
   if (st.count >= STUCK_AFTER) {
-    const what = sig === SIGNATURE_LIST ? 'its signature list has' : `signature ${sig} has`
+    const what =
+      sig === SIGNATURE_LIST
+        ? `its signature list has been unreadable for ${st.count} passes`
+        : sig === RPC_BEHIND
+          ? `the index RPC has been behind its cursor for ${st.count} passes`
+          : `signature ${sig} has been unreadable for ${st.count} passes`
     await deps.alerts.send(
       `index-stuck:${m.pubkey}`,
-      `Indexing of ${m.gameId} (market ${m.pubkey}) is stuck: ${what} been unreadable for ${st.count} passes`,
+      `Indexing of ${m.gameId} (market ${m.pubkey}) is stuck: ${what}`,
     )
   }
 }
@@ -600,7 +627,8 @@ async function noteStop(deps: IndexerDeps, m: MarketRow, sig: string): Promise<v
 /**
  * One market from its cursor. With IndexReads, each batch of transactions comes out of the
  * transaction budget, waited for no longer than `budgetLeft()`; when it would come later the scan
- * stops there (`partial`), the cursor at the last transaction read.
+ * stops there (`partial`), the cursor at the last transaction read. A listing from an RPC behind the cursor (`MarketMarks.cursorSlot`) is not
+ * read at all: the cursor never moves back.
  */
 async function indexMarket(
   deps: IndexerDeps,
@@ -609,8 +637,11 @@ async function indexMarket(
   budgetLeft: () => number = () => 0,
 ): Promise<{ trades: number; claims: number; partial?: true }> {
   const stops = deps.stops ?? defaultStops
+  const marks = deps.reads?.marks
   const address = new PublicKey(m.pubkey)
   const sigs: string[] = []
+  /** Each listed signature's slot, for the slot of the signature the cursor is written to. */
+  const slots = new Map<string, number>()
   let newestFetched: string | undefined
   let before: string | undefined
   // Newest first; page back until the cursor (the newest signature already indexed). A read
@@ -629,6 +660,16 @@ async function indexMarket(
           'confirmed',
         ),
       )
+      // An RPC that does not hold the cursor signature yet (a failover to one behind) answers
+      // `until` with older signatures: nothing is read, the cursor stays, the market is asked
+      // again next pass. Counted as a stop, so one that stays behind reaches index-stuck.
+      const known = m.indexCursor ? marks?.cursorSlot(m.pubkey) : undefined
+      const newest = page[0]?.slot
+      if (!before && known !== undefined && typeof newest === 'number' && newest < known) {
+        await noteStop(deps, m, RPC_BEHIND)
+        return { trades: 0, claims: 0 }
+      }
+      for (const s of page) if (typeof s.slot === 'number') slots.set(s.signature, s.slot)
       newestFetched ??= page[0]?.signature
       sigs.push(...page.filter((s) => s.err === null).map((s) => s.signature))
       if (page.length < 1000) break
@@ -641,7 +682,8 @@ async function indexMarket(
   // Nothing fetched: the market did not move past a signature, so a stall counter stays; one
   // for an unreadable signature list does not, the list was read.
   if (!newestFetched) {
-    if (stops.get(m.pubkey)?.sig === SIGNATURE_LIST) stops.delete(m.pubkey)
+    const sig = stops.get(m.pubkey)?.sig
+    if (sig === SIGNATURE_LIST || sig === RPC_BEHIND) stops.delete(m.pubkey)
     return { trades: 0, claims: 0 }
   }
   const ordered = sigs.reverse()
@@ -743,6 +785,8 @@ async function indexMarket(
       indexCursor: cursor,
       ...(externalLp && !m.externalLp ? { externalLp: true } : {}),
     })
+    const slot = slots.get(cursor)
+    if (slot !== undefined) marks?.cursorAt(m.pubkey, slot)
   }
   if (externalLp && !m.externalLp) {
     await deps.alerts.send(

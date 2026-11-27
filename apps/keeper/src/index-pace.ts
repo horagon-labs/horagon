@@ -200,6 +200,8 @@ export class MarketMarks {
     string,
     { hash: string | undefined; at: number; partial?: true }
   >()
+  /** Per market, the slot its cursor is known to be at or past; null: none known (no trade). */
+  private readonly cursorSlots = new Map<string, number | null>()
 
   /**
    * Whether `market` needs its signatures read: never indexed in full since start, its account
@@ -230,6 +232,31 @@ export class MarketMarks {
     this.marks.delete(market)
   }
 
+  /**
+   * A slot `market`'s cursor is at or past: the slot of the signature it was last written to this
+   * run, or (after a start) the slot of the market's newest indexed trade (`seedCursorSlot`); kept
+   * through `forget`. A listing whose newest signature is older comes from an RPC that is behind
+   * the cursor (it does not hold the `until` signature yet), and must not move the cursor back.
+   */
+  cursorSlot(market: string): number | undefined {
+    return this.cursorSlots.get(market) ?? undefined
+  }
+
+  /** Whether `market` has not been given a cursor slot this run, not even "none known". */
+  needsCursorSlot(market: string): boolean {
+    return !this.cursorSlots.has(market)
+  }
+
+  /** After a start: the slot of `market`'s newest indexed trade, null when it has none. */
+  seedCursorSlot(market: string, slot: number | null): void {
+    if (!this.cursorSlots.has(market)) this.cursorSlots.set(market, slot)
+  }
+
+  /** The cursor of `market` was written to a signature at `slot` (it never goes down). */
+  cursorAt(market: string, slot: number): void {
+    this.cursorSlots.set(market, Math.max(slot, this.cursorSlots.get(market) ?? slot))
+  }
+
   lastIndexedAt(market: string): number {
     return this.marks.get(market)?.at ?? Number.NEGATIVE_INFINITY
   }
@@ -237,5 +264,6 @@ export class MarketMarks {
   /** Drops the markets that are no longer indexable. */
   retain(markets: ReadonlySet<string>): void {
     for (const k of this.marks.keys()) if (!markets.has(k)) this.marks.delete(k)
+    for (const k of this.cursorSlots.keys()) if (!markets.has(k)) this.cursorSlots.delete(k)
   }
 }
