@@ -16,6 +16,8 @@ export const LAST_NIGHT_ROWS = 6
 
 export interface LastNightRow {
   id: string
+  /** The winner market's address: the proof rail opens it on /verify at 375. */
+  market: string
   winner: string
   loser: string
   winScore: number
@@ -47,6 +49,7 @@ function rowOf(g: Game): LastNightRow | null {
   const homeWon = g.homeScore > g.awayScore
   return {
     id: g.id,
+    market: m.pubkey,
     winner: homeWon ? g.home : g.away,
     loser: homeWon ? g.away : g.home,
     winScore: Math.max(g.homeScore, g.awayScore),

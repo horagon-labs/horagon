@@ -438,6 +438,7 @@ describe('last night, kept honest (C9, C14)', () => {
 
   const row = (over: Partial<LastNightRow> = {}): LastNightRow => ({
     id: 'nba-401909318',
+    market: 'Mkt1111111111111111111111111111111111111111',
     winner: 'CHI',
     loser: 'CHA',
     winScore: 107,

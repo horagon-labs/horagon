@@ -1,5 +1,6 @@
-// Tonight (Chronometer spec 4.1, R5): the hero and the live board. Rendered per request, so the
-// first HTML holds tonight's games (lib/server/api.ts); the board then polls in the browser.
+// Tonight (Chronometer spec 4.1, R5): the hero, the proof rail (first-screen W6) and the live
+// board. Rendered per request, so the first HTML holds tonight's games and the record's counts
+// (lib/server/api.ts); the board then polls in the browser.
 // Under the board: with FLAG_PRACTICE on, the Practice strip (R8), which is the hero's second
 // line on a rest day instead; then last night's games (R10, A4); then one static line discloses
 // the reference agent (R2b).
@@ -9,11 +10,13 @@ import { AgentNote } from '../components/chrono/agent-line'
 import { Hero } from '../components/chrono/hero'
 import { PracticeStrip } from '../components/chrono/practice-strip'
 import { LastNightStrip } from '../components/last-night'
+import { ProofRail } from '../components/proof-rail'
 import { TonightBoard } from '../components/tonight-board'
+import { heroMoved } from '../lib/chrono/board'
 import { practiceStrip } from '../lib/chrono/practice'
 import { isTonight } from '../lib/format'
 import { HOME_TITLE, SITE_DESCRIPTION } from '../lib/meta'
-import { initialBoard, initialLastNight, initialPractice } from '../lib/server/api'
+import { initialBoard, initialLastNight, initialPractice, initialRecord } from '../lib/server/api'
 
 export const metadata: Metadata = {
   title: { absolute: HOME_TITLE },
@@ -30,18 +33,25 @@ export const metadata: Metadata = {
 export default async function TonightPage() {
   // Per request: the board's data is live, and the build opens no DB or RPC connection.
   await connection()
-  // All three under the first frame's one cap, side by side.
-  const [initial, lastNight, practice] = await Promise.all([
+  // All four under the first frame's one cap, side by side.
+  const [initial, lastNight, practice, record] = await Promise.all([
     initialBoard(),
     initialLastNight(),
     initialPractice(),
+    initialRecord(),
   ])
   const strip = practiceStrip(practice, initial.now)
   const rest =
     initial.games !== undefined && !initial.games.some((g) => isTonight(g, initial.now * 1000))
   return (
     <>
-      <Hero second={rest ? <PracticeStrip strip={strip} /> : undefined} />
+      {/* The story card's own move joins `heroMoved` once the story ships (first-screen slice 4). */}
+      <Hero
+        second={rest ? <PracticeStrip strip={strip} /> : undefined}
+        moved={heroMoved(initial.games, initial.now)}
+      />
+      {/* Until the story card ships, the 375 rail opens last night's lead game on /verify. */}
+      <ProofRail record={record} proofMarket={lastNight?.rows[0]?.market ?? null} />
       <TonightBoard initial={initial} />
       {!rest && <PracticeStrip strip={strip} className="mt-6" />}
       {lastNight && <LastNightStrip night={lastNight} now={initial.now} />}

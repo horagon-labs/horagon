@@ -196,6 +196,23 @@ export function rowWords(i: BoardItem, now: number): RowWords {
 /** The market trades now: its number and arc are Live blue (one meaning per colour). */
 export const openNow = (i: BoardItem): boolean => i.market !== undefined && isTrading(i.state)
 
+/**
+ * The H1 may say "Prices move with every run." (first-screen C2b) only when a moved market is on
+ * screen. While a listed winner market trades (S3, S4): some listed winner market moved from its
+ * open. Otherwise (S1, S2, S5): only the story card's market, `storyMoved`.
+ */
+export function heroMoved(
+  games: readonly Game[] | undefined,
+  now: number,
+  storyMoved = false,
+): boolean {
+  const listed = (games ?? [])
+    .filter((g) => isTonight(g, now * 1000))
+    .map((g) => boardItem(g, undefined, now))
+  if (!listed.some(openNow)) return storyMoved
+  return listed.some((i) => i.market !== undefined && movedFromOpen(i.market))
+}
+
 /** What a screen reader hears for one game, on its row link and in the Night dial's list. */
 export function itemLabel(i: BoardItem): string {
   const g = i.game

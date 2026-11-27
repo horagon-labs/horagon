@@ -5,7 +5,7 @@
 // copy, next/dist/compiled/server-only) fails the build if a client component imports this.
 import 'server-only'
 import { createApp, depsFromEnv } from '@horagon/api'
-import type { Game, PracticeResponse } from '@horagon/sdk'
+import type { Game, PracticeResponse, RecordResponse } from '@horagon/sdk'
 import { HoragonClient } from '@horagon/sdk/client'
 import { isHoragonError } from '@horagon/sdk/errors'
 import { lookupTarget, type VerifyTarget } from '../verify-target'
@@ -16,6 +16,8 @@ import {
   type InitialGame,
   loadBoard,
   loadGame,
+  loadRecord,
+  RECORD_TTL_MS,
   ttlCache,
   within,
 } from './initial'
@@ -154,5 +156,26 @@ export function initialLastNight(): Promise<LastNight | null> {
       }
     },
     (n) => n !== null,
+  )
+}
+
+const records = ttlCache<RecordResponse | null>(RECORD_TTL_MS)
+
+/**
+ * The proof rail's counts on / (first-screen W6): only an answer is kept, for 60 s. Null when the
+ * API failed or was slow. Never throws.
+ */
+export function initialRecord(): Promise<RecordResponse | null> {
+  return records(
+    'record',
+    async () => {
+      try {
+        return await loadRecord(serverClient())
+      } catch {
+        // depsFromEnv throws without its environment (a local build): no counts.
+        return null
+      }
+    },
+    (r) => r !== null,
   )
 }

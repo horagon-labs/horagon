@@ -2,7 +2,7 @@
 // go into the first HTML, so neither page opens on "Setting the dial…" and a link unfurler or a
 // crawler sees real content. Everything here is best effort: a slow or failing API leaves the
 // value out, and the page's own poll loads it in the browser as before.
-import type { Game, GameDetail, HoragonClient } from '@horagon/sdk'
+import type { Game, GameDetail, HoragonClient, RecordResponse } from '@horagon/sdk'
 import { etNextDay, etNight, isHoragonError } from '@horagon/sdk'
 import { nightOver, type Upcoming, upcomingOf } from '../chrono/board'
 import { isTonight } from '../format'
@@ -141,4 +141,18 @@ export function ttlCache<T>(ttlMs: number, max = 200, nowMs: () => number = Date
     )
     return value
   }
+}
+
+/** How long / keeps the proof rail's counts: GET /record is cached 60 s at the edge too. */
+export const RECORD_TTL_MS = 60_000
+
+/**
+ * The proof rail's counts (first-screen C6, C6m): GET /record under the first frame's cap. Null
+ * when the API failed or was late; the rail then shows the program links alone. Never throws.
+ */
+export async function loadRecord(
+  client: Pick<HoragonClient, 'record'>,
+  timeoutMs = INITIAL_TIMEOUT_MS,
+): Promise<RecordResponse | null> {
+  return (await within(client.record(), timeoutMs)) ?? null
 }
