@@ -41,18 +41,22 @@ beforeAll(async () => {
   fixtures = await loadReplayDir(PRACTICE_FIXTURES_DIR)
   const f = fixtures.find((x) => x.espnEventId === '401910007')
   if (!f) throw new Error('no MEM@CLE recording')
-  // The recording reads 0:00 (0.1 s left) 30 recorded seconds before its Final: 5 s at 6x, too
-  // short for the horn hold. The Final and what follows move 120 s later, so the horn frame
-  // holds 25 s and the round shows the horn halt.
+  // The recording's last live frame reads 0.1 s left, 30 recorded seconds before its Final: time
+  // left, not the horn (a sub-second clock reads 1). Here that frame reads 0.0, the horn, and the
+  // Final and what follows move 120 s later, so the horn frame holds 25 s and the round shows
+  // the horn halt.
   const finalAt = Date.parse(
     f.frames.find((x) => x.source === 'espn' && x.status === 'final')?.t ?? '',
   )
+  const lastLive = f.frames.filter((x) => x.source === 'espn' && x.status === 'live').at(-1)
   memCle = {
     ...f,
     frames: f.frames.map((x) =>
       Date.parse(x.t) >= finalAt
         ? { ...x, t: new Date(Date.parse(x.t) + 120_000).toISOString() }
-        : x,
+        : x === lastLive
+          ? { ...x, clock: '0.0' }
+          : x,
     ),
   }
 })

@@ -5,6 +5,7 @@
 import { appendFile, mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { errorSummary } from '@horagon/sdk'
+import { secsLeft } from '@horagon/sdk/replay'
 import { z } from 'zod'
 import { easternDate, type Feed, type FeedGame, type FeedSnapshot, type FeedStatus } from './types'
 
@@ -83,6 +84,16 @@ function points(score: string | undefined, optional: boolean): number | null {
   return Number(score)
 }
 
+/**
+ * A live game's seconds left (`secsLeft`: under a second reads 1, never 0). 0 is the horn: ESPN's
+ * end of a period, or a clock of exactly 0. No clock is null, never 0: a missing field must not
+ * read as the horn (R8).
+ */
+function liveClock(s: { clock?: number; type: { name: string } }): number | null {
+  if (s.type.name === 'STATUS_END_PERIOD') return 0
+  return s.clock === undefined ? null : secsLeft(s.clock)
+}
+
 export interface ParseResult {
   games: FeedGame[]
   /** Events skipped because they did not match the expected shape. */
@@ -137,7 +148,7 @@ export function parseEspnScoreboard(body: unknown): ParseResult {
       tipoff,
       status,
       period: c.status.period,
-      clockSecs: status === 'live' ? Math.max(0, Math.round(c.status.clock ?? 0)) : null,
+      clockSecs: status === 'live' ? liveClock(c.status) : null,
       homeScore,
       awayScore,
       periods,

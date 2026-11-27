@@ -66,18 +66,28 @@ export type ReplayGame = z.infer<typeof ReplayGameSchema>
 /** What a writer produces before parsing (the compactor's output). */
 export type ReplayGameInput = z.input<typeof ReplayGameSchema>
 
-/** "11:16", "45.3", "0.0" (ESPN) or "PT11M16.00S" (NBA) to whole seconds; 0 when unreadable. */
+/**
+ * Whole seconds left for a clock of `secs` seconds: rounded, except that time left never reads 0.
+ * 0.4 s on the clock is 1, so 0 means no time is left: the horn (R8). A sub-second clock is
+ * still play: a timeout or free throws at 0.4 can last minutes, and a tie can still go to
+ * overtime.
+ */
+export function secsLeft(secs: number): number {
+  if (!Number.isFinite(secs) || secs <= 0) return 0
+  return Math.max(1, Math.round(secs))
+}
+
+/**
+ * "11:16", "45.3", "0.0" (ESPN) or "PT11M16.00S" (NBA) to whole seconds (`secsLeft`); 0 when
+ * unreadable.
+ */
 export function clockToSecs(clock: string): number {
   const iso = /^PT(?:(\d+)M)?(?:([\d.]+)S)?$/.exec(clock)
-  if (iso) {
-    const secs = Math.round(Number(iso[1] ?? 0) * 60 + Number(iso[2] ?? 0))
-    return Number.isFinite(secs) ? secs : 0
-  }
+  if (iso) return secsLeft(Number(iso[1] ?? 0) * 60 + Number(iso[2] ?? 0))
   const mmss = /^(\d+):(\d{2})$/.exec(clock)
   if (mmss) {
     const secs = Number(mmss[1]) * 60 + Number(mmss[2])
     return Number.isFinite(secs) ? secs : 0
   }
-  const secs = Number(clock)
-  return Number.isFinite(secs) && secs >= 0 ? Math.round(secs) : 0
+  return secsLeft(Number(clock))
 }

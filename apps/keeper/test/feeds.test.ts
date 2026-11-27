@@ -29,6 +29,31 @@ describe('ESPN scoreboard', () => {
     expect(games[2]?.clockSecs).toBeNull()
   })
 
+  it('reads 0 on the clock only when no time is left: under a second is 1, none read is null', () => {
+    type Ev = {
+      competitions: Array<{ status: { clock?: number; type: { name: string } } }>
+    }
+    const at = (patch: (s: Ev['competitions'][0]['status']) => void) => {
+      const body = structuredClone(scoreboard)
+      const s = (body.events[0] as Ev).competitions[0]?.status
+      if (!s) throw new Error('fixture')
+      patch(s)
+      return parseEspnScoreboard(body).games[0]?.clockSecs
+    }
+    expect(at((s) => void (s.clock = 0.4))).toBe(1)
+    expect(at((s) => void (s.clock = 0.1))).toBe(1)
+    expect(at((s) => void (s.clock = 0))).toBe(0)
+    expect(at((s) => void (s.clock = 45.3))).toBe(45)
+    expect(at((s) => void delete s.clock)).toBeNull()
+    // ESPN's end of a period is the horn, whatever the clock says.
+    expect(
+      at((s) => {
+        s.clock = 0.1
+        s.type.name = 'STATUS_END_PERIOD'
+      }),
+    ).toBe(0)
+  })
+
   it('maps GS, NY, NO, SA, UTAH and WSH to NBA tricodes', () => {
     const pairs = [
       ['GS', 'GSW'],
@@ -359,6 +384,7 @@ describe('replay feed', () => {
   it('parses ESPN and NBA clocks', () => {
     expect(clockToSecs('11:16')).toBe(676)
     expect(clockToSecs('45.3')).toBe(45)
+    expect(clockToSecs('0.1')).toBe(1)
     expect(clockToSecs('PT05M30.00S')).toBe(330)
     expect(clockToSecs('garbage')).toBe(0)
   })
