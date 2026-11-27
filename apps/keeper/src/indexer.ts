@@ -41,7 +41,13 @@ import {
 import type { Logger } from 'pino'
 import type { Alerter } from './alerts'
 import { base58Decode } from './base58'
-import { type IndexPace, isRateLimited, PASS_BUDGET_MS, SWEEP_SECS } from './index-pace'
+import {
+  type IndexPace,
+  isRateLimited,
+  PASS_BUDGET_MS,
+  SWEEP_SECS,
+  TRANSACTION_CHUNK,
+} from './index-pace'
 
 type TradeInsert = Parameters<typeof insertTrades>[1][number] & { botMemo: boolean }
 type ClaimInsert = Parameters<typeof insertClaims>[1][number]
@@ -486,9 +492,16 @@ export async function indexOnce(
       break
     }
     try {
-      const r = await indexMarket(deps, m)
+      const left = () => Math.max(0, PASS_BUDGET_MS - ((pace?.clock() ?? 0) - startedAt))
+      const r = await indexMarket(deps, m, left)
       trades += r.trades
       claims += r.claims
+      if (r.partial) {
+        // The transaction budget ran out: the market goes on next pass, after the markets that
+        // waited longer, and nothing else is started (it would only read signatures).
+        pace?.partial(m.pubkey, now)
+        break
+      }
       // Indexed in full unless it stopped at something it could not read.
       if (stops.has(m.pubkey)) pace?.forget(m.pubkey)
       else pace?.indexed(m.pubkey, hashes.get(m.pubkey), now)
@@ -561,10 +574,16 @@ async function noteStop(deps: IndexerDeps, m: MarketRow, sig: string): Promise<v
   }
 }
 
+/**
+ * One market from its cursor. With a pace, each batch of transactions comes out of the
+ * transaction budget, waited for no longer than `budgetLeft()`; when it would come later the scan
+ * stops there (`partial`), the cursor at the last transaction read.
+ */
 async function indexMarket(
   deps: IndexerDeps,
   m: MarketRow,
-): Promise<{ trades: number; claims: number }> {
+  budgetLeft: () => number = () => 0,
+): Promise<{ trades: number; claims: number; partial?: true }> {
   const stops = deps.stops ?? defaultStops
   const address = new PublicKey(m.pubkey)
   const sigs: string[] = []
@@ -608,8 +627,13 @@ async function indexMarket(
   let externalLp = false
   const skipped: Array<{ sig: string; ixIndex: number }> = []
   let rateLimited: { error: unknown } | undefined
-  scan: for (let i = 0; i < ordered.length; i += 50) {
-    const chunk = ordered.slice(i, i + 50)
+  let partial = false
+  scan: for (let i = 0; i < ordered.length; i += TRANSACTION_CHUNK) {
+    const chunk = ordered.slice(i, i + TRANSACTION_CHUNK)
+    if (deps.pace && !(await deps.pace.takeTransactions(chunk.length, budgetLeft()))) {
+      partial = true
+      break
+    }
     let answer: Array<VersionedTransactionResponse | null>
     try {
       answer = await deps.connection.getTransactions(chunk, {
@@ -674,10 +698,10 @@ async function indexMarket(
     }
   }
   if (stoppedAt) await noteStop(deps, m, stoppedAt)
-  else stops.delete(m.pubkey)
+  else if (!partial) stops.delete(m.pubkey)
   // Without a stop everything fetched is done, failed signatures included, so a market with
   // failing swaps does not page through the same failures every tick.
-  const cursor = stoppedAt ? processed : newestFetched
+  const cursor = stoppedAt || partial ? processed : newestFetched
   if (cursor) {
     await updateMarket(deps.db, m.pubkey, {
       indexCursor: cursor,
@@ -691,5 +715,5 @@ async function indexMarket(
     )
   }
   if (rateLimited) throw new RateLimitedPass(rateLimited.error)
-  return { trades, claims }
+  return { trades, claims, ...(partial ? { partial: true as const } : {}) }
 }

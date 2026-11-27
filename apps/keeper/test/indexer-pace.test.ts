@@ -1,13 +1,18 @@
 // The indexer under an IndexPace (incident of 2026-11-25): a rate limit stops the pass and holds
 // the next ones, a market is asked for its signatures only when its account or mints changed or
 // its sweep is due, and signature reads are spaced. Chain calls are fakes on a fake clock.
-import { type DbHandle, upsertMarket, upsertScheduledGames } from '@horagon/db'
+import {
+  type DbHandle,
+  listIndexableMarkets,
+  upsertMarket,
+  upsertScheduledGames,
+} from '@horagon/db'
 import { createTestDb } from '@horagon/db/testing'
 import { DEVNET_MUSDC_MINT, HoragonProgram } from '@horagon/sdk'
 import { Keypair, type PublicKey } from '@solana/web3.js'
 import type { Logger } from 'pino'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { IndexPace, SIGNATURES_SPACING_MS } from '../src/index-pace'
+import { IndexPace, SIGNATURES_SPACING_MS, TRANSACTION_CHUNK } from '../src/index-pace'
 import { type IndexerDeps, indexOnce, STUCK_AFTER } from '../src/indexer'
 
 // Market accounts are not decoded for real: the first data byte 1 is a price of 0.4.
@@ -42,10 +47,13 @@ describe('indexOnce with an IndexPace', () => {
   let sigCalls: Array<{ market: string; at: number }>
   let accountCalls: number[]
   let txCalls: number
+  /** getTransactions batches: their size and the clock. */
+  let txBatches: Array<{ n: number; t: number }>
   /** Each getSignaturesForAddress answer; a function may throw. */
-  let sigAnswer: (market: string) => Array<{ signature: string; err: null }>
+  let sigAnswer: (market: string, o: { until?: string }) => Array<{ signature: string; err: null }>
   let accountAnswer: () => void
-  let txAnswer: () => void
+  /** Each getTransactions answer; undefined answers null for every signature. */
+  let txAnswer: (sigs: string[]) => unknown[] | undefined
   let warns: Array<{ obj: Record<string, unknown>; msg: string }>
   let sent: Array<{ key: string; text: string }>
 
@@ -70,14 +78,14 @@ describe('indexOnce with an IndexPace', () => {
     stops: new Map(),
     pace,
     connection: {
-      getSignaturesForAddress: async (a: PublicKey) => {
+      getSignaturesForAddress: async (a: PublicKey, o: { until?: string }) => {
         sigCalls.push({ market: a.toBase58(), at: t })
-        return sigAnswer(a.toBase58())
+        return sigAnswer(a.toBase58(), o ?? {})
       },
       getTransactions: async (sigs: string[]) => {
         txCalls++
-        txAnswer()
-        return sigs.map(() => null)
+        txBatches.push({ n: sigs.length, t })
+        return txAnswer(sigs) ?? sigs.map(() => null)
       },
       getMultipleAccountsInfo: async (keys: PublicKey[]) => {
         accountCalls.push(keys.length)
@@ -126,11 +134,12 @@ describe('indexOnce with an IndexPace', () => {
     sigCalls = []
     accountCalls = []
     txCalls = 0
+    txBatches = []
     warns = []
     sent = []
     sigAnswer = () => []
     accountAnswer = () => {}
-    txAnswer = () => {}
+    txAnswer = () => undefined
     pace = new IndexPace({
       log: log(),
       alerts: alerts(),
@@ -346,7 +355,7 @@ describe('indexOnce with an IndexPace', () => {
     expect(warns.some((w) => w.msg === 'transaction batch read failed')).toBe(true)
     t += 30_000
     sigCalls = []
-    txAnswer = () => {}
+    txAnswer = () => undefined
     sigAnswer = () => []
     await indexOnce(deps())
     expect(asked().sort()).toEqual([a, b].sort())
@@ -386,4 +395,74 @@ describe('indexOnce with an IndexPace', () => {
     await indexOnce({ ...deps(), stops })
     expect(stops.has(m)).toBe(false)
   })
+  /** A market's history, oldest first, answered newest first down to the cursor. */
+  const history = (list: string[]) => (o: { until?: string }) => {
+    const k = o.until ? list.indexOf(o.until) : -1
+    return list
+      .slice(k + 1)
+      .reverse()
+      .map((signature) => ({ signature, err: null }))
+  }
+  /** A confirmed transaction that decodes to no rows. */
+  const readable = (sig: string) => ({
+    slot: 1,
+    blockTime: 1_795_000_000,
+    meta: { err: null, preTokenBalances: [], postTokenBalances: [] },
+    transaction: {
+      signatures: [sig],
+      message: {
+        staticAccountKeys: [program.authority],
+        header: { numRequiredSignatures: 1 },
+        compiledInstructions: [],
+      },
+    },
+  })
+  const cursorOf = async (market: string) =>
+    (await listIndexableMarkets(h.db, new Date(t))).find((x) => x.pubkey === market)?.indexCursor
+  /** The most transaction entries in any 10 s window. */
+  const busiestTx = () =>
+    Math.max(
+      ...txBatches.map(({ t: t0 }) =>
+        txBatches.filter((b) => b.t >= t0 && b.t < t0 + 10_000).reduce((s, b) => s + b.n, 0),
+      ),
+    )
+
+  it('reads a backlog in batches of at most 10 from the transaction budget, the cursor at the last one read', async () => {
+    const m = await addMarket('open', 0)
+    const list = Array.from({ length: 60 }, (_, i) => `t${String(i).padStart(2, '0')}`)
+    sigAnswer = (_market, o) => history(list)(o)
+    txAnswer = (sigs) => sigs.map(readable)
+    await indexOnce(deps())
+    expect(txBatches.map((b) => b.n)).toEqual([TRANSACTION_CHUNK])
+    // The next batch would wait 3.5 s, past the pass budget: the market stops there, with no
+    // index-stuck count, and goes on next pass.
+    expect(await cursorOf(m)).toBe('t09')
+    for (let i = 0; i < 10 && (await cursorOf(m)) !== 't59'; i++) {
+      t += 5_000
+      await indexOnce(deps())
+    }
+    expect(await cursorOf(m)).toBe('t59')
+    expect(txBatches.every((b) => b.n <= TRANSACTION_CHUNK)).toBe(true)
+    expect(busiestTx()).toBeLessThanOrEqual(30)
+    expect(sent).toEqual([])
+    expect(warns.filter((w) => w.msg.includes('not readable'))).toEqual([])
+  })
+
+  it('after a pause, 11 trading markets with a backlog take turns under 30 transaction entries per 10 s', async () => {
+    const markets: string[] = []
+    for (let i = 0; i < 11; i++) markets.push(await addMarket('open', i))
+    const lists = new Map(
+      markets.map((m, i) => [m, Array.from({ length: 60 }, (_, j) => `m${i}-${j}`)]),
+    )
+    sigAnswer = (market, o) => history(lists.get(market) ?? [])(o)
+    txAnswer = (sigs) => sigs.map(readable)
+    for (let pass = 0; pass < 12; pass++) {
+      await indexOnce(deps())
+      t += 5_000
+    }
+    expect(txBatches.every((b) => b.n <= TRANSACTION_CHUNK)).toBe(true)
+    expect(busiestTx()).toBeLessThanOrEqual(30)
+    // Each market has had a turn: none waits behind the first one's backlog.
+    for (const m of markets) expect(await cursorOf(m)).not.toBeNull()
+  }, 60_000)
 })

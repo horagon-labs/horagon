@@ -3,8 +3,8 @@
 // rent went anywhere but the sponsor is recorded and alerted, and the API then opens no more
 // accounts for that wallet (`atasClosedAway`). One close is expected: pm-AMM's claim_winnings
 // closes the user's YES and NO itself, rent to the user, once the market is resolved. Its reads
-// share the indexer's IndexPace: a pause holds them, a rate limit here pauses both, and its
-// signature and transaction reads are spaced on the same clocks as the indexer's.
+// share the indexer's IndexPace: a pause holds them, a rate limit here pauses both, its signature
+// reads are spaced on the indexer's clock and its transaction reads come out of the same budget.
 import {
   CLAIM_CLOSE,
   type Db,
@@ -73,7 +73,7 @@ export interface AtaWatchDeps {
   /** Trace cursors per ATA creation; defaults to a module-level map. */
   traces?: Map<string, TraceState>
   /** The indexer's read pace (`main.ts`): its pause holds this pass too. */
-  pace?: Pick<IndexPace, 'held' | 'rateLimited' | 'clean' | 'spaceSignatures' | 'spaceTransactions'>
+  pace?: Pick<IndexPace, 'held' | 'rateLimited' | 'clean' | 'spaceSignatures' | 'takeTransactions'>
 }
 
 export interface AtaClose {
@@ -177,8 +177,11 @@ async function findClose(
       if (s.signature === createdSig) return { sig: null, to: 'unknown', byClaim: false }
       if (!s.err) {
         if (over()) return 'cut'
+        // One entry of the transaction budget it shares with the indexer, waited for within
+        // what is left of the pass.
+        const left = Math.max(0, budget.ms - (clock() - spent.startedAt))
+        if (deps.pace && !(await deps.pace.takeTransactions(1, left))) return 'cut'
         spent.txCalls++
-        await deps.pace?.spaceTransactions()
         const tx = await deps.connection.getTransaction(s.signature, {
           commitment: 'confirmed',
           maxSupportedTransactionVersion: 0,

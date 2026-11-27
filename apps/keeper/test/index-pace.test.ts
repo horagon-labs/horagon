@@ -7,7 +7,9 @@ import {
   isRateLimited,
   RATE_LIMIT_PAGE_AFTER_MS,
   SIGNATURES_SPACING_MS,
+  TRANSACTION_CHUNK,
   TRANSACTION_SPACING_MS,
+  TRANSACTIONS_PER_WINDOW,
 } from '../src/index-pace'
 
 /** A pace on a fake clock: `sleep` moves the clock, `random` is fixed unless given. */
@@ -203,21 +205,61 @@ describe('IndexPace read spacing', () => {
     expect(busiest(at, 10_000)).toBeLessThanOrEqual(30)
   })
 
-  it('spaces transaction reads on their own clock, as the RPC limits each method apart', async () => {
+  it('caps a wait at one spacing after the clock steps back', async () => {
+    const f = fakePace()
+    await f.pace.spaceSignatures()
+    f.advance(-3_600_000)
+    await f.pace.spaceSignatures()
+    expect(f.sleeps.at(-1)).toBeLessThanOrEqual(SIGNATURES_SPACING_MS)
+  })
+})
+
+describe('IndexPace transaction budget', () => {
+  /** The most entries at times `at` (ms, with a count each) in any window of `windowMs`. */
+  const busiest = (at: Array<{ t: number; n: number }>, windowMs: number) =>
+    Math.max(
+      ...at.map(({ t: t0 }) =>
+        at.filter(({ t }) => t >= t0 && t < t0 + windowMs).reduce((s, x) => s + x.n, 0),
+      ),
+    )
+
+  it('spends 350 ms of its clock per entry, waiting no longer than it is given', async () => {
     const f = fakePace()
     expect(TRANSACTION_SPACING_MS).toBe(350)
+    expect(TRANSACTION_CHUNK).toBe(10)
+    // A signature read does not touch it: the RPC counts each method apart.
     await f.pace.spaceSignatures()
-    // A transaction read right after a signature read does not wait for it.
-    const before = f.sleeps.length
-    await f.pace.spaceTransactions()
-    expect(f.sleeps).toHaveLength(before)
-    const at: number[] = []
-    for (let i = 0; i < 120; i++) {
-      await f.pace.spaceTransactions()
-      at.push(f.now())
+    expect(await f.pace.takeTransactions(10, 0)).toBe(true)
+    expect(f.sleeps).toEqual([])
+    // Ten entries cost 3.5 s: not within 1 s, nothing taken.
+    expect(await f.pace.takeTransactions(10, 1_000)).toBe(false)
+    expect(f.sleeps).toEqual([])
+    expect(await f.pace.takeTransactions(2, 3_500)).toBe(true)
+    expect(f.sleeps).toEqual([3_500])
+    expect(await f.pace.takeTransactions(1, Number.POSITIVE_INFINITY)).toBe(true)
+    expect(f.sleeps).toEqual([3_500, 700])
+  })
+
+  it('keeps any 10 s window to 30 entries, whatever the batch sizes, indexer and ATA watch together', async () => {
+    expect(TRANSACTIONS_PER_WINDOW).toBe(30)
+    for (const sizes of [[10], [1, 10, 10, 10], [3, 7, 1, 10, 2], [1]]) {
+      const f = fakePace()
+      const at: Array<{ t: number; n: number }> = []
+      for (let i = 0; i < 60; i++) {
+        const n = sizes[i % sizes.length] ?? 1
+        expect(await f.pace.takeTransactions(n, Number.POSITIVE_INFINITY)).toBe(true)
+        at.push({ t: f.now(), n })
+      }
+      expect(busiest(at, 10_000)).toBeLessThanOrEqual(30)
     }
-    expect((at[1] ?? 0) - (at[0] ?? 0)).toBe(350)
-    expect(busiest(at, 10_000)).toBeLessThanOrEqual(30)
+  })
+
+  it('does not wait for hours after the clock steps back', async () => {
+    const f = fakePace()
+    await f.pace.takeTransactions(10, 0)
+    f.advance(-3_600_000)
+    expect(await f.pace.takeTransactions(10, 10_000)).toBe(true)
+    expect(Math.max(0, ...f.sleeps)).toBeLessThanOrEqual(10_000)
   })
 })
 

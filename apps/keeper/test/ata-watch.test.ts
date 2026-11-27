@@ -761,7 +761,7 @@ describe('watchSponsoredAtas', () => {
       expect(at.slice(1).map((x, i) => x - (at[i] ?? 0))).toEqual([350, 350])
     })
 
-    it('keeps signature and transaction reads to 30 per 10 s each, after an index pass, over a full batch of closed ATAs', async () => {
+    it('keeps signature and transaction reads to 30 per 10 s each, after an index pass on the same budgets, over a full batch of closed ATAs', async () => {
       // The worst pass: 100 closed rows still to trace (the first pass after a night of claims,
       // or the first after a deploy), each with some noise before its close, right after an
       // index pass that read signatures on the same pace.
@@ -771,6 +771,11 @@ describe('watchSponsoredAtas', () => {
       for (let i = 0; i < 9; i++) {
         await pace.spaceSignatures()
         sigAt.push(t)
+      }
+      // ... and two transaction batches of 10 from the same budget.
+      for (let i = 0; i < 2; i++) {
+        expect(await pace.takeTransactions(10, Number.POSITIVE_INFINITY)).toBe(true)
+        for (let k = 0; k < 10; k++) txAt.push(t)
       }
       const deps = depsWith(
         {

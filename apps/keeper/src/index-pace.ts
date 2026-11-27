@@ -2,8 +2,9 @@
 // held the keeper's IP in a per-method rate limit that its own reads every 5 s kept alive).
 // One object, made once in `main.ts` and shared by both: a rate limit on any of their reads
 // pauses them all with exponential back-off and jitter, and pages `index-rate-limited` once the
-// pause has lasted more than 15 min; signature and transaction reads are spaced; and a market
-// is asked for its signatures only when its account or its mints changed or its sweep is due.
+// pause has lasted more than 15 min; signature reads are spaced, transaction reads (each entry
+// of a batch) come out of a budget per 10 s; and a market is asked for its signatures only when
+// its account or its mints changed or its sweep is due.
 // Everything here is in memory: a restart indexes every market once and starts with no pause.
 // It never sleeps through a pause: a held pass returns at once, so the tick keeps its own
 // cadence.
@@ -22,8 +23,16 @@ export const RATE_LIMIT_PAGE_AFTER_MS = 15 * 60_000
  * forgets the last call.
  */
 export const SIGNATURES_SPACING_MS = 350
-/** The same for the ATA watch's getTransaction calls, which the RPC counts apart. */
+/**
+ * getTransaction entries (each entry of a batch counts) in any 10 s, from the indexer and the ATA
+ * watch together: the RPC limits each method apart, and may count every entry of a batch.
+ */
+export const TRANSACTIONS_PER_WINDOW = 30
+export const TRANSACTION_WINDOW_MS = 10_000
+/** What each getTransaction entry costs of the transaction clock: the next read waits for it. */
 export const TRANSACTION_SPACING_MS = 350
+/** The most getTransaction entries in one batch of the indexer. */
+export const TRANSACTION_CHUNK = 10
 /** After this long into a pass no further market is started; the rest go first next pass. */
 export const PASS_BUDGET_MS = 3_000
 /** A market's signatures are read at least this often even when its account did not change. */
@@ -84,12 +93,19 @@ export class IndexPace {
   /** The first rate limit since the last clean pass; null when there is none. */
   private since: number | null = null
   /** When (ms) the last call of each spaced method was made. */
-  private readonly lastCall = {
-    signatures: Number.NEGATIVE_INFINITY,
-    transaction: Number.NEGATIVE_INFINITY,
-  }
-  /** Per market: the hash of its account and mints and when (s) it was last indexed in full. */
-  private readonly marks = new Map<string, { hash: string | undefined; at: number }>()
+  private readonly lastCall = { signatures: Number.NEGATIVE_INFINITY }
+  /** getTransaction entries taken in the last window: when (ms) and how many. */
+  private taken: Array<{ at: number; n: number }> = []
+  /** No getTransaction read before this time (ms): the last one's entries times the spacing. */
+  private transactionsFrom = Number.NEGATIVE_INFINITY
+  /**
+   * Per market: the hash of its account and mints and when (s) it was last indexed in full, or
+   * read in part (`partial`: due on every pass until it is read in full).
+   */
+  private readonly marks = new Map<
+    string,
+    { hash: string | undefined; at: number; partial?: true }
+  >()
 
   constructor(private readonly opts: PaceOptions) {
     this.clock = opts.clock ?? Date.now
@@ -140,15 +156,50 @@ export class IndexPace {
     return this.space('signatures', SIGNATURES_SPACING_MS)
   }
 
-  /** Waits until the last getTransaction is at least TRANSACTION_SPACING_MS old. */
-  spaceTransactions(): Promise<void> {
-    return this.space('transaction', TRANSACTION_SPACING_MS)
-  }
-
-  private async space(method: 'signatures' | 'transaction', spacingMs: number): Promise<void> {
-    const wait = this.lastCall[method] + spacingMs - this.clock()
+  private async space(method: 'signatures', spacingMs: number): Promise<void> {
+    // At most one spacing: a clock stepped back must not hold the reads for the step.
+    const wait = Math.min(spacingMs, this.lastCall[method] + spacingMs - this.clock())
     if (wait > 0) await this.sleep(wait)
     this.lastCall[method] = this.clock()
+  }
+
+  /**
+   * Takes `n` getTransaction entries (a batch of n, or one call) from the budget: no more than
+   * TRANSACTIONS_PER_WINDOW in any TRANSACTION_WINDOW_MS, and TRANSACTION_SPACING_MS of the
+   * transaction clock per entry. Waits for them when that is at most `maxWaitMs`; otherwise
+   * takes nothing and returns false, and the caller stops where it is.
+   */
+  async takeTransactions(n: number, maxWaitMs: number): Promise<boolean> {
+    let wait = this.transactionsReadyAt(n, this.clock()) - this.clock()
+    if (wait > TRANSACTION_WINDOW_MS + TRANSACTION_CHUNK * TRANSACTION_SPACING_MS) {
+      // Longer than the budget can ever ask: the clock stepped back. Start the budget over.
+      this.taken = []
+      this.transactionsFrom = Number.NEGATIVE_INFINITY
+      wait = 0
+    }
+    if (wait > maxWaitMs) return false
+    if (wait > 0) await this.sleep(wait)
+    const at = this.clock()
+    this.taken.push({ at, n })
+    this.transactionsFrom = at + n * TRANSACTION_SPACING_MS
+    return true
+  }
+
+  /** The first time (ms) `n` more entries fit both the spacing and the window. */
+  private transactionsReadyAt(n: number, now: number): number {
+    this.taken = this.taken.filter((e) => e.at > now - TRANSACTION_WINDOW_MS)
+    let ready = Math.max(now, this.transactionsFrom)
+    // Entries still in the window that would end at `ready`; the oldest leave it first.
+    let inWindow = this.taken
+      .filter((e) => e.at > ready - TRANSACTION_WINDOW_MS)
+      .reduce((s, e) => s + e.n, 0)
+    for (const e of this.taken) {
+      if (inWindow + n <= TRANSACTIONS_PER_WINDOW) break
+      if (e.at <= ready - TRANSACTION_WINDOW_MS) continue
+      inWindow -= e.n
+      ready = Math.max(ready, e.at + TRANSACTION_WINDOW_MS)
+    }
+    return ready
   }
 
   /**
@@ -157,7 +208,7 @@ export class IndexPace {
    */
   due(market: string, hash: string | undefined, sweepSecs: number, nowSecs: number): boolean {
     const mark = this.marks.get(market)
-    if (!mark) return true
+    if (!mark || mark.partial) return true
     if (hash !== undefined && hash !== mark.hash) return true
     return nowSecs - mark.at >= sweepSecs
   }
@@ -167,7 +218,15 @@ export class IndexPace {
     this.marks.set(market, { hash, at: nowSecs })
   }
 
-  /** Not indexed in full (a stop, a failure): due on the next pass. */
+  /**
+   * Read in part at `nowSecs` (the transaction budget ran out): due on the next passes, after
+   * the markets that have waited longer, until it is read in full.
+   */
+  partial(market: string, nowSecs: number): void {
+    this.marks.set(market, { hash: undefined, at: nowSecs, partial: true })
+  }
+
+  /** Not indexed in full (a stop, a failure): due on the next pass, first. */
   forget(market: string): void {
     this.marks.delete(market)
   }
