@@ -6,6 +6,7 @@ import { PLAY_MONEY_NOTICE } from '@horagon/sdk/notice'
 import { winnerOf } from './chrono/board'
 import { dialCaption, liveNumber, toWin, verdict } from './chrono/copy'
 import { gameDial } from './chrono/game'
+import { isPractice, PRACTICE_LINE } from './chrono/practice'
 import { etClock, etDayLabel } from './chrono/time'
 import { gameClock } from './format'
 
@@ -37,7 +38,7 @@ export function siteUrl(
 
 /** The share card's words and needle for one game. */
 export interface GameCard {
-  /** "LAC @ MEM". */
+  /** "LAC @ MEM"; "Practice · LAC @ MEM" for a Practice replay (R8). */
   matchup: string
   /** "LAC 54–60 MEM · Q3 4:12", or "Tip-off Tue, Nov 24 · 8:30 PM ET" before the game. */
   line: string
@@ -65,7 +66,7 @@ export function gameCard(g: GameDetail, now: number): GameCard {
     headline = g.status === 'canceled' ? 'Game canceled' : 'Game postponed'
   else headline = dialCaption(dial.state, g, outcome)
   return {
-    matchup: `${g.away} @ ${g.home}`,
+    matchup: `${isPractice(g) ? 'Practice · ' : ''}${g.away} @ ${g.home}`,
     line,
     headline,
     price: dial.price,
@@ -86,7 +87,7 @@ export function gameMeta(g: GameDetail | undefined, now: number): PageMeta {
   const head = c.headline.replace(' to win · ', ' to win ')
   return {
     title: `${c.matchup} · ${head}`,
-    description: `${c.headline}. ${c.line}. ${PLAY_MONEY_NOTICE}`,
+    description: `${c.headline}. ${c.line}. ${isPractice(g) ? `${PRACTICE_LINE}. ` : ''}${PLAY_MONEY_NOTICE}`,
   }
 }
 

@@ -4,8 +4,9 @@
 import type { Metadata } from 'next'
 import { connection } from 'next/server'
 import { GameView } from '../../../components/game-view'
+import { isPractice } from '../../../lib/chrono/practice'
 import { fullTitle, gameMeta } from '../../../lib/meta'
-import { initialGame } from '../../../lib/server/api'
+import { initialGame, initialPractice } from '../../../lib/server/api'
 import { decodedId } from './id'
 
 type Props = { params: Promise<{ id: string }> }
@@ -29,5 +30,9 @@ export default async function GamePage({ params }: Props) {
   const { id } = await params
   await connection()
   const initial = await initialGame(decodedId(id))
-  return <GameView id={decodedId(id)} initial={initial} />
+  // A Practice replay says who else trades it (R8), from the agent's heartbeat.
+  const practice = initial.game && isPractice(initial.game) ? await initialPractice() : null
+  return (
+    <GameView id={decodedId(id)} initial={initial} counterparty={practice?.counterparty ?? null} />
+  )
 }

@@ -5,6 +5,7 @@
 // turn toward it. No new endpoint: both are routes the SDK client already has. The server's first
 // frame (R5, lib/server/initial.ts) draws the game, its real price included, until the first
 // poll answers; without it the page opens on a dial with no needle.
+import type { PracticeResponse } from '@horagon/sdk'
 import { isHoragonError } from '@horagon/sdk/errors'
 import { api } from '../lib/api'
 import { winnerOf } from '../lib/chrono/board'
@@ -12,17 +13,28 @@ import { proposedOutcome } from '../lib/chrono/evidence'
 import { gameDial } from '../lib/chrono/game'
 import { pollHealth } from '../lib/chrono/health'
 import { useNow } from '../lib/chrono/now'
+import { isPractice } from '../lib/chrono/practice'
 import { fullTitle, gameMeta } from '../lib/meta'
 import type { InitialGame } from '../lib/server/initial'
 import { usePoll } from '../lib/use-poll'
 import { GameLoading, GameScreen, NoGame } from './chrono/game-screen'
 import { GamePositions, MarketBlock } from './chrono/market-block'
+import { PracticeNote, PracticePlate } from './chrono/practice-plate'
 import { ErrorText } from './error-text'
 import { ShareButton } from './share-button'
 
 const SLOW_POLL_MS = 60_000
 
-export function GameView({ id, initial }: { id: string; initial?: InitialGame }) {
+export function GameView({
+  id,
+  initial,
+  counterparty = null,
+}: {
+  id: string
+  initial?: InitialGame
+  /** A Practice game's other trader, from GET /practice on the server; null when not known. */
+  counterparty?: PracticeResponse['counterparty'] | null
+}) {
   const detail = usePoll(`game:${id}`, () => api.games.get(id))
   const history = usePoll(`history:${id}`, () => api.games.history(id), 15_000)
   const game = detail.data ?? initial?.game
@@ -60,14 +72,21 @@ export function GameView({ id, initial }: { id: string; initial?: InitialGame })
   const proposed = evidence.data ? proposedOutcome(evidence.data.json) : null
   const dial = gameDial(game, winner, marketState.data?.startTs ?? null, proposed, now)
   const meta = gameMeta(game, now)
+  // A Practice replay (R8) wears its plate where the share button sits: it is never shared.
+  const practice = isPractice(game)
   return (
     <div className="space-y-3">
       <div className="flex items-start justify-between gap-3">
         <h1 className="pt-3 text-13 font-medium uppercase tracking-[0.2em] text-brass-500">
           {game.away} @ {game.home}
         </h1>
-        <ShareButton title={fullTitle(meta.title)} text={meta.title} />
+        {practice ? (
+          <PracticePlate />
+        ) : (
+          <ShareButton title={fullTitle(meta.title)} text={meta.title} />
+        )}
       </div>
+      {practice && <PracticeNote game={game} counterparty={counterparty} />}
       <GameScreen
         game={game}
         history={history.data}

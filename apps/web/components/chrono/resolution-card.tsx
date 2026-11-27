@@ -3,6 +3,7 @@
 // "open" next to a dial that says trading closed.
 import type { GameDetail } from '@horagon/sdk'
 import { externalLpNote, haltLinkLabel, resolutionStatus } from '../../lib/chrono/copy'
+import { isPractice, PRACTICE_RESULT_HEADING } from '../../lib/chrono/practice'
 import { milestones } from '../../lib/chrono/resolution'
 import type { DialState } from '../../lib/chrono/state'
 import { explorerAddress, explorerTx } from '../../lib/format'
@@ -25,7 +26,9 @@ export function ResolutionCard({ game, state }: { game: GameDetail; state: DialS
   if (!r) return null
   return (
     <section className="space-y-3 rounded-card border border-rule-faint p-4 text-13">
-      <h2 className="text-12 uppercase tracking-[0.3em] text-brass-500">Resolution</h2>
+      <h2 className="text-12 uppercase tracking-[0.3em] text-brass-500">
+        {isPractice(game) ? PRACTICE_RESULT_HEADING : 'Resolution'}
+      </h2>
       <p className="font-medium text-ivory-100" data-status>
         {resolutionStatus(state, game, r.outcome)}
       </p>
