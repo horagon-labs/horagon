@@ -4,6 +4,7 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { type StudyRow, StudySnapshotSchema, studySnapshot } from '@horagon/sdk/study'
+import { PublicKey } from '@solana/web3.js'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import AgentPage from '../app/agent/page'
@@ -26,6 +27,17 @@ const row = (n: number, over: Partial<StudyRow>): StudyRow => ({
   night: '2026-11-25',
   ...over,
 })
+/** A base58 string that decodes to a 32-byte key and prints back the same. */
+const isPubkey = (s: string) => {
+  try {
+    return new PublicKey(s).toBase58() === s
+  } catch {
+    return false
+  }
+}
+/** A market or game-market address: a real key, a PDA (off the curve), not a padded stand-in. */
+const isMarketKey = (s: string) =>
+  isPubkey(s) && !PublicKey.isOnCurve(new PublicKey(s).toBytes()) && !/1{6}/.test(s)
 const SIM = { seed: 2026, paths: 40 }
 const fixture = studySnapshot({
   generatedAt: '2026-11-28T08:00:00.000Z',
@@ -129,9 +141,30 @@ describe('/study from the empty snapshot (R10)', () => {
     expect(text).toContain('Simulation, not chain data')
   })
 
-  it('ships the empty snapshot: no fixture data reaches the page', () => {
+  // The committed snapshot is regenerated from chain after each night, so this pins what holds
+  // for any honest snapshot rather than its contents.
+  it('ships a chain snapshot: real program ids and real keys, no fixture data', () => {
     const committed = StudySnapshotSchema.parse(JSON.parse(read('content', 'study.json')))
-    expect(committed).toMatchObject({ generatedAt: null, slot: null, rows: [], missing: [] })
+    expect(committed.programIds).toEqual(ids)
+    if (committed.generatedAt === null) {
+      // Before the first run: no rows, no missing markets, no slot.
+      expect(committed).toMatchObject({ slot: null, rows: [], missing: [] })
+    } else {
+      expect(committed.slot).toEqual(expect.any(Number))
+    }
+    const keys = [...committed.rows, ...committed.missing].flatMap((r) => [r.market, r.gameMarket])
+    for (const key of keys) expect(isMarketKey(key), key).toBe(true)
+  })
+
+  it('tells a market address from a fixture string', () => {
+    const [pda] = PublicKey.findProgramAddressSync([Buffer.from('m')], new PublicKey(ids.pmAmm))
+    expect(isMarketKey(pda.toBase58())).toBe(true)
+    expect(isPubkey(ids.horagon)).toBe(true)
+    for (const n of [1, 2, 9]) {
+      expect(isMarketKey(row(n, {}).market)).toBe(false)
+      expect(isMarketKey(row(n, {}).gameMarket)).toBe(false)
+    }
+    expect(isMarketKey('not a key')).toBe(false)
   })
 })
 
