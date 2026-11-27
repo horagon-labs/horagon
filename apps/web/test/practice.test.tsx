@@ -6,10 +6,12 @@ import { join } from 'node:path'
 import type { PracticeResponse } from '@horagon/sdk'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
+import { GameScreen } from '../components/chrono/game-screen'
 import { PracticeNote, PracticePlate } from '../components/chrono/practice-plate'
 import { PracticeStrip } from '../components/chrono/practice-strip'
 import { ResolutionCard } from '../components/chrono/resolution-card'
-import { detail, game, market, NOW } from '../lib/chrono/fixtures'
+import { detail, game, history, market, NOW } from '../lib/chrono/fixtures'
+import { gameDial } from '../lib/chrono/game'
 import {
   COUNTERPARTY_AGENT,
   COUNTERPARTY_NONE,
@@ -107,6 +109,27 @@ describe('a Practice game on the game screen', () => {
     expect(unknown).toContain(PRACTICE_LINE)
     expect(unknown).not.toContain(COUNTERPARTY_NONE)
     expect(unknown).not.toContain(COUNTERPARTY_AGENT)
+  })
+
+  it('drops the agent disclosure under the dial unless the agent trades the replay', () => {
+    const screen = (g: ReturnType<typeof run>, counterparty?: 'agent' | 'none' | null) =>
+      renderToStaticMarkup(
+        <GameScreen
+          game={g}
+          history={history()}
+          dial={gameDial(g, g.markets[0], null, null, NOW)}
+          now={NOW}
+          stale={false}
+          right={null}
+          counterparty={counterparty}
+        />,
+      )
+    // "No one else trades this replay" must not sit beside "a disclosed agent trades".
+    expect(screen(run(), 'none')).not.toContain('data-agent-line')
+    expect(screen(run(), null)).not.toContain('data-agent-line')
+    expect(screen(run(), 'agent')).toContain('data-agent-line')
+    // An NBA game keeps it.
+    expect(screen(detail())).toContain('data-agent-line')
   })
 
   it('titles the page and the card "Practice · MEM @ CLE …"', () => {

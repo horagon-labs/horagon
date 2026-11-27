@@ -96,6 +96,7 @@ export function GameView({
         now={now}
         stale={health.stale}
         positions={portfolio?.wallet === address ? portfolio?.positions : undefined}
+        counterparty={counterparty}
         right={
           winner ? (
             <MarketBlock

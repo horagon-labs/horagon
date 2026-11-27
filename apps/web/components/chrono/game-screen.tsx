@@ -5,7 +5,7 @@
 // ResolutionCard on the right. Culture A2 (R8): the buzzer index on a stopped face, the Buzzer
 // stop (never on load), the ◆ at the average entry, the move chip, the story plate and clutch
 // dim (`data-hour`), each with its reduced-motion twin.
-import type { GameDetail, GameHistory, Position } from '@horagon/sdk'
+import type { GameDetail, GameHistory, Position, PracticeResponse } from '@horagon/sdk'
 import Link from 'next/link'
 import type { ReactNode } from 'react'
 import { winnerOf } from '../../lib/chrono/board'
@@ -14,6 +14,7 @@ import { faceCaption, liveNumber } from '../../lib/chrono/copy'
 import { useFeel, useMotionReduced } from '../../lib/chrono/feel'
 import { canTrade, type GameDial } from '../../lib/chrono/game'
 import { buzz } from '../../lib/chrono/haptics'
+import { isPractice } from '../../lib/chrono/practice'
 import { findRuns, freshRun, latestRun } from '../../lib/chrono/runs'
 import {
   atBuzzer,
@@ -47,6 +48,11 @@ export interface GameScreenProps {
   right: ReactNode
   /** The wallet's positions, for the ◆, string 15 and the holder's buzz (A2). */
   positions?: readonly Position[]
+  /**
+   * A Practice game's other trader (R8). The agent's disclosure under the dial shows on a replay
+   * only when the agent trades it: beside "No one else trades this replay" it would mislead.
+   */
+  counterparty?: PracticeResponse['counterparty'] | null
 }
 
 /** The failing-poll line (spec 4.4), on the screen, the loading face and the crown. */
@@ -142,7 +148,9 @@ export function GameScreen(p: GameScreenProps) {
               {stop > 0 ? STOP_SPOKEN : ''}
             </p>
           </div>
-          {winner && <AgentLine activity={game.activity} trading={canTrade(dial.state)} />}
+          {winner && (!isPractice(game) || p.counterparty === 'agent') && (
+            <AgentLine activity={game.activity} trading={canTrade(dial.state)} />
+          )}
           {winner && (
             <Tape history={p.history} market={winner.pubkey} home={game.home} away={game.away} />
           )}
