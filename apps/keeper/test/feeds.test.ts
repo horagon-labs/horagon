@@ -30,28 +30,25 @@ describe('ESPN scoreboard', () => {
   })
 
   it('reads 0 on the clock only when no time is left: under a second is 1, none read is null', () => {
-    type Ev = {
-      competitions: Array<{ status: { clock?: number; type: { name: string } } }>
-    }
-    const at = (patch: (s: Ev['competitions'][0]['status']) => void) => {
+    type Status = { clock?: number; type: { name: string } }
+    type Ev = { competitions: Array<{ status: Status }> }
+    /** The live game's clockSecs with ESPN's clock (undefined: none) and status name. */
+    const at = (clock: number | undefined, name?: string) => {
       const body = structuredClone(scoreboard)
       const s = (body.events[0] as Ev).competitions[0]?.status
       if (!s) throw new Error('fixture')
-      patch(s)
+      if (clock === undefined) delete s.clock
+      else s.clock = clock
+      if (name) s.type.name = name
       return parseEspnScoreboard(body).games[0]?.clockSecs
     }
-    expect(at((s) => void (s.clock = 0.4))).toBe(1)
-    expect(at((s) => void (s.clock = 0.1))).toBe(1)
-    expect(at((s) => void (s.clock = 0))).toBe(0)
-    expect(at((s) => void (s.clock = 45.3))).toBe(45)
-    expect(at((s) => void delete s.clock)).toBeNull()
+    expect(at(0.4)).toBe(1)
+    expect(at(0.1)).toBe(1)
+    expect(at(0)).toBe(0)
+    expect(at(45.3)).toBe(45)
+    expect(at(undefined)).toBeNull()
     // ESPN's end of a period is the horn, whatever the clock says.
-    expect(
-      at((s) => {
-        s.clock = 0.1
-        s.type.name = 'STATUS_END_PERIOD'
-      }),
-    ).toBe(0)
+    expect(at(0.1, 'STATUS_END_PERIOD')).toBe(0)
   })
 
   it('maps GS, NY, NO, SA, UTAH and WSH to NBA tricodes', () => {
