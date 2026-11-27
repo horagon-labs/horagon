@@ -87,7 +87,9 @@ export function indexLag(
 /** One per app: the cached part of the ops numbers, read again once older than OPS_TTL_SECS. */
 export function healthOpsReader(deps: ApiDeps) {
   let cached: { at: number; value: Promise<Cached> } | null = null
-  return (heartbeat: { info: Record<string, unknown> } | null): Promise<HealthOps> => {
+  return async (
+    heartbeat: Promise<{ info: Record<string, unknown> } | null>,
+  ): Promise<HealthOps> => {
     const now = deps.now()
     if (!cached || now - cached.at > OPS_TTL_SECS) {
       const at = now
@@ -96,6 +98,8 @@ export function healthOpsReader(deps: ApiDeps) {
       )
       cached = { at, value }
     }
-    return cached.value.then((c) => ({ ...c, index: indexLag(heartbeat, now) }))
+    // The chain and backlog reads run beside the health checks' own reads, not after them.
+    const [c, hb] = await Promise.all([cached.value, heartbeat])
+    return { ...c, index: indexLag(hb, now) }
   }
 }
