@@ -4,13 +4,24 @@
 // watch (with SPONSOR_PUBKEY). Each step fails on its own, logs, and is retried on its next
 // turn; the heartbeat goes out every round regardless. SIGTERM ends the round after the step in
 // progress. Every RPC's cluster is verified before anything else runs; a backup RPC that does
-// not answer is left out.
+// not answer is left out. The indexer and the ATA watch read through HORAGON_INDEX_RPC_URL when
+// it is set, and share one IndexPace: a rate limit holds their reads (a held pass returns at
+// once) and an indexer pass starts no market after 3 s, so the next round's tick (halts,
+// proposals, finalizes) never waits on them for long.
 import { heartbeat } from '@horagon/db'
 import { errorSummary, HoragonProgram } from '@horagon/sdk'
 import { type Alerter, logAlerter, personAlertWindow, telegramAlerter } from './alerts'
 import { pruneArchive } from './archive-retention'
 import { watchSponsoredAtas } from './ata-watch'
-import { BACKUP_RPC_TRIES, createLogger, loadConfig, makeConnection, verifyCluster } from './config'
+import {
+  BACKUP_RPC_TRIES,
+  createLogger,
+  indexReadConnection,
+  loadConfig,
+  makeConnection,
+  rpcHost,
+  verifyCluster,
+} from './config'
 import { connectKeeperDb } from './db'
 import { loadRatings } from './elo'
 import { TxSender } from './executor'
@@ -18,6 +29,7 @@ import { faucetClaim } from './faucet'
 import { espnFeed, RawArchive } from './feeds/espn'
 import { loadReplayDir, replayFeed } from './feeds/replay'
 import type { Feed } from './feeds/types'
+import { IndexPace } from './index-pace'
 import { indexOnce } from './indexer'
 import { dueEvery, FailureStreak, type RoundStep, roundSteps, runRound, runStep } from './loop'
 import { evidenceUri } from './propose'
@@ -64,6 +76,21 @@ async function main(): Promise<void> {
 
   const { db, close } = connectKeeperDb(cfg.databaseUrl)
   const sender = new TxSender({ connections, payer: cfg.attestor, log, alerts })
+  // Index reads: their own RPC when set (verified like a backup), else the active main one.
+  const indexConnection = await indexReadConnection({
+    url: cfg.indexRpcUrl,
+    fallback: () => sender.connection,
+    cluster: cfg.cluster,
+    log,
+    make: (url) => makeConnection(url, undefined, { onActivity: () => guard.touch() }),
+    onDown: async (error) => {
+      await alerts.send(
+        'rpc-index-down',
+        `Index RPC ${cfg.indexRpcUrl ? rpcHost(cfg.indexRpcUrl) : ''} failed the cluster check ${BACKUP_RPC_TRIES} times (${error}); index reads use the main RPC until the keeper restarts.`,
+      )
+    },
+  })
+  const pace = new IndexPace({ log, alerts })
   const program = new HoragonProgram({ collateralMint: cfg.collateralMint })
   const ratings = await loadRatings(cfg.eloFile)
   const now = () => Math.floor(Date.now() / 1000)
@@ -161,7 +188,8 @@ async function main(): Promise<void> {
         const index = await step('index', () =>
           indexOnce({
             db,
-            connection: sender.connection,
+            connection: indexConnection(),
+            pace,
             collateralMint: cfg.collateralMint,
             authority: program.authority,
             alerts,
@@ -207,7 +235,15 @@ async function main(): Promise<void> {
       'ata-watch': async () => {
         if (!sponsor) return
         await step('ata-watch', () =>
-          watchSponsoredAtas({ db, connection: sender.connection, sponsor, alerts, log, now }),
+          watchSponsoredAtas({
+            db,
+            connection: indexConnection(),
+            sponsor,
+            alerts,
+            log,
+            now,
+            pace,
+          }),
         )
       },
     }

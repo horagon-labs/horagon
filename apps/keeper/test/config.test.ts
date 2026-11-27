@@ -12,6 +12,7 @@ import {
   ClusterMismatch,
   createLogger,
   DEVNET_GENESIS_HASH,
+  indexReadConnection,
   isClusterRefusal,
   loadConfig,
   loadKeypair,
@@ -20,6 +21,7 @@ import {
   REPO_DIR,
   resolveKeyPath,
   rpcEndpoints,
+  rpcHost,
   telegramSettings,
   timeoutFetch,
   verifyCluster,
@@ -532,6 +534,132 @@ describe('loadConfig', () => {
       expect(err?.message).toBe('TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID must be set together')
       expect(err?.message).not.toMatch(/T0K|4242/)
     }
+  })
+})
+
+describe('HORAGON_INDEX_RPC_URL', () => {
+  const KEYED = 'https://index.devnet.example/rpc/v1?api-key=SECRET'
+
+  it('is optional: unset or blank uses the main RPC', () => {
+    expect(loadConfig(env()).indexRpcUrl).toBeNull()
+    expect(loadConfig(env({ HORAGON_INDEX_RPC_URL: '' })).indexRpcUrl).toBeNull()
+    expect(loadConfig(env({ HORAGON_INDEX_RPC_URL: KEYED })).indexRpcUrl).toBe(KEYED)
+  })
+
+  it('takes https only and never mainnet, without quoting the URL', () => {
+    const http = () =>
+      loadConfig(env({ HORAGON_INDEX_RPC_URL: 'http://index.devnet.example?k=SECRET' }))
+    expect(http).toThrow('HORAGON_INDEX_RPC_URL')
+    try {
+      http()
+    } catch (err) {
+      expect((err as Error).message).not.toContain('SECRET')
+    }
+    expect(() =>
+      loadConfig(env({ HORAGON_INDEX_RPC_URL: 'https://api.mainnet-beta.solana.com' })),
+    ).toThrow('devnet only')
+  })
+
+  it('names the host only', () => {
+    expect(rpcHost(KEYED)).toBe('index.devnet.example')
+    expect(rpcHost('https://user:pw@rpc.example:8899/x?y=z')).toBe('rpc.example')
+    expect(rpcHost('not a url')).toBe('(invalid URL)')
+  })
+
+  const fakeConn = (genesis: string | Error) =>
+    ({
+      async getGenesisHash() {
+        if (genesis instanceof Error) throw genesis
+        return genesis
+      },
+    }) as unknown as Connection
+  const capture = () => {
+    const lines: Array<Record<string, unknown>> = []
+    const log = pino({ level: 'info' }, { write: (l: string) => void lines.push(JSON.parse(l)) })
+    return { lines, log }
+  }
+
+  it('unset: index reads follow the main connection, whichever is active', async () => {
+    let active = fakeConn(DEVNET_GENESIS_HASH)
+    const made: string[] = []
+    const get = await indexReadConnection({
+      url: null,
+      fallback: () => active,
+      cluster: 'devnet',
+      log: silent,
+      make: (u) => {
+        made.push(u)
+        return fakeConn(DEVNET_GENESIS_HASH)
+      },
+    })
+    expect(get()).toBe(active)
+    active = fakeConn(DEVNET_GENESIS_HASH)
+    expect(get()).toBe(active)
+    expect(made).toEqual([])
+  })
+
+  it('set: a separate, verified Connection on that URL, logged by host only', async () => {
+    const main = fakeConn(DEVNET_GENESIS_HASH)
+    const own = fakeConn(DEVNET_GENESIS_HASH)
+    const made: string[] = []
+    const { lines, log } = capture()
+    const get = await indexReadConnection({
+      url: KEYED,
+      fallback: () => main,
+      cluster: 'devnet',
+      log,
+      make: (u) => {
+        made.push(u)
+        return own
+      },
+    })
+    expect(made).toEqual([KEYED])
+    expect(get()).toBe(own)
+    expect(get()).not.toBe(main)
+    expect(lines.at(-1)).toMatchObject({ indexRpcHost: 'index.devnet.example' })
+    expect(JSON.stringify(lines)).not.toContain('SECRET')
+    expect(JSON.stringify(lines)).not.toContain('/rpc/v1')
+  })
+
+  it('refuses a mainnet or wrong-cluster index RPC, and falls back from one that does not answer', async () => {
+    const main = fakeConn(DEVNET_GENESIS_HASH)
+    const sleep = async () => {}
+    await expect(
+      indexReadConnection({
+        url: KEYED,
+        fallback: () => main,
+        cluster: 'devnet',
+        log: silent,
+        sleep,
+        make: () => fakeConn(MAINNET_GENESIS_HASH),
+      }),
+    ).rejects.toThrow(HoragonError)
+    await expect(
+      indexReadConnection({
+        url: KEYED,
+        fallback: () => main,
+        cluster: 'devnet',
+        log: silent,
+        sleep,
+        make: () => fakeConn('4uhcVJyU9pJkvQyS88uRDiswHXSCkY3zQawwpjk2NsNY'),
+      }),
+    ).rejects.toThrow(ClusterMismatch)
+
+    const { lines, log } = capture()
+    const down: string[] = []
+    const get = await indexReadConnection({
+      url: KEYED,
+      fallback: () => main,
+      cluster: 'devnet',
+      log,
+      sleep,
+      make: () => fakeConn(new Error(`connect ECONNREFUSED ${KEYED}`)),
+      onDown: async (error) => void down.push(error),
+    })
+    expect(get()).toBe(main)
+    expect(down).toHaveLength(1)
+    expect(lines.at(-1)).toMatchObject({ level: 40, indexRpcHost: 'index.devnet.example' })
+    expect(JSON.stringify([lines, down])).not.toContain('SECRET')
   })
 })
 

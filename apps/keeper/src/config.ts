@@ -58,6 +58,8 @@ const EnvSchema = z.object({
   HORAGON_RPC_BACKUP_URL: z.url({ protocol: /^https?$/ }).optional(),
   /** Comma list of wss:// URLs, by position to the RPC URLs; an empty entry is derived. */
   RPC_WS_URLS: z.string().optional(),
+  /** The indexer's and ATA watch's own RPC (reads only); unset uses HORAGON_RPC_URL. */
+  HORAGON_INDEX_RPC_URL: z.preprocess(blank, z.url({ protocol: /^https$/ }).optional()),
   HORAGON_CLUSTER: z.enum(['devnet', 'localnet']).default('devnet'),
   DATABASE_URL: z.string().min(1),
   ATTESTOR_KEYPAIR: z.string().min(1).default('.keys/attestor.json'),
@@ -139,6 +141,8 @@ export interface RpcEndpoint {
 export interface KeeperConfig {
   /** Primary first, then the backup. */
   rpcs: RpcEndpoint[]
+  /** HORAGON_INDEX_RPC_URL, or null: index reads use the main connection. Log its host only. */
+  indexRpcUrl: string | null
   cluster: Cluster
   databaseUrl: string
   attestor: Keypair
@@ -352,6 +356,56 @@ export function makeConnection(
   })
 }
 
+/** The host of an RPC URL, the only part of it that is ever logged (the rest may hold a key). */
+export function rpcHost(url: string): string {
+  try {
+    return new URL(url).hostname
+  } catch {
+    return '(invalid URL)'
+  }
+}
+
+/**
+ * The Connection the indexer and the ATA watch read through. Without HORAGON_INDEX_RPC_URL it is
+ * the main one (`fallback`, read on every call, so it follows TxSender's switch to the backup).
+ * With it, a Connection of its own, cluster-checked like a backup: a refusal throws (fail
+ * closed); one that has not answered after BACKUP_RPC_TRIES is left out for the main one, with a
+ * warning and `onDown`. Logs name its host only.
+ */
+export async function indexReadConnection<C extends Pick<Connection, 'getGenesisHash'>>(opts: {
+  url: string | null
+  fallback: () => C
+  cluster: Cluster
+  log: Logger
+  make: (url: string) => C
+  sleep?: (ms: number) => Promise<void>
+  onDown?: (error: string) => Promise<void>
+}): Promise<() => C> {
+  if (!opts.url) return opts.fallback
+  const indexRpcHost = rpcHost(opts.url)
+  const own = opts.make(opts.url)
+  const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)))
+  for (let attempt = 0; ; attempt++) {
+    try {
+      await assertCluster(own, opts.cluster)
+      opts.log.info({ indexRpcHost }, 'index reads use their own RPC')
+      return () => own
+    } catch (err) {
+      if (isClusterRefusal(err)) throw err
+      const error = errorSummary(err).message
+      if (attempt + 1 >= BACKUP_RPC_TRIES) {
+        opts.log.warn(
+          { indexRpcHost, error, tries: BACKUP_RPC_TRIES },
+          'index RPC not verified; index reads use the main RPC',
+        )
+        await opts.onDown?.(error)
+        return opts.fallback
+      }
+      await sleep(5_000 * 2 ** attempt)
+    }
+  }
+}
+
 /** Issue paths and messages only: zod never puts the input value in its messages by default. */
 const issues = (err: ZodError) =>
   err.issues.map((i) => `${i.path.join('.') || '(root)'}: ${i.message}`).join('; ')
@@ -390,6 +444,7 @@ export function loadConfig(
     [e.HORAGON_RPC_URL, ...(e.HORAGON_RPC_BACKUP_URL ? [e.HORAGON_RPC_BACKUP_URL] : [])],
     e.RPC_WS_URLS,
   )
+  if (e.HORAGON_INDEX_RPC_URL) assertNotMainnet(e.HORAGON_INDEX_RPC_URL)
   if (e.KEEPER_FEED === 'replay' && (!e.REPLAY_TAG || !e.REPLAY_TIPOFF)) {
     throw new Error('KEEPER_FEED=replay needs REPLAY_TAG and REPLAY_TIPOFF')
   }
@@ -399,6 +454,7 @@ export function loadConfig(
   const path = (p: string) => resolve(repoDir, p)
   return {
     rpcs,
+    indexRpcUrl: e.HORAGON_INDEX_RPC_URL ?? null,
     cluster: e.HORAGON_CLUSTER,
     databaseUrl: e.DATABASE_URL,
     attestor: loadKeypair(resolveKeyPath(e.ATTESTOR_KEYPAIR, repoDir)),

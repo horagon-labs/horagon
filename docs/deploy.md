@@ -93,6 +93,16 @@ Run the first night after the deploy that brings auto-propose with `KEEPER_AUTO_
 then `on`. Write the balldontlie key into `.env.keeper` on the VPS yourself, never in a chat, the
 repository or a command line.
 
+## Index reads (the keeper's variable)
+
+The indexer and the ATA watch only read the chain, and the public devnet endpoint can rate-limit
+those reads (`docs/runbook.md`, procedure L). They can take their own RPC, read from
+`~/horagon/.env.keeper` like the variables above:
+
+| Variable                | Default | What it does                                                                                                                                                           |
+| ----------------------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `HORAGON_INDEX_RPC_URL` | unset   | An https devnet RPC for the indexer and the ATA watch (reads only). Unset or blank: they read through `HORAGON_RPC_URL`. Logged by host only, cluster-checked at start |
+
 ## Reference agent (once, before its first swap)
 
 The agent is optional and off by default (`AGENT_ENABLED` unset). Before it ever trades:
