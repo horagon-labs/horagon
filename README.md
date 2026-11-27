@@ -427,18 +427,18 @@ Public keys only, from [`docs/metrics-wallets.json`](docs/metrics-wallets.json) 
 program's `Config` account. `node ops/check-upgrade-authority.mjs` prints who can upgrade the
 program today, read from chain.
 
-| Role                                   | Public key                                     | Holder                                                                                                   |
-| -------------------------------------- | ---------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
-| Program `horagon`                      | `HtDJ3vfx8vtFSmskm2Ks39kBMuDmFZH3H2B173BB9qHF` | Code; upgradable by the upgrade authority                                                                |
-| Admin (`Config.admin`), deployer       | `D6CYaG4YPm52oetuEy5yzXPSWsFv7yCWp2YAHeaodviR` | The operator. Also the upgrade authority until it moves to a cold key held offline (runbook procedure M) |
-| Attestor                               | `H6kzKfTP6Dq8YQmcGeL2tbNKmRSiXSpB3vpB1cyJ5jgx` | The keeper on the VPS                                                                                    |
-| Guardian 1                             | `4fPyTjxT2haHHg28M4JRqBjVj4n3dTeEKptgFAz7mY9h` | The operator                                                                                             |
-| Guardian 2                             | `AmqWjy4iVqK5RKF97YXawW7ZbGJo1U63bWF6Mo9vi9iQ` | Made for the watcher; not in the config (its second guardian slot is empty)                              |
-| Sponsor                                | `32tQ3JDbnnQSqs51BDNzgcy82dW7AKK2EMKDo9ACBnrc` | The API on Vercel                                                                                        |
-| Authority PDA                          | `mSFBJEB98CWSVaJwjQqRsTgmdPuoctnuav9Phi4SjX2`  | The program (no private key)                                                                             |
-| Treasury (the Authority's mUSDC ATA)   | `J8npAeSbcmjiYpjQGkw4oLreJFGKRaMCVbMkCRdXi93G` | The program, through the Authority PDA                                                                   |
-| Team burners (the agent's is one)      | `9v2ZmruntFtM4HmUFNq3Nn3rpXhV3uh8FmyRWafVbcHN` | The team; excluded from every metric                                                                     |
-|                                        | `7Da24CpktL9Cp4st1iQ3U4ZKHgsRYXXEJx5oGbgFWP1Z` |                                                                                                          |
+| Role                                 | Public key                                     | Holder                                                                                                   |
+| ------------------------------------ | ---------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| Program `horagon`                    | `HtDJ3vfx8vtFSmskm2Ks39kBMuDmFZH3H2B173BB9qHF` | Code; upgradable by the upgrade authority                                                                |
+| Admin (`Config.admin`), deployer     | `D6CYaG4YPm52oetuEy5yzXPSWsFv7yCWp2YAHeaodviR` | The operator. Also the upgrade authority until it moves to a cold key held offline (runbook procedure M) |
+| Attestor                             | `H6kzKfTP6Dq8YQmcGeL2tbNKmRSiXSpB3vpB1cyJ5jgx` | The keeper on the VPS                                                                                    |
+| Guardian 1                           | `4fPyTjxT2haHHg28M4JRqBjVj4n3dTeEKptgFAz7mY9h` | The operator                                                                                             |
+| Guardian 2                           | `AmqWjy4iVqK5RKF97YXawW7ZbGJo1U63bWF6Mo9vi9iQ` | Made for the watcher; not in the config (its second guardian slot is empty)                              |
+| Sponsor                              | `32tQ3JDbnnQSqs51BDNzgcy82dW7AKK2EMKDo9ACBnrc` | The API on Vercel                                                                                        |
+| Authority PDA                        | `mSFBJEB98CWSVaJwjQqRsTgmdPuoctnuav9Phi4SjX2`  | The program (no private key)                                                                             |
+| Treasury (the Authority's mUSDC ATA) | `J8npAeSbcmjiYpjQGkw4oLreJFGKRaMCVbMkCRdXi93G` | The program, through the Authority PDA                                                                   |
+| Team burners (the agent's is one)    | `9v2ZmruntFtM4HmUFNq3Nn3rpXhV3uh8FmyRWafVbcHN` | The team; excluded from every metric                                                                     |
+|                                      | `7Da24CpktL9Cp4st1iQ3U4ZKHgsRYXXEJx5oGbgFWP1Z` |                                                                                                          |
 
 The wallets file also lists three `spike` wallets from the Tier 0 tests; they sign nothing in
 production.
