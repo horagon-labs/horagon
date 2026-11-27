@@ -15,6 +15,7 @@ import {
   getMarketIdReservation,
   heartbeat,
   insertPricePoint,
+  insertSnapshot,
   insertTrades,
   latestPrices,
   latestTradeSlots,
@@ -23,6 +24,7 @@ import {
   listMarketTrades,
   listOps,
   listOpsSince,
+  listSnapshotsOf,
   logOps,
   markAtaClosed,
   markAtasChecked,
@@ -463,6 +465,32 @@ describe('unresolvedBacklog', () => {
       count: 1,
       oldestEndTs: new Date('2026-11-20T23:00:00Z'),
     })
+  })
+})
+
+describe('listSnapshotsOf (first-screen /nights)', () => {
+  it('lists the snapshots of several games in one read, by game then time', async () => {
+    expect(await listSnapshotsOf(h.db, [])).toEqual([])
+    await seedGames('nba-1', 'nba-2', 'nba-3')
+    const snap = (gameId: string, secs: number, period: number) => ({
+      gameId,
+      ts: new Date(tipoff.getTime() + secs * 1000),
+      homeScore: period,
+      awayScore: 0,
+      period,
+      clockSecs: 700,
+      modelProb: 0.5,
+    })
+    await insertSnapshot(h.db, snap('nba-2', 60, 2))
+    await insertSnapshot(h.db, snap('nba-1', 90, 1))
+    await insertSnapshot(h.db, snap('nba-2', 30, 1))
+    await insertSnapshot(h.db, snap('nba-3', 10, 1))
+    const rows = await listSnapshotsOf(h.db, ['nba-2', 'nba-1', 'nba-2', 'nba-9'])
+    expect(rows.map((r) => [r.gameId, r.period])).toEqual([
+      ['nba-1', 1],
+      ['nba-2', 1],
+      ['nba-2', 2],
+    ])
   })
 })
 

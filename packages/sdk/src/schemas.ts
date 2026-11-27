@@ -466,6 +466,86 @@ export const RecordSchema = z
   })
   .refine((r) => r.final <= r.markets, { message: 'more final results than markets' })
 
+/** At most this many points in each line of a night's game (`NightGameSchema.model`, `.price`). */
+export const NIGHT_POINTS = 60
+
+/** One point of a night's line: [unix seconds, the winner's chance 0..1]. */
+export const NightPointSchema = z.tuple([UnixSecondsSchema, ProbabilitySchema])
+
+/**
+ * The lowest the winner's chance went while the game was on, and the game at that moment: the
+ * price's low once the market moved (`from: 'price'`), else the model's (`from: 'model'`).
+ */
+export const NightLowSchema = z.object({
+  ts: UnixSecondsSchema,
+  /** The winner's chance, 0..1. */
+  prob: ProbabilitySchema,
+  period: z.number().int().min(1),
+  clockSecs: z.number().int().nonnegative().nullable(),
+  winnerScore: z.number().int().nonnegative(),
+  loserScore: z.number().int().nonnegative(),
+  from: z.enum(['price', 'model']),
+})
+
+/**
+ * One final NBA game of a night with its winner market (first-screen story, W1), told from the
+ * winner's side: every chance and price below is the winner's, not the home team's.
+ */
+export const NightGameSchema = z.object({
+  id: GameIdSchema,
+  home: z.string(),
+  away: z.string(),
+  homeScore: z.number().int(),
+  awayScore: z.number().int(),
+  winner: z.string(),
+  loser: z.string(),
+  scheduledTipoff: z.iso.datetime(),
+  /** The last period played: 5 and up is overtime. */
+  period: z.number().int(),
+  /** The winner market. */
+  market: PubkeySchema,
+  /** The winner's opening price, in basis points (the model's pre-game % written on chain). */
+  openedBps: z.number().int().min(0).max(10_000),
+  /** The winner's side of the last indexed price, which stops at the halt; null when none. */
+  closed: ProbabilitySchema.nullable(),
+  /** Someone traded and the closing price is at least half a point from the opening one. */
+  moved: z.boolean(),
+  /** The winner opened at 33% or less. */
+  upset: z.boolean(),
+  overtime: z.boolean(),
+  low: NightLowSchema.nullable(),
+  /** When each period began: the first snapshot of Q1, Q2, ... (overtime periods after Q4). */
+  periodStarts: z.array(UnixSecondsSchema),
+  /** The model's line from tip-off to the first Final snapshot, its low and high kept. */
+  model: z.array(NightPointSchema).max(NIGHT_POINTS),
+  /** The price's line from the open to the final buzzer, its low and high kept. */
+  price: z.array(NightPointSchema).max(NIGHT_POINTS),
+  /** Swaps on the winner market by class (R2b `gameActivity`): fans, the reference agent, others. */
+  calls: z.object({
+    fans: CountSchema,
+    fanWallets: CountSchema,
+    agent: CountSchema,
+    others: CountSchema,
+  }),
+  resolution: z.object({
+    market: PubkeySchema,
+    status: MarketStatusSchema,
+    /** As `ResolutionSchema.challengeEndsAt`: only while proposed and the window was read. */
+    challengeEndsAt: UnixSecondsSchema.nullable(),
+  }),
+})
+
+/**
+ * `GET /api/v1/nights/{date}` (first-screen story): the final NBA games of one ET date with a
+ * winner market, by tip-off. Practice never counts.
+ */
+export const NightSchema = z.object({
+  date: z.iso.date(),
+  /** The games whose winner opened at 33% or less. */
+  upsets: CountSchema,
+  games: z.array(NightGameSchema),
+})
+
 export type GameStatus = z.infer<typeof GameStatusSchema>
 export type MarketKind = z.infer<typeof MarketKindSchema>
 export type MarketStatus = z.infer<typeof MarketStatusSchema>
@@ -500,6 +580,10 @@ export type Problem = z.infer<typeof ProblemSchema>
 export type FlagsResponse = z.infer<typeof FlagsResponseSchema>
 export type PracticeResponse = z.infer<typeof PracticeResponseSchema>
 export type RecordResponse = z.infer<typeof RecordSchema>
+export type NightPoint = z.infer<typeof NightPointSchema>
+export type NightLow = z.infer<typeof NightLowSchema>
+export type NightGame = z.infer<typeof NightGameSchema>
+export type Night = z.infer<typeof NightSchema>
 
 /** On-chain `GameMarket.kind` <-> API name. */
 export const MARKET_KIND_CODE: Readonly<Record<MarketKind, 0 | 1>> = { winner: 0, 'second-half': 1 }

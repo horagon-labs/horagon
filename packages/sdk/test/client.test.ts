@@ -207,3 +207,66 @@ describe('HoragonClient.record (first-screen proof rail)', () => {
     }
   })
 })
+
+describe('HoragonClient.nights (first-screen story)', () => {
+  const MARKET = '54WUazC5Dcit8K8mjigTgNQfvEjeFxdUWU7QEDNPaD4G'
+  const low = {
+    ts: 1795659246,
+    prob: 0.0737,
+    period: 3,
+    clockSecs: 341,
+    winnerScore: 63,
+    loserScore: 74,
+    from: 'model',
+  }
+  const nightGame = {
+    id: 'nba-401909320',
+    home: 'OKC',
+    away: 'MIN',
+    homeScore: 106,
+    awayScore: 113,
+    winner: 'MIN',
+    loser: 'OKC',
+    scheduledTipoff: '2026-11-26T01:00:00.000Z',
+    period: 4,
+    market: MARKET,
+    openedBps: 2819,
+    closed: 0.2819,
+    moved: false,
+    upset: true,
+    overtime: false,
+    low,
+    periodStarts: [1795653794, 1795655000, 1795657000, 1795659900],
+    model: [
+      [1795653794, 0.32],
+      [1795659246, 0.0737],
+      [1795662611, 1],
+    ],
+    price: [[1795649410, 0.2819]],
+    calls: { fans: 0, fanWallets: 0, agent: 0, others: 0 },
+    resolution: { market: MARKET, status: 'recycled', challengeEndsAt: null },
+  }
+  const night = { date: '2026-11-25', upsets: 1, games: [nightGame] }
+
+  it('asks /nights/{date} and parses the night', async () => {
+    const s = scripted([json(night)])
+    const c = new HoragonClient({ baseUrl: 'https://h.test/api/v1', fetch: s.fetchImpl })
+    await expect(c.nights('2026-11-25')).resolves.toEqual(night)
+    expect(s.calls).toEqual([{ url: 'https://h.test/api/v1/nights/2026-11-25', method: 'GET' }])
+  })
+
+  it('refuses a line over 60 points, a low from elsewhere, or a negative count', async () => {
+    const many = Array.from({ length: 61 }, (_, i) => [1795653794 + i, 0.5])
+    for (const bad of [
+      { ...nightGame, model: many },
+      { ...nightGame, price: many },
+      { ...nightGame, low: { ...low, from: 'crowd' } },
+      { ...nightGame, calls: { ...nightGame.calls, agent: -1 } },
+      { ...nightGame, openedBps: 10_001 },
+    ]) {
+      const s = scripted([json({ ...night, games: [bad] })])
+      const c = new HoragonClient({ baseUrl: 'https://h.test', fetch: s.fetchImpl, retries: 0 })
+      await expect(c.nights('2026-11-25')).rejects.toMatchObject({ code: 'NETWORK' })
+    }
+  })
+})

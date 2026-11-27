@@ -29,6 +29,8 @@ import {
   MarketStateSchema,
   type MeResponse,
   MeResponseSchema,
+  type Night,
+  NightSchema,
   type Position,
   type PositionsResponse,
   PositionsResponseSchema,
@@ -250,6 +252,14 @@ export class HoragonClient {
   /** The NBA winner markets created on chain and the results final on chain (proof rail). */
   record(): Promise<RecordResponse> {
     return this.get('/record', {}, RecordSchema)
+  }
+
+  /**
+   * One ET night's final NBA games with a winner market, told from the winner's side: opening and
+   * closing price, the low, both lines and who traded (first-screen story). `date` is YYYY-MM-DD.
+   */
+  nights(date: string): Promise<Night> {
+    return this.get(`/nights/${encodeURIComponent(date)}`, {}, NightSchema)
   }
 
   faucet(wallet: string): Promise<FaucetResponse> {

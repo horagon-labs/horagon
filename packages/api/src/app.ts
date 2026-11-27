@@ -35,6 +35,7 @@ import {
   MarketStateSchema,
   MeResponseSchema,
   marketKindName,
+  NightSchema,
   PositionsResponseSchema,
   PracticeResponseSchema,
   PubkeySchema,
@@ -60,6 +61,7 @@ import { claimFaucet } from './faucet'
 import { flagsOf, provideFlags, requireFlags } from './flags'
 import { healthOpsReader } from './health-ops'
 import { MeQuerySchema, meFor, positionsAndNights } from './me'
+import { nightFor } from './nights'
 import { practiceFor } from './practice'
 import { ApiError, problemResponse } from './problem'
 import {
@@ -523,6 +525,22 @@ export function createApp(deps: ApiDeps) {
       // The first screen's proof rail: a count that moves a few times a night.
       c.header('cache-control', 's-maxage=60, stale-while-revalidate=60')
       return c.json(await countMarkets(deps.db, 'NBA'), 200)
+    },
+  )
+
+  app.openapi(
+    createRoute({
+      method: 'get',
+      path: '/nights/{date}',
+      request: { params: z.object({ date: z.iso.date() }) },
+      responses: {
+        200: json(NightSchema, "One ET night's final NBA games, told from the winner's side"),
+      },
+    }),
+    async (c) => {
+      // The first screen's story: a past night changes only while its results resolve.
+      c.header('cache-control', 's-maxage=600, stale-while-revalidate=600')
+      return c.json(await nightFor(deps.db, c.req.valid('param').date, disputeWindow), 200)
     },
   )
 

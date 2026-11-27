@@ -1,0 +1,137 @@
+{
+  "date": "2026-11-27",
+  "upsets": 0,
+  "games": [
+    {
+      "id": "nba-401909400",
+      "home": "NYK",
+      "away": "MIA",
+      "homeScore": 110,
+      "awayScore": 100,
+      "winner": "NYK",
+      "loser": "MIA",
+      "scheduledTipoff": "2026-11-28T00:00:00.000Z",
+      "period": 4,
+      "market": "GmaDrppBC7P5ARKV8g3djiwP89vz1jLK23V2GBjuAEGB",
+      "openedBps": 6000,
+      "closed": 0.81,
+      "moved": true,
+      "upset": false,
+      "overtime": false,
+      "low": {
+        "ts": 1795826100,
+        "prob": 0.35,
+        "period": 2,
+        "clockSecs": 360,
+        "winnerScore": 38,
+        "loserScore": 47,
+        "from": "price"
+      },
+      "periodStarts": [
+        1795824000,
+        1795825500,
+        1795827600,
+        1795829100
+      ],
+      "model": [
+        [
+          1795824000,
+          0.62
+        ],
+        [
+          1795824600,
+          0.6
+        ],
+        [
+          1795825200,
+          0.58
+        ],
+        [
+          1795825500,
+          0.58
+        ],
+        [
+          1795826100,
+          0.33
+        ],
+        [
+          1795826700,
+          0.4
+        ],
+        [
+          1795827600,
+          0.4
+        ],
+        [
+          1795828200,
+          0.3
+        ],
+        [
+          1795828800,
+          0.45
+        ],
+        [
+          1795829100,
+          0.45
+        ],
+        [
+          1795829700,
+          0.72
+        ],
+        [
+          1795830300,
+          0.99
+        ],
+        [
+          1795830360,
+          1
+        ]
+      ],
+      "price": [
+        [
+          1795820400,
+          0.6
+        ],
+        [
+          1795822200,
+          0.61
+        ],
+        [
+          1795824600,
+          0.58
+        ],
+        [
+          1795826100,
+          0.35
+        ],
+        [
+          1795828200,
+          0.42
+        ],
+        [
+          1795829700,
+          0.7
+        ],
+        [
+          1795830300,
+          0.8
+        ],
+        [
+          1795830340,
+          0.81
+        ]
+      ],
+      "calls": {
+        "fans": 2,
+        "fanWallets": 1,
+        "agent": 12,
+        "others": 0
+      },
+      "resolution": {
+        "market": "GmaDrppBC7P5ARKV8g3djiwP89vz1jLK23V2GBjuAEGB",
+        "status": "proposed",
+        "challengeEndsAt": null
+      }
+    }
+  ]
+}

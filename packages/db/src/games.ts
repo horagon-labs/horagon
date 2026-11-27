@@ -154,6 +154,19 @@ export async function listSnapshots(db: Db, gameId: string): Promise<SnapshotRow
     .orderBy(asc(gameSnapshots.ts))
 }
 
+/**
+ * The snapshots of several games in one read (first-screen /nights), by game, then time.
+ * Duplicate and unknown ids are ignored; an empty list runs no query.
+ */
+export async function listSnapshotsOf(db: Db, gameIds: readonly string[]): Promise<SnapshotRow[]> {
+  if (gameIds.length === 0) return []
+  return db
+    .select()
+    .from(gameSnapshots)
+    .where(inArray(gameSnapshots.gameId, [...new Set(gameIds)]))
+    .orderBy(asc(gameSnapshots.gameId), asc(gameSnapshots.ts))
+}
+
 /** The exact JCS string is stored, so the published bytes are the hashed bytes. */
 export async function putEvidence(
   db: Db,
