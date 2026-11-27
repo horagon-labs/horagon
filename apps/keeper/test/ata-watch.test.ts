@@ -31,6 +31,7 @@ import pino, { type Logger } from 'pino'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { Alerter } from '../src/alerts'
 import { type AtaWatchDeps, closeOf, watchSponsoredAtas } from '../src/ata-watch'
+import { IndexPace } from '../src/index-pace'
 
 const sponsor = Keypair.generate().publicKey
 const mint = Keypair.generate().publicKey
@@ -660,5 +661,104 @@ describe('watchSponsoredAtas', () => {
     await watchSponsoredAtas(deps)
     expect(sent).toHaveLength(1)
     expect(await atasClosedAway(h.db, f.wallet.toBase58(), sponsor.toBase58())).toBe(0)
+  })
+  describe('under the shared IndexPace', () => {
+    const RATE_LIMIT = () =>
+      new Error('429 Too Many Requests: Too many requests for a specific RPC call')
+    let t: number
+    let pace: IndexPace
+    let paceWarns: Array<{ obj: Record<string, unknown>; msg: string }>
+    beforeEach(() => {
+      t = 1_000_000
+      paceWarns = []
+      pace = new IndexPace({
+        log: {
+          warn: (obj: Record<string, unknown>, msg: string) => paceWarns.push({ obj, msg }),
+        } as unknown as Logger,
+        alerts: { send: async () => {} },
+        clock: () => t,
+        random: () => 0,
+        sleep: async (ms) => {
+          t += ms
+        },
+      })
+    })
+
+    it('makes no read while the indexer is paused, and leaves the rows unchecked', async () => {
+      await record(2)
+      await pace.rateLimited('index', RATE_LIMIT())
+      const calls: string[] = []
+      const deps = depsWith(
+        {
+          getMultipleAccountsInfo: async (keys: PublicKey[]) => {
+            calls.push('accounts')
+            return keys.map(() => null)
+          },
+          getSignaturesForAddress: async () => {
+            calls.push('signatures')
+            return []
+          },
+        },
+        { pace },
+      )
+      expect(await watchSponsoredAtas(deps)).toEqual({ checked: 0, closed: 0, flagged: 0 })
+      expect(calls).toEqual([])
+      const rows = await sponsoredAtasToCheck(h.db)
+      expect(rows.every((r) => r.checkedAt === null)).toBe(true)
+      t += 30_000
+      expect(await watchSponsoredAtas(deps)).toEqual({ checked: 2, closed: 2, flagged: 2 })
+    })
+
+    it('stops the pass on a rate-limited signature read and pauses the indexer too', async () => {
+      await record(3)
+      const asked: string[] = []
+      const deps = depsWith(
+        {
+          getSignaturesForAddress: async (k: PublicKey) => {
+            asked.push(k.toBase58())
+            throw RATE_LIMIT()
+          },
+        },
+        { pace },
+      )
+      expect(await watchSponsoredAtas(deps)).toEqual({ checked: 3, closed: 0, flagged: 0 })
+      expect(asked).toHaveLength(1)
+      expect(paceWarns).toHaveLength(1)
+      expect(paceWarns[0]?.obj).toMatchObject({ source: 'ata-watch', delayMs: 30_000 })
+      expect(await pace.held('index')).toBe(true)
+      // Nothing was closed or flagged: every row stays open.
+      expect(await sponsoredAtasToCheck(h.db)).toHaveLength(3)
+    })
+
+    it('pauses on a rate-limited account read', async () => {
+      await record(1)
+      const deps = depsWith(
+        {
+          getMultipleAccountsInfo: async () => {
+            throw RATE_LIMIT()
+          },
+        },
+        { pace },
+      )
+      expect(await watchSponsoredAtas(deps)).toEqual({ checked: 0, closed: 0, flagged: 0 })
+      expect(await pace.held('ata-watch')).toBe(true)
+    })
+
+    it('spaces its signature reads 200 ms apart on the pace clock', async () => {
+      await record(3)
+      const at: number[] = []
+      const deps = depsWith(
+        {
+          getSignaturesForAddress: async () => {
+            at.push(t)
+            return []
+          },
+        },
+        { pace },
+      )
+      await watchSponsoredAtas(deps)
+      expect(at).toHaveLength(3)
+      expect(at.slice(1).map((x, i) => x - (at[i] ?? 0))).toEqual([200, 200])
+    })
   })
 })
