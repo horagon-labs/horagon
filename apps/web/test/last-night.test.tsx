@@ -175,21 +175,24 @@ describe('loadLastNight: which night (R10)', () => {
   })
 })
 
+// Thu, Nov 26, 10:00 AM ET: Wednesday is the ET calendar day before (first-screen spec C9).
+const THU = at('2026-11-26T15:00:00Z')
+
 describe('the strip copy (R10)', () => {
   it('counts the upsets in the header', () => {
     const base = { date: '2026-11-25', rows: [] }
-    expect(lastNightHeader({ ...base, upsets: 2 })).toBe(
+    expect(lastNightHeader({ ...base, upsets: 2 }, THU)).toBe(
       'Last night on the dial · Wed, Nov 25 · 2 upsets',
     )
-    expect(lastNightHeader({ ...base, upsets: 1 })).toBe(
+    expect(lastNightHeader({ ...base, upsets: 1 }, THU)).toBe(
       'Last night on the dial · Wed, Nov 25 · 1 upset',
     )
-    expect(lastNightHeader({ ...base, upsets: 0 })).toBe(
+    expect(lastNightHeader({ ...base, upsets: 0 }, THU)).toBe(
       'Last night on the dial · Wed, Nov 25 · no upsets',
     )
   })
 
-  it('writes a row as the winner, the score, opened and closed', () => {
+  it('writes a row as the winner, the score, opened and closed (closed once it moved, C14)', () => {
     const [row, bare] = nightRows([
       final('nba-1', ['CHA', 105], ['CHI', 107], 7_400, { price: 0.19 }),
       final('nba-2', ['NYK', 110], ['BOS', 90], 6_000, { price: null }),
@@ -207,7 +210,9 @@ describe('the strip markup (R10)', () => {
     final('nba-1', ['CHA', 105], ['CHI', 107], 7_400, { price: 0.19 }),
     final('nba-2', ['NYK', 110], ['BOS', 90], 6_000, { price: null }),
   ])
-  const html = renderToStaticMarkup(<LastNightStrip night={{ date: '2026-11-25', rows, upsets }} />)
+  const html = renderToStaticMarkup(
+    <LastNightStrip night={{ date: '2026-11-25', rows, upsets }} now={THU} />,
+  )
   const text = html.replace(/<[^>]+>/g, '')
 
   it('shows the header, the UPSET plate and the rows, closed omitted when null', () => {

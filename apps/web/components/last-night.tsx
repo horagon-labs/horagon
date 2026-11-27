@@ -7,11 +7,11 @@ import { type LastNight, lastNightHeader, lastNightRowText } from '../lib/server
 // Ink among muted words is under 3:1 against them, so the link is underlined too (review §3.3).
 const LINK = 'inline-flex min-h-11 items-center text-13 text-ink underline underline-offset-4'
 
-export function LastNightStrip({ night }: { night: LastNight }) {
+export function LastNightStrip({ night, now }: { night: LastNight; now: number }) {
   return (
     <section aria-labelledby="last-night" className="mt-8 space-y-2" data-last-night>
       <h2 id="last-night" className="text-13 font-medium uppercase tracking-[0.2em] text-ink">
-        {lastNightHeader(night)}
+        {lastNightHeader(night, now)}
       </h2>
       <ul className="space-y-1.5 border-t border-rule pt-2">
         {night.rows.map((r) => (

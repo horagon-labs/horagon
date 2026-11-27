@@ -1,7 +1,8 @@
 // "Last night on the dial" (R10, culture A4): the morning after, on /. The newest ET night before
 // tonight's with a final NBA game, up to six of its games, the ones with a story first. The
 // opening price is the model's pre-game % written on chain; the closing price is the last indexed
-// price, which stops at the halt. Pure selection plus a loader; best effort, like the first frame.
+// price, which stops at the halt, and is printed only when it moved (first-screen spec C14). Pure
+// selection plus a loader; best effort, like the first frame.
 import type { Game } from '@horagon/sdk'
 import { etNight } from '@horagon/sdk'
 import { isUpset, winnerOpened } from '@horagon/sdk/study'
@@ -23,6 +24,8 @@ export interface LastNightRow {
   openedBps: number
   /** The winner's side of the last indexed price (0..1); null when none was indexed. */
   closed: number | null
+  /** The indexed price differs from the opening one: only then is "closed" said (C14). */
+  moved: boolean
   upset: boolean
   overtime: boolean
   tipoff: string
@@ -50,6 +53,7 @@ function rowOf(g: Game): LastNightRow | null {
     loseScore: Math.min(g.homeScore, g.awayScore),
     openedBps: winnerOpened(m.initialPriceBps, homeWon),
     closed: m.price === null ? null : homeWon ? m.price : 1 - m.price,
+    moved: m.price !== null && Math.round(m.price * 10_000) !== m.initialPriceBps,
     upset: isUpset(m.initialPriceBps, homeWon),
     overtime: g.period >= 5,
     tipoff: g.scheduledTipoff,
@@ -122,16 +126,28 @@ const dayLabel = new Intl.DateTimeFormat('en-US', {
   timeZone: 'UTC',
 })
 
-/** "Last night on the dial · Wed, Nov 25 · 2 upsets". */
-export function lastNightHeader(night: LastNight): string {
+/** The ET calendar date of unix second `ts` (no 06:00 rollover, unlike etNight). */
+const etCalendarDate = (ts: number) =>
+  new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' }).format(new Date(ts * 1000))
+
+/**
+ * The strip's eyebrow (first-screen spec C9): "Last night on the dial · Wed, Nov 25 · 2 upsets"
+ * only when the night is the ET calendar day before today's; "Tonight on the dial · …" while it is
+ * still the ET night (before the 06:00 ET rollover); otherwise the date leads, "Wed, Nov 25 on the
+ * dial · 2 upsets", so a night two days back is never called last night.
+ */
+export function lastNightHeader(night: LastNight, nowSecs: number): string {
   const day = dayLabel.format(new Date(`${night.date}T12:00:00Z`))
   const upsets =
     night.upsets === 0 ? 'no upsets' : `${night.upsets} upset${night.upsets === 1 ? '' : 's'}`
-  return `Last night on the dial · ${day} · ${upsets}`
+  if (night.date === etNight(nowSecs)) return `Tonight on the dial · ${day} · ${upsets}`
+  if (night.date === etPrevDay(etCalendarDate(nowSecs)))
+    return `Last night on the dial · ${day} · ${upsets}`
+  return `${day} on the dial · ${upsets}`
 }
 
-/** "CHI 107–105 CHA · opened 26% · closed 81%"; the closed part only when a price was indexed. */
+/** "CHI 107–105 CHA · opened 26%", plus " · closed 81%" only when the price moved (C14). */
 export function lastNightRowText(r: LastNightRow): string {
   const head = `${r.winner} ${r.winScore}–${r.loseScore} ${r.loser} · opened ${percent(r.openedBps / 10_000)}`
-  return r.closed === null ? head : `${head} · closed ${percent(r.closed)}`
+  return r.closed === null || !r.moved ? head : `${head} · closed ${percent(r.closed)}`
 }

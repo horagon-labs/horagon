@@ -44,7 +44,7 @@ export default async function TonightPage() {
       <Hero second={rest ? <PracticeStrip strip={strip} /> : undefined} />
       <TonightBoard initial={initial} />
       {!rest && <PracticeStrip strip={strip} className="mt-6" />}
-      {lastNight && <LastNightStrip night={lastNight} />}
+      {lastNight && <LastNightStrip night={lastNight} now={initial.now} />}
       <AgentNote />
     </>
   )

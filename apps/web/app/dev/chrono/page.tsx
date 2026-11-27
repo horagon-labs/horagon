@@ -44,7 +44,7 @@ export default function ChronoGalleryPage() {
     <>
       <Gallery />
       <div className="mt-10" data-dev-last-night>
-        <LastNightStrip night={lastNightFixture()} />
+        <LastNightStrip night={lastNightFixture()} now={at('2026-11-26T15:00:00Z')} />
       </div>
     </>
   )
