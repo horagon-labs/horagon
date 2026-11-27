@@ -99,8 +99,8 @@ for attempt in 1 2 3; do
   sleep 10
 done
 
-solana program show --url "$UPSTREAM" "$HORAGON" | tee "$WORK/program-show.txt"
-SHOW=$(solana program show --url "$UPSTREAM" --output json-compact "$HORAGON")
+solana program show --keypair "$ADMIN_KEY" --url "$UPSTREAM" "$HORAGON" | tee "$WORK/program-show.txt"
+SHOW=$(solana program show --keypair "$ADMIN_KEY" --url "$UPSTREAM" --output json-compact "$HORAGON")
 case "$SHOW" in
   *"\"authority\":\"$ADMIN\""*) ;;
   *) fail "the program's upgrade authority is not the throwaway admin $ADMIN: $SHOW" ;;
@@ -117,7 +117,7 @@ if ! wait_for_slot "$RPC" "$SURFPOOL_PID" 1; then
   fail "Surfpool did not start: $WORK/surfpool.out"
 fi
 # Loads the program through Surfpool before the first timed case; the suite fails clearly if not.
-solana program show --url "$RPC" "$HORAGON" ||
+solana program show --keypair "$ADMIN_KEY" --url "$RPC" "$HORAGON" ||
   echo "program-it: warning: Surfpool could not show the program yet"
 
 pnpm turbo run build --filter=@horagon/integration...
