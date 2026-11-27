@@ -275,6 +275,14 @@ describe("/agent: the agent's mode, from its heartbeat only", () => {
       expect(file).not.toMatch(/starts in a dry run|Off unless enabled/)
     }
   })
+
+  it('says in the README that the agent runs live, not that it has traded', () => {
+    // A live run sends the swaps it decides, and it may decide none: on 2026-11-27 its wallet,
+    // which /agent links on the explorer, held no swap, so the README names the mode only.
+    const readme = read(WEB, '..', '..', 'README.md')
+    expect(readme).toContain('has run live (not a dry run) since 2026-11-27')
+    expect(readme).not.toMatch(/traded live/)
+  })
 })
 
 describe('/agent: how the reference agent works (R2b)', () => {

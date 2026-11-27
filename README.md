@@ -384,7 +384,7 @@ NO. `redeem_pair` (1 YES + 1 NO →
 <a id="reference-agent"></a>
 
 **Reference agent.** One disclosed team wallet trades toward the win-probability model, so a
-market that fans leave quiet still follows the game. It ran a dry run first (it decides and sends nothing) and has traded live since 2026-11-27; the site's `/agent` page reads its current mode from its heartbeat. It is off unless enabled, and runs as its own process beside the keeper (a separate systemd unit, started by hand) ([`apps/keeper/src/agent`](apps/keeper/src/agent)) and pays its own
+market that fans leave quiet still follows the game. It ran a dry run first (it decides and sends nothing) and has run live (not a dry run) since 2026-11-27; the site's `/agent` page reads its current mode from its heartbeat. It is off unless enabled, and runs as its own process beside the keeper (a separate systemd unit, started by hand) ([`apps/keeper/src/agent`](apps/keeper/src/agent)) and pays its own
 fees, never through the sponsor. Every 20 seconds it looks at each live NBA winner market. It
 trades one only when the game has tipped off, more than 2 minutes remain before its `end_ts`,
 the clock does not read 0:00 in the 4th quarter or overtime (the horn), the model was updated
