@@ -807,7 +807,7 @@ only, so neither ever touches the other's markets. The main keeper's indexer ind
   restart). Its market opens at once with 300 mUSDC, the replayed tip-off is 10 min later,
   end_ts 30 min after that. The keeper halts at the buzzer, drafts, proposes the recording's
   final score itself (evidence source replay, linking the file under PRACTICE_SOURCE_URL),
-  and finalizes after the 15-min window: about 55 min from the start.
+  and finalizes after the dispute window (900 s in `Config` today): about 55 min from the start.
 - **Guards.** Before a run starts, in this order: FLAG_PRACTICE on (else `flag-off`), no other
   Practice run unsettled (`run-unsettled`), no NBA market open or opening between the start and
   90 min after it (`nba-window`: real nights first), every balance read (`balance-unread`), the
