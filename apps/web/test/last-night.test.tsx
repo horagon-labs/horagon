@@ -1,7 +1,11 @@
 // "Last night on the dial" (R10, culture A4): which night, which rows in which order, and the
 // strip's markup. The client is a stub: no API, no DB, no RPC.
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import type { Game } from '@horagon/sdk'
+import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
+import { LastNightStrip } from '../components/last-night'
 import { at, game, market } from '../lib/chrono/fixtures'
 import type { BoardClient } from '../lib/server/initial'
 import {
@@ -193,5 +197,41 @@ describe('the strip copy (R10)', () => {
     if (!row || !bare) throw new Error('rows')
     expect(lastNightRowText(row)).toBe('CHI 107–105 CHA · opened 26% · closed 81%')
     expect(lastNightRowText(bare)).toBe('NYK 110–90 BOS · opened 60%')
+  })
+})
+
+describe('the strip markup (R10)', () => {
+  const WEB = join(import.meta.dirname, '..')
+  const read = (...p: string[]) => readFileSync(join(WEB, ...p), 'utf8')
+  const { rows, upsets } = nightRows([
+    final('nba-1', ['CHA', 105], ['CHI', 107], 7_400, { price: 0.19 }),
+    final('nba-2', ['NYK', 110], ['BOS', 90], 6_000, { price: null }),
+  ])
+  const html = renderToStaticMarkup(<LastNightStrip night={{ date: '2026-11-25', rows, upsets }} />)
+  const text = html.replace(/<[^>]+>/g, '')
+
+  it('shows the header, the UPSET plate and the rows, closed omitted when null', () => {
+    expect(html).toContain('Last night on the dial · Wed, Nov 25 · 1 upset')
+    expect(html.match(/>UPSET</g)).toHaveLength(1)
+    expect(text).toContain('CHI 107–105 CHA · opened 26% · closed 81%')
+    expect(text).toContain('NYK 110–90 BOS · opened 60%')
+    expect(text).not.toContain('NYK 110–90 BOS · opened 60% · closed')
+    expect(html.match(/<li/g)).toHaveLength(2)
+    expect(html).toMatch(/<a [^>]*href="\/study"[^>]*>How the model is checked<\/a>/)
+  })
+
+  it('is mono, uses no live colour, and ships no script', () => {
+    expect(html).toContain('font-mono')
+    expect(html).not.toMatch(/\blive\b/)
+    expect(read('components', 'last-night.tsx')).not.toContain("'use client'")
+  })
+
+  it('renders on / under the board and above the agent note, from the server', () => {
+    const page = read('app', 'page.tsx')
+    const board = page.indexOf('<TonightBoard')
+    const strip = page.indexOf('<LastNightStrip')
+    expect(strip).toBeGreaterThan(board)
+    expect(page.indexOf('<AgentNote />')).toBeGreaterThan(strip)
+    expect(read('lib', 'server', 'api.ts')).toMatch(/export function initialLastNight\(\)/)
   })
 })
