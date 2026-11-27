@@ -56,6 +56,7 @@ const fixture = studySnapshot({
     }),
   ],
   missing: [],
+  notPlayed: [],
   lpSim: SIM,
 })
 const empty = studySnapshot({
@@ -64,6 +65,24 @@ const empty = studySnapshot({
   programIds: ids,
   rows: [],
   missing: [],
+  notPlayed: [],
+  lpSim: SIM,
+})
+const game = (n: number, home: string, away: string) => {
+  const { initialPriceBps: _p, outcome: _o, ...g } = row(n, { home, away })
+  return g
+}
+/** One game not played (NO by rule), one account gone, one evidence that fails its hash. */
+const withOff = studySnapshot({
+  generatedAt: '2026-11-28T08:00:00.000Z',
+  slot: 431_000_000,
+  programIds: ids,
+  rows: [row(1, {})],
+  missing: [
+    { ...game(5, 'LAL', 'DEN'), reason: 'account' },
+    { ...game(6, 'PHX', 'SAC'), reason: 'evidence' },
+  ],
+  notPlayed: [game(4, 'MIA', 'ORL')],
   lpSim: SIM,
 })
 
@@ -119,6 +138,28 @@ describe('/study from a fixture snapshot (R10)', () => {
     expect(text).toContain('seed 2026')
   })
 
+  it('says a game not played is never scored, and counts only checked evidence', () => {
+    expect(text).toContain(
+      'A game not played within 7 days resolves NO by rule. That is no away win, so it is listed apart and never scored.',
+    )
+    expect(text).toContain(
+      'its evidence, checked against the hash on chain, says the game was played',
+    )
+    expect(text).not.toContain('Not played, so not scored:')
+    expect(text).not.toContain('Left out because')
+  })
+
+  it('lists the games not played and the markets left out, apart from the scored ones', () => {
+    const off = textOf(renderToStaticMarkup(<StudyView snapshot={withOff} />))
+    expect(off).toContain('Not played, so not scored: ORL @ MIA (Nov 25).')
+    expect(off).toContain('Left out because the account is gone: DEN @ LAL (Nov 25).')
+    expect(off).toContain(
+      'Left out because the evidence could not be fetched or does not match the hash on chain: SAC @ PHX (Nov 25).',
+    )
+    expect(off).toContain('1 game over 1 ET night')
+    expect(withOff.calibration.n).toBe(1)
+  })
+
   it('states the upset rule in words', () => {
     expect(text).toContain('A game is an upset when its winner opened at 33% or less.')
   })
@@ -147,12 +188,15 @@ describe('/study from the empty snapshot (R10)', () => {
     const committed = StudySnapshotSchema.parse(JSON.parse(read('content', 'study.json')))
     expect(committed.programIds).toEqual(ids)
     if (committed.generatedAt === null) {
-      // Before the first run: no rows, no missing markets, no slot.
-      expect(committed).toMatchObject({ slot: null, rows: [], missing: [] })
+      // Before the first run: no rows, no missing or unplayed markets, no slot.
+      expect(committed).toMatchObject({ slot: null, rows: [], missing: [], notPlayed: [] })
     } else {
       expect(committed.slot).toEqual(expect.any(Number))
     }
-    const keys = [...committed.rows, ...committed.missing].flatMap((r) => [r.market, r.gameMarket])
+    const keys = [...committed.rows, ...committed.missing, ...committed.notPlayed].flatMap((r) => [
+      r.market,
+      r.gameMarket,
+    ])
     for (const key of keys) expect(isMarketKey(key), key).toBe(true)
   })
 

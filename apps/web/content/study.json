@@ -9,6 +9,7 @@
   "firstCountedNight": "2026-11-27",
   "rows": [],
   "missing": [],
+  "notPlayed": [],
   "calibration": {
     "n": 0,
     "brier": null,

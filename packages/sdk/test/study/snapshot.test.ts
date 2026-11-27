@@ -58,6 +58,7 @@ describe('studySnapshot (R10)', () => {
     programIds: ids,
     rows,
     missing: [],
+    notPlayed: [],
     lpSim: { seed: 2026, paths: 40 },
   })
 
@@ -89,6 +90,7 @@ describe('studySnapshot (R10)', () => {
       programIds: ids,
       rows: [],
       missing: [],
+      notPlayed: [],
       lpSim: { seed: 2026, paths: 40 },
     })
     expect(StudySnapshotSchema.parse(empty)).toMatchObject({
@@ -97,6 +99,43 @@ describe('studySnapshot (R10)', () => {
       nights: [],
       calibration: { n: 0, brier: null },
     })
+  })
+
+  it('carries the not-played and missing markets unscored, sorted by tip-off', () => {
+    const game = (n: number, tipoff: string) => {
+      const {
+        initialPriceBps: _p,
+        outcome: _o,
+        ...g
+      } = row({
+        market: `Mkt${n}111111111111111111111111111111111111111`.slice(0, 44),
+        tipoff,
+      })
+      return g
+    }
+    const late = game(2, '2026-11-26T02:00:00.000Z')
+    const early = game(3, '2026-11-26T00:30:00.000Z')
+    const withOff = studySnapshot({
+      generatedAt: null,
+      slot: null,
+      programIds: ids,
+      rows,
+      missing: [
+        { ...late, reason: 'evidence' },
+        { ...early, reason: 'account' },
+      ],
+      notPlayed: [late, early],
+      lpSim: { seed: 2026, paths: 40 },
+    })
+    expect(StudySnapshotSchema.parse(withOff)).toEqual(withOff)
+    expect(withOff.notPlayed.map((g) => g.tipoff)).toEqual([early.tipoff, late.tipoff])
+    expect(withOff.missing.map((g) => g.reason)).toEqual(['account', 'evidence'])
+    expect(withOff.calibration).toEqual(snap.calibration)
+    expect(withOff.nights).toEqual(snap.nights)
+    expect(() =>
+      StudySnapshotSchema.parse({ ...withOff, missing: [{ ...early, reason: 'gone' }] }),
+    ).toThrow()
+    expect(() => StudySnapshotSchema.parse({ ...withOff, missing: [early] })).toThrow()
   })
 
   it('refuses a row with a bad outcome or price', () => {

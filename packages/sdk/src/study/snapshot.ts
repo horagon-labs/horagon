@@ -1,6 +1,7 @@
 // The study's published snapshot (apps/web/content/study.json): one row per resolved kind-0 NBA
-// market, read from chain by apps/keeper/scripts/study.ts, plus the scores, a per-night
-// breakdown, the depth curves and the LP simulation. Pure: the script does the chain part.
+// market of a game that was played, read from chain by apps/keeper/scripts/study.ts, plus the
+// scores, a per-night breakdown, the depth curves and the LP simulation. Pure: the script does
+// the chain part and checks the evidence.
 import { z } from 'zod'
 import { FIRST_COUNTED_NIGHT } from '../nights'
 import { calibration } from './calibration'
@@ -35,8 +36,22 @@ export const StudyRowSchema = z.strictObject({
   night: Date10,
 })
 
-/** A counted market whose pm-AMM account is gone: listed, never guessed. */
-export const StudyMissingSchema = StudyRowSchema.omit({ initialPriceBps: true, outcome: true })
+const StudyGameSchema = StudyRowSchema.omit({ initialPriceBps: true, outcome: true })
+
+/**
+ * A resolved market left out because it cannot be read: its pm-AMM account is gone ('account'),
+ * or its evidence could not be fetched, does not hash to the hash on chain, or names another game
+ * or outcome ('evidence'). Listed, never guessed.
+ */
+export const StudyMissingSchema = StudyGameSchema.extend({
+  reason: z.enum(['account', 'evidence']),
+})
+
+/**
+ * A resolved market whose checked evidence says the game was not played within 7 days: it resolved
+ * NO by rule, which is not an away win, so it is listed and never scored.
+ */
+export const StudyNotPlayedSchema = StudyGameSchema
 
 const BinSchema = z.strictObject({
   from: z.number(),
@@ -103,6 +118,7 @@ export const StudySnapshotSchema = z.strictObject({
   firstCountedNight: Date10,
   rows: z.array(StudyRowSchema),
   missing: z.array(StudyMissingSchema),
+  notPlayed: z.array(StudyNotPlayedSchema),
   calibration: StudyCalibrationSchema,
   nights: z.array(NightSchema),
   depth: DepthSchema,
@@ -111,6 +127,7 @@ export const StudySnapshotSchema = z.strictObject({
 
 export type StudyRow = z.infer<typeof StudyRowSchema>
 export type StudyMissing = z.infer<typeof StudyMissingSchema>
+export type StudyNotPlayed = z.infer<typeof StudyNotPlayedSchema>
 export type StudySnapshot = z.infer<typeof StudySnapshotSchema>
 
 export interface StudySnapshotInput {
@@ -119,6 +136,7 @@ export interface StudySnapshotInput {
   programIds: { horagon: string; pmAmm: string }
   rows: StudyRow[]
   missing: StudyMissing[]
+  notPlayed: StudyNotPlayed[]
   lpSim: { seed: number; paths: number }
 }
 
@@ -126,13 +144,14 @@ export interface StudySnapshotInput {
 const r6 = (x: number) => Math.round(x * 1e6) / 1e6
 const r6n = (x: number | null) => (x === null ? null : r6(x))
 
+const byTipoff = (a: { tipoff: string; market: string }, b: { tipoff: string; market: string }) =>
+  a.tipoff.localeCompare(b.tipoff) || a.market.localeCompare(b.market)
+
 const samplesOf = (rows: readonly StudyRow[]) =>
   rows.map((r) => ({ p: r.initialPriceBps / 10_000, homeWon: r.outcome === 'home' }))
 
 export function studySnapshot(input: StudySnapshotInput): StudySnapshot {
-  const rows = [...input.rows].sort(
-    (a, b) => a.tipoff.localeCompare(b.tipoff) || a.market.localeCompare(b.market),
-  )
+  const rows = [...input.rows].sort(byTipoff)
   const byNight = new Map<string, StudyRow[]>()
   for (const r of rows) byNight.set(r.night, [...(byNight.get(r.night) ?? []), r])
   const nights = [...byNight.entries()]
@@ -156,7 +175,8 @@ export function studySnapshot(input: StudySnapshotInput): StudySnapshot {
     programIds: input.programIds,
     firstCountedNight: FIRST_COUNTED_NIGHT,
     rows,
-    missing: input.missing,
+    missing: [...input.missing].sort(byTipoff),
+    notPlayed: [...input.notPlayed].sort(byTipoff),
     calibration: calibration(samplesOf(rows)),
     nights,
     depth: {

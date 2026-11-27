@@ -1,12 +1,16 @@
-// The mechanism study (R10), read from chain alone: every resolved kind-0 NBA market's opening
-// price (the model's pre-game %, written when the market opened) against its outcome, written to
+// The mechanism study (R10), read from chain: every resolved kind-0 NBA market's opening price
+// (the model's pre-game %, written when the market opened) against its outcome, written to
 // apps/web/content/study.json for the /study page. Read-only: it holds no key and sends no
-// transaction. The RPC must be devnet (its genesis hash); a counted market whose pm-AMM account
-// is gone goes to `missing`, never guessed.
+// transaction. The RPC must be devnet (its genesis hash). Each resolved market's evidence is
+// fetched from its on-chain URI and checked against the on-chain hash: a game not played within
+// 7 days resolves NO by rule, which is no away win, so it goes to `notPlayed` and is never
+// scored. A market whose pm-AMM account is gone, or whose evidence cannot be fetched or checked,
+// goes to `missing`, never guessed.
 //   pnpm --filter @horagon/keeper study [--fixture f.json --out path] [--out path] [--empty]
-// --fixture reads {slot?, accounts: [{pubkey, owner, dataBase64}]} instead of the RPC and never
-// connects; it needs an --out other than the committed snapshot, so fixture rows never reach the
-// page. --empty writes the snapshot with no chain rows (the depth curves and the simulation only).
+// --fixture reads {slot?, accounts: [{pubkey, owner, dataBase64}], evidence?: {uri: json}}
+// instead of the RPC and the URIs, and never connects or fetches; it needs an --out other than
+// the committed snapshot, so fixture rows never reach the page. --empty writes the snapshot with
+// no chain rows (the depth curves and the simulation only).
 import { mkdir, readFile } from 'node:fs/promises'
 import { dirname, join, relative, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -16,13 +20,16 @@ import {
   decodeGameMarket,
   decodeMarketAccount,
   etNight,
+  evidenceHashBytes,
   type GameMarketAccount,
   HORAGON_PROGRAM_ID,
   HoragonProgram,
   PM_AMM_PROGRAM_ID,
+  parseResolutionEvidence,
 } from '@horagon/sdk'
 import {
   type StudyMissing,
+  type StudyNotPlayed,
   type StudyRow,
   type StudySnapshot,
   StudySnapshotSchema,
@@ -39,6 +46,11 @@ export const DEFAULT_OUT = join(REPO_DIR, 'apps/web/content/study.json')
 export const LP_SIM = { seed: 2026, paths: 2_000 }
 /** getMultipleAccountsInfo takes at most 100 keys. */
 const CHUNK = 100
+/** Evidence fetches at a time, and how long each may take. */
+const EVIDENCE_CONCURRENCY = 8
+const EVIDENCE_TIMEOUT_MS = 10_000
+/** Evidence JSON is well under a kilobyte; anything far larger is not evidence. */
+const EVIDENCE_MAX_CHARS = 64 * 1024
 
 export type StudyConnection = Pick<
   Connection,
@@ -53,9 +65,33 @@ const FixtureAccountSchema = z.strictObject({
 const FixtureSchema = z.strictObject({
   slot: z.number().int().nonnegative().optional(),
   accounts: z.array(FixtureAccountSchema),
+  /** The evidence JSON each URI serves; a URI not listed fails like a failed fetch. */
+  evidence: z.record(z.string(), z.string()).optional(),
 })
 export type FixtureAccount = z.infer<typeof FixtureAccountSchema>
 export type StudyFixture = z.infer<typeof FixtureSchema>
+
+/** The evidence JSON published at an on-chain URI; throws when it cannot be had. */
+export type EvidenceFetch = (uri: string) => Promise<string>
+
+/** GET over https only, with a timeout; a status that is not OK throws. */
+export async function httpEvidence(uri: string): Promise<string> {
+  const url = new URL(uri)
+  if (url.protocol !== 'https:') throw new Error(`evidence URI is not https: ${uri}`)
+  const res = await fetch(url.href, { signal: AbortSignal.timeout(EVIDENCE_TIMEOUT_MS) })
+  if (!res.ok) throw new Error(`evidence ${uri}: HTTP ${res.status}`)
+  const text = await res.text()
+  if (text.length > EVIDENCE_MAX_CHARS) throw new Error(`evidence ${uri}: too large`)
+  return text
+}
+
+const fixtureEvidence =
+  (evidence: Record<string, string> = {}): EvidenceFetch =>
+  async (uri) => {
+    const json = Object.hasOwn(evidence, uri) ? evidence[uri] : undefined
+    if (json === undefined) throw new Error(`no evidence in the fixture for ${uri}`)
+    return json
+  }
 
 interface AccountLike {
   owner: PublicKey
@@ -121,10 +157,58 @@ function readFixture(fixture: StudyFixture): ChainRead {
   return { slot: fixture.slot ?? null, gameMarkets, markets }
 }
 
-/** The rows and the missing markets: resolved (winningSide 1 or 2) markets only. */
-export function selectRows(read: ChainRead): { rows: StudyRow[]; missing: StudyMissing[] } {
-  const rows: StudyRow[] = []
-  const missing: StudyMissing[] = []
+const sameBytes = (a: Uint8Array, b: Uint8Array) =>
+  a.length === b.length && a.every((x, i) => x === b[i])
+
+/**
+ * What the market's evidence says about the game: 'final' or 'postponed'; null when it cannot be
+ * fetched, does not hash to the hash on chain, fails the SDK's validator, or names another game
+ * or another outcome than the pm-AMM account.
+ */
+async function checkedStatus(
+  g: GameMarketAccount,
+  winningSide: 1 | 2,
+  fetchEvidence: EvidenceFetch,
+): Promise<'final' | 'postponed' | null> {
+  if (g.evidenceUri === '' || g.evidenceHash.every((b) => b === 0)) return null
+  try {
+    const value: unknown = JSON.parse(await fetchEvidence(g.evidenceUri))
+    if (!sameBytes(await evidenceHashBytes(value), g.evidenceHash)) return null
+    const e = parseResolutionEvidence(value)
+    const sameGame =
+      e.kind === 0 &&
+      e.league === g.league &&
+      e.gameId === g.externalGameId &&
+      e.home === g.home &&
+      e.away === g.away
+    if (!sameGame || e.outcome !== (winningSide === 1 ? 'yes' : 'no')) return null
+    return e.status === 'postponed' ? 'postponed' : 'final'
+  } catch {
+    return null
+  }
+}
+
+export interface Selected {
+  rows: StudyRow[]
+  missing: StudyMissing[]
+  notPlayed: StudyNotPlayed[]
+}
+
+interface Resolved {
+  g: GameMarketAccount
+  base: StudyNotPlayed
+  bps: number
+  side: 1 | 2
+}
+
+/**
+ * Resolved (winningSide 1 or 2) markets only: a row when the checked evidence says the game was
+ * played, `notPlayed` when it says the game was not, `missing` when the account is gone or the
+ * evidence fails.
+ */
+export async function selectRows(read: ChainRead, fetchEvidence: EvidenceFetch): Promise<Selected> {
+  const out: Selected = { rows: [], missing: [], notPlayed: [] }
+  const resolved: Resolved[] = []
   for (const { pubkey, account: g } of read.gameMarkets) {
     if (!isCounted(g)) continue
     const market = g.market.toBase58()
@@ -138,54 +222,82 @@ export function selectRows(read: ChainRead): { rows: StudyRow[]; missing: StudyM
     }
     const info = read.markets.get(market) ?? null
     if (info === null) {
-      missing.push(base)
+      out.missing.push({ ...base, reason: 'account' })
       continue
     }
     const m = decodeMarketAccount(info)
     if (!m.resolved || (m.winningSide !== 1 && m.winningSide !== 2)) continue
-    rows.push({
-      ...base,
-      initialPriceBps: m.initialPriceBps,
-      outcome: m.winningSide === 1 ? 'home' : 'away',
+    resolved.push({ g, base, bps: m.initialPriceBps, side: m.winningSide })
+  }
+  for (let i = 0; i < resolved.length; i += EVIDENCE_CONCURRENCY) {
+    const batch = resolved.slice(i, i + EVIDENCE_CONCURRENCY)
+    const statuses = await Promise.all(batch.map((r) => checkedStatus(r.g, r.side, fetchEvidence)))
+    batch.forEach((r, j) => {
+      const status = statuses[j] ?? null
+      if (status === null) out.missing.push({ ...r.base, reason: 'evidence' })
+      else if (status === 'postponed') out.notPlayed.push(r.base)
+      else
+        out.rows.push({
+          ...r.base,
+          initialPriceBps: r.bps,
+          outcome: r.side === 1 ? 'home' : 'away',
+        })
     })
   }
-  missing.sort((a, b) => a.tipoff.localeCompare(b.tipoff) || a.market.localeCompare(b.market))
-  return { rows, missing }
+  return out
 }
 
 const programIds = { horagon: HORAGON_PROGRAM_ID.toBase58(), pmAmm: PM_AMM_PROGRAM_ID.toBase58() }
 
 export interface RunStudyInput {
-  /** Read these accounts instead of the RPC; no connection is then needed or used. */
+  /** Read these accounts and evidence instead of the RPC and the URIs; nothing is then fetched. */
   fixture?: StudyFixture
   connection?: StudyConnection
+  /** Fetches the evidence on the RPC path (default: `httpEvidence`). */
+  fetchEvidence?: EvidenceFetch
   now: Date
   lpSim?: { seed: number; paths: number }
 }
 
 export async function runStudy(input: RunStudyInput): Promise<StudySnapshot> {
   let read: ChainRead
-  if (input.fixture) read = readFixture(input.fixture)
-  else if (input.connection) read = await readRpc(input.connection)
-  else throw new Error('runStudy needs a fixture or a connection')
-  const { rows, missing } = selectRows(read)
+  let fetchEvidence: EvidenceFetch
+  if (input.fixture) {
+    read = readFixture(input.fixture)
+    fetchEvidence = fixtureEvidence(input.fixture.evidence)
+  } else if (input.connection) {
+    read = await readRpc(input.connection)
+    fetchEvidence = input.fetchEvidence ?? httpEvidence
+  } else throw new Error('runStudy needs a fixture or a connection')
+  const { rows, missing, notPlayed } = await selectRows(read, fetchEvidence)
   return studySnapshot({
     generatedAt: input.now.toISOString(),
     slot: read.slot,
     programIds,
     rows,
     missing,
+    notPlayed,
     lpSim: input.lpSim ?? LP_SIM,
   })
 }
 
 /** The snapshot before the script's first run: no rows and no time. */
 export function emptyStudy(lpSim = LP_SIM): StudySnapshot {
-  return studySnapshot({ generatedAt: null, slot: null, programIds, rows: [], missing: [], lpSim })
+  return studySnapshot({
+    generatedAt: null,
+    slot: null,
+    programIds,
+    rows: [],
+    missing: [],
+    notPlayed: [],
+    lpSim,
+  })
 }
 
 export interface MainDeps {
   connect: (url: string) => StudyConnection
+  /** Default: `httpEvidence`. */
+  fetchEvidence?: EvidenceFetch
   now?: () => Date
 }
 
@@ -218,7 +330,11 @@ export async function main(
     const url = env.HORAGON_RPC_URL
     if (!url) throw new Error('HORAGON_RPC_URL is not set (or pass --fixture)')
     assertNotMainnet(url)
-    snapshot = await runStudy({ connection: deps.connect(url), now })
+    snapshot = await runStudy({
+      connection: deps.connect(url),
+      fetchEvidence: deps.fetchEvidence ?? httpEvidence,
+      now,
+    })
   }
   await mkdir(dirname(out), { recursive: true })
   await writeFileAtomic(out, `${JSON.stringify(StudySnapshotSchema.parse(snapshot), null, 2)}\n`)
@@ -230,7 +346,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     connect: (url) => new Connection(url, 'confirmed'),
   })
   console.log(
-    `study: ${snapshot.rows.length} markets, ${snapshot.missing.length} missing, ` +
-      `${snapshot.nights.length} ET nights, slot ${snapshot.slot ?? 'none'}`,
+    `study: ${snapshot.rows.length} markets, ${snapshot.notPlayed.length} not played, ` +
+      `${snapshot.missing.length} missing, ${snapshot.nights.length} ET nights, ` +
+      `slot ${snapshot.slot ?? 'none'}`,
   )
 }

@@ -46,6 +46,9 @@ const dayLabel = new Intl.DateTimeFormat('en-US', {
   timeZone: 'UTC',
 })
 const day = (date: string) => dayLabel.format(new Date(`${date}T12:00:00Z`))
+/** "ORL @ MIA (Nov 25), DEN @ LAL (Nov 26)". */
+const gameList = (list: ReadonlyArray<{ home: string; away: string; night: string }>) =>
+  list.map((g) => `${g.away} @ ${g.home} (${day(g.night)})`).join(', ')
 const weekday = new Intl.DateTimeFormat('en-US', {
   weekday: 'short',
   month: 'short',
@@ -276,6 +279,9 @@ export function StudyView({ snapshot: s }: { snapshot: StudySnapshot }) {
   const [today, before] = s.depth.curves
   const endMinutes = (today?.endOffsetSecs ?? 10_800) / 60
   const beforeMinutes = (before?.endOffsetSecs ?? 7_800) / 60
+  const { notPlayed } = s
+  const gone = s.missing.filter((m) => m.reason === 'account')
+  const unchecked = s.missing.filter((m) => m.reason === 'evidence')
   const medianDepth = Math.sqrt(
     Math.max(0, endMinutes - s.depth.medianFinalMinutes) /
       (endMinutes + s.depth.createLeadSecs / 60),
@@ -324,8 +330,8 @@ export function StudyView({ snapshot: s }: { snapshot: StudySnapshot }) {
         )}
         <ScoreTable s={s} />
         <p className="text-13">
-          Lower is better for both. Every resolved NBA winner market ever created counts.{' '}
-          {s.calibration.upsets} of {s.calibration.n} were upsets.
+          Lower is better for both. Every resolved NBA winner market of a game that was played
+          counts. {s.calibration.upsets} of {s.calibration.n} were upsets.
         </p>
         <h3 className="pt-2 text-14 font-semibold text-ink">Folded to the favourite</h3>
         <BinTable s={s} />
@@ -356,18 +362,25 @@ export function StudyView({ snapshot: s }: { snapshot: StudySnapshot }) {
           </li>
           <li>It sends nothing and holds no key.</li>
           <li>
-            A market counts when it is a winner market of an NBA game and its pm-AMM account is
-            resolved (<Code>winningSide</Code> 1 is YES, 2 is NO).
+            A market counts when it is a winner market of an NBA game, its pm-AMM account is
+            resolved (<Code>winningSide</Code> 1 is YES, 2 is NO), and its evidence, checked against
+            the hash on chain, says the game was played.
+          </li>
+          <li>
+            A game not played within 7 days resolves NO by rule. That is no away win, so it is
+            listed apart and never scored.
           </li>
           {s.generatedAt !== null && (
             <li>
               This table: slot {s.slot ?? '–'}, made {utc(s.generatedAt)}.
             </li>
           )}
-          {s.missing.length > 0 && (
+          {notPlayed.length > 0 && <li>Not played, so not scored: {gameList(notPlayed)}.</li>}
+          {gone.length > 0 && <li>Left out because the account is gone: {gameList(gone)}.</li>}
+          {unchecked.length > 0 && (
             <li>
-              Left out because the account is gone:{' '}
-              {s.missing.map((m) => `${m.away} @ ${m.home} (${day(m.night)})`).join(', ')}.
+              Left out because the evidence could not be fetched or does not match the hash on
+              chain: {gameList(unchecked)}.
             </li>
           )}
         </ul>
