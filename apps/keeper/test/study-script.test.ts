@@ -1,16 +1,41 @@
 // The study script (R10), end to end on fixture accounts: no RPC is ever reached. The connection
-// handed to the fixture path throws on every call, which proves it.
+// handed to the fixture path throws on every call, which proves it. No test may write the
+// committed snapshot: writeFileAtomic refuses DEFAULT_OUT here, even if the script asks for it.
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { HORAGON_PROGRAM_ID, PM_AMM_PROGRAM_ID } from '@horagon/sdk'
 import { StudySnapshotSchema } from '@horagon/sdk/study'
 import type { AccountInfo, PublicKey } from '@solana/web3.js'
 import { describe, expect, it, vi } from 'vitest'
-import { type FixtureAccount, main, runStudy, type StudyConnection } from '../scripts/study'
-import { DEVNET_GENESIS_HASH } from '../src/config'
+import {
+  DEFAULT_OUT,
+  type FixtureAccount,
+  main,
+  runStudy,
+  type StudyConnection,
+} from '../scripts/study'
+import { DEVNET_GENESIS_HASH, REPO_DIR } from '../src/config'
 import { marketInfo, poolAt } from './agent-fixtures'
 import { account, type GameFields, gameMarketBytes, program, S, STATUS } from './chain-fixtures'
+
+const writes = vi.hoisted(() => [] as string[])
+vi.mock('../src/json-cache', async (importActual) => {
+  const actual = await importActual<typeof import('../src/json-cache')>()
+  const { join, resolve } = await import('node:path')
+  const { REPO_DIR } = await import('../src/config')
+  const committed = join(REPO_DIR, 'apps/web/content/study.json')
+  return {
+    ...actual,
+    writeFileAtomic: async (file: string, data: string) => {
+      writes.push(resolve(file))
+      if (resolve(file) === resolve(committed)) {
+        throw new Error('test tried to write the committed study.json')
+      }
+      await actual.writeFileAtomic(file, data)
+    },
+  }
+})
 
 const TESTNET_GENESIS_HASH = '4uhcVJyU9pJkvQyS88uRDiswHXSCkY3zQawwpjk2NsNY'
 const NOW = new Date('2026-11-28T09:00:00.000Z')
@@ -175,6 +200,31 @@ describe('study script command line (R10)', () => {
     await main(['--fixture', fixture, '--out', out], {}, deps)
     const snap = StudySnapshotSchema.parse(JSON.parse(readFileSync(out, 'utf8')))
     expect(snap.rows).toHaveLength(2)
+  })
+
+  it('never connects on --fixture: the real connect throws on an empty URL', async () => {
+    const fixture = join(dir, 'f2.json')
+    const out = join(dir, 'study2.json')
+    writeFileSync(fixture, JSON.stringify({ slot: 9, accounts: fixtureOf(chain()) }))
+    const connect = vi.fn((url: string): StudyConnection => {
+      throw new Error(`Endpoint URL must start with http: or https: (${url})`)
+    })
+    await main(['--fixture', fixture, '--out', out], {}, { connect, now: () => NOW })
+    expect(connect).not.toHaveBeenCalled()
+    expect(StudySnapshotSchema.parse(JSON.parse(readFileSync(out, 'utf8'))).rows).toHaveLength(2)
+  })
+
+  it('refuses --fixture without --out, or with the committed snapshot as --out', async () => {
+    const fixture = join(dir, 'f3.json')
+    writeFileSync(fixture, JSON.stringify({ slot: 9, accounts: fixtureOf(chain()) }))
+    expect(resolve(DEFAULT_OUT)).toBe(resolve(REPO_DIR, 'apps/web/content/study.json'))
+    writes.length = 0
+    await expect(main(['--fixture', fixture], {}, deps)).rejects.toThrow(/--out/)
+    await expect(main(['--fixture', fixture, '--out', DEFAULT_OUT], {}, deps)).rejects.toThrow(
+      /--out/,
+    )
+    // Refused before anything is written, not by the guard above.
+    expect(writes).toEqual([])
   })
 
   it('writes the empty snapshot with --empty: no rows and no time', async () => {

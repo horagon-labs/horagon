@@ -3,11 +3,12 @@
 // apps/web/content/study.json for the /study page. Read-only: it holds no key and sends no
 // transaction. The RPC must be devnet (its genesis hash); a counted market whose pm-AMM account
 // is gone goes to `missing`, never guessed.
-//   pnpm --filter @horagon/keeper study [--fixture f.json] [--out path] [--empty]
-// --fixture reads {slot?, accounts: [{pubkey, owner, dataBase64}]} instead of the RPC; --empty
-// writes the snapshot with no chain rows (the depth curves and the simulation only).
+//   pnpm --filter @horagon/keeper study [--fixture f.json --out path] [--out path] [--empty]
+// --fixture reads {slot?, accounts: [{pubkey, owner, dataBase64}]} instead of the RPC and never
+// connects; it needs an --out other than the committed snapshot, so fixture rows never reach the
+// page. --empty writes the snapshot with no chain rows (the depth curves and the simulation only).
 import { mkdir, readFile } from 'node:fs/promises'
-import { dirname, join, resolve } from 'node:path'
+import { dirname, join, relative, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { parseArgs } from 'node:util'
 import {
@@ -155,15 +156,18 @@ export function selectRows(read: ChainRead): { rows: StudyRow[]; missing: StudyM
 const programIds = { horagon: HORAGON_PROGRAM_ID.toBase58(), pmAmm: PM_AMM_PROGRAM_ID.toBase58() }
 
 export interface RunStudyInput {
-  /** Read these accounts instead of the RPC; the connection is then never used. */
+  /** Read these accounts instead of the RPC; no connection is then needed or used. */
   fixture?: StudyFixture
-  connection: StudyConnection
+  connection?: StudyConnection
   now: Date
   lpSim?: { seed: number; paths: number }
 }
 
 export async function runStudy(input: RunStudyInput): Promise<StudySnapshot> {
-  const read = input.fixture ? readFixture(input.fixture) : await readRpc(input.connection)
+  let read: ChainRead
+  if (input.fixture) read = readFixture(input.fixture)
+  else if (input.connection) read = await readRpc(input.connection)
+  else throw new Error('runStudy needs a fixture or a connection')
   const { rows, missing } = selectRows(read)
   return studySnapshot({
     generatedAt: input.now.toISOString(),
@@ -199,19 +203,23 @@ export async function main(
     },
   })
   const now = deps.now?.() ?? new Date()
+  const out = resolve(values.out ?? DEFAULT_OUT)
+  if (values.fixture && !values.empty && (!values.out || relative(out, DEFAULT_OUT) === '')) {
+    // Fixture rows are not chain data: they never go to the snapshot the page imports.
+    throw new Error('--fixture needs --out, and not the committed apps/web/content/study.json')
+  }
   let snapshot: StudySnapshot
   if (values.empty) {
     snapshot = emptyStudy()
   } else if (values.fixture) {
     const fixture = FixtureSchema.parse(JSON.parse(await readFile(values.fixture, 'utf8')))
-    snapshot = await runStudy({ fixture, connection: deps.connect(''), now })
+    snapshot = await runStudy({ fixture, now })
   } else {
     const url = env.HORAGON_RPC_URL
     if (!url) throw new Error('HORAGON_RPC_URL is not set (or pass --fixture)')
     assertNotMainnet(url)
     snapshot = await runStudy({ connection: deps.connect(url), now })
   }
-  const out = resolve(values.out ?? DEFAULT_OUT)
   await mkdir(dirname(out), { recursive: true })
   await writeFileAtomic(out, `${JSON.stringify(StudySnapshotSchema.parse(snapshot), null, 2)}\n`)
   return snapshot
