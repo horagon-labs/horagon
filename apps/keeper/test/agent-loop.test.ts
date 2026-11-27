@@ -470,6 +470,8 @@ describe('a live round', () => {
     expect(await agentRow()).toEqual({
       round: 1,
       dryRun: true,
+      // Whether it trades PRACTICE markets too (AGENT_PRACTICE): the Practice page reads it (R8).
+      practice: false,
       paused: false,
       markets: 1,
       decided: 1,

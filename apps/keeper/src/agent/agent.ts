@@ -645,6 +645,9 @@ export class ReferenceAgent {
       await heartbeat(this.d.db, 'agent', {
         round: this.rounds,
         dryRun: this.d.dryRun,
+        // The Practice page says the agent trades a replay only when this is true and the run
+        // is live (R8).
+        practice: this.d.params.practice,
         paused,
         ...(paused ? { pausedUntil: this.failures.pausedUntil } : {}),
         markets: report.markets,
