@@ -55,6 +55,7 @@ import type { ApiDeps } from './deps'
 import { disputeWindowReader } from './dispute-window'
 import { claimFaucet } from './faucet'
 import { flagsOf, provideFlags, requireFlags } from './flags'
+import { healthOpsReader } from './health-ops'
 import { MeQuerySchema, meFor, positionsAndNights } from './me'
 import { ApiError, problemResponse } from './problem'
 import {
@@ -126,6 +127,8 @@ export function createApp(deps: ApiDeps) {
   const marketSet = new MarketSet(deps)
   // One reader per app: the on-chain challenge window, kept 600 s (dispute-window.ts).
   const disputeWindow = disputeWindowReader(deps)
+  // The ops numbers of /health: chain and backlog reads kept 45 s (health-ops.ts).
+  const healthOps = healthOpsReader(deps)
   const app = new OpenAPIHono<Env>({
     defaultHook: (result, c) => {
       if (!result.success) {
@@ -518,8 +521,10 @@ export function createApp(deps: ApiDeps) {
           return { ok: false as const, value: null, ms: Math.round(performance.now() - t) }
         }
       }
+      const heartbeatRead = timed(() => getHeartbeat(deps.db, 'keeper'))
+      const ops = healthOps(heartbeatRead.then((r) => (r.ok ? r.value : null)))
       const [db, rpcSlot] = await Promise.all([
-        timed(() => getHeartbeat(deps.db, 'keeper')),
+        heartbeatRead,
         timed(() => deps.connection.getSlot('confirmed')),
       ])
       const heartbeat = db.ok ? db.value : null
@@ -533,6 +538,7 @@ export function createApp(deps: ApiDeps) {
         rpc: { ok: rpcSlot.ok, ms: rpcSlot.ms, slot: rpcSlot.ok ? rpcSlot.value : null },
         keeper: { ok: keeperOk, heartbeatAgeSecs: age },
         version: deps.version,
+        ops: await ops,
       }
       c.header('cache-control', 'no-store')
       return health.ok ? c.json(health, 200) : c.json(health, 503)

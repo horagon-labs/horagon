@@ -44,11 +44,18 @@ export function roundSteps(o: { hourly: boolean; archive: boolean }): RoundStep[
   ]
 }
 
-export type IndexStep = 'index' | 'ata-watch'
+export type IndexStep = 'index' | 'ata-watch' | 'sponsor-marks'
 
-/** The steps of one index round: the indexer, then the sponsored-ATA watch when it is due. */
-export function indexSteps(o: { ataWatch: boolean }): IndexStep[] {
-  return ['index', ...(o.ataWatch ? (['ata-watch'] as const) : [])]
+/**
+ * The steps of one index round: the indexer, then the sponsored-ATA watch and the sponsor budget
+ * marks (`sponsor-marks.ts`, database only) when each is due.
+ */
+export function indexSteps(o: { ataWatch: boolean; sponsorMarks?: boolean }): IndexStep[] {
+  return [
+    'index',
+    ...(o.ataWatch ? (['ata-watch'] as const) : []),
+    ...(o.sponsorMarks ? (['sponsor-marks'] as const) : []),
+  ]
 }
 
 /**
@@ -60,6 +67,8 @@ export function indexSteps(o: { ataWatch: boolean }): IndexStep[] {
 export class PeriodicLoop {
   /** Rounds finished. */
   rounds = 0
+  /** When (ms, the loop's clock) the last round ended; null before the first. */
+  lastRoundAt: number | null = null
   private startedAt: number | null = null
   /** When (ms) the round in progress last made progress (`progress()`). */
   private progressAt = Number.NEGATIVE_INFINITY
@@ -86,6 +95,7 @@ export class PeriodicLoop {
         this.startedAt = null
       }
       this.rounds++
+      this.lastRoundAt = clock()
       if (this.opts.stopping()) break
       // Never longer than one period, even after the clock steps back.
       const wait = Math.min(

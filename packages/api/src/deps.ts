@@ -16,6 +16,12 @@ export interface SponsorConfig {
   keypair: Keypair
   /** Daily (UTC) cap on reserved lamports: fees plus ATA rent (spec 9). */
   dailyCapLamports: bigint
+  /**
+   * The last slice of the daily cap, spent only for wallets with a sponsored trade that landed
+   * (`sponsoredTradeLanded`): a crowd of new wallets cannot use the whole budget up and switch
+   * sponsored trades off for everyone. 0 turns it off.
+   */
+  reserveLamports: bigint
   /** Per wallet and per hashed IP (spec 9: 30 transactions an hour). */
   txPerHour: number
   /**

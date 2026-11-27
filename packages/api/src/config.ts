@@ -89,6 +89,30 @@ function solAmount(
   return BigInt(lamports)
 }
 
+/** The default reserve: 0.5 SOL, or a quarter of a smaller cap. */
+const DEFAULT_RESERVE_LAMPORTS = 500_000_000n
+
+/**
+ * The sponsor's reserve (`SPONSOR_RESERVE_SOL`): 0 (off), or more than 0 and less than the cap,
+ * so new wallets always keep a part of the day. Unset: min(0.5 SOL, cap / 4), which every cap
+ * accepts, so a deploy that does not set it boots whatever the cap is.
+ */
+function reserveAmount(env: Record<string, string | undefined>, cap: bigint): bigint {
+  const raw = env.SPONSOR_RESERVE_SOL
+  if (raw === undefined || raw.trim() === '') {
+    return cap / 4n < DEFAULT_RESERVE_LAMPORTS ? cap / 4n : DEFAULT_RESERVE_LAMPORTS
+  }
+  const sol = Number(raw)
+  const lamports = Math.round(sol * 1e9)
+  if (!Number.isFinite(sol) || !Number.isSafeInteger(lamports) || lamports < 0) {
+    throw new Error('SPONSOR_RESERVE_SOL must be an amount of SOL of 0 or more')
+  }
+  if (lamports > 0 && BigInt(lamports) >= cap) {
+    throw new Error('SPONSOR_RESERVE_SOL must be less than SPONSOR_DAILY_CAP_SOL')
+  }
+  return BigInt(lamports)
+}
+
 export function depsFromEnv(env: Record<string, string | undefined>, db?: Db): ApiDeps {
   const need = (k: string) => {
     const v = env[k]
@@ -110,6 +134,7 @@ export function depsFromEnv(env: Record<string, string | undefined>, db?: Db): A
     : env.SPONSOR_KEYPAIR
       ? loadKeypairFile('SPONSOR_KEYPAIR', env.SPONSOR_KEYPAIR)
       : undefined
+  const dailyCapLamports = sponsorKeypair ? solAmount(env, 'SPONSOR_DAILY_CAP_SOL', 2) : 0n
   return {
     db: db ?? connectPostgres(need('DATABASE_URL')).db,
     connection: new Connection(rpcUrl, {
@@ -123,7 +148,8 @@ export function depsFromEnv(env: Record<string, string | undefined>, db?: Db): A
       ? {
           sponsor: {
             keypair: sponsorKeypair,
-            dailyCapLamports: solAmount(env, 'SPONSOR_DAILY_CAP_SOL', 2),
+            dailyCapLamports,
+            reserveLamports: reserveAmount(env, dailyCapLamports),
             txPerHour: wholeNumber(env, 'SPONSOR_TX_PER_HOUR', 30, 1),
             // 0 is allowed: the sponsor then opens no new token accounts (RATE_LIMITED).
             atasPerDay: {

@@ -2,10 +2,12 @@ import { Buffer } from 'node:buffer'
 import {
   heartbeat,
   insertTrades,
+  listOps,
   markAtaClosed,
   putEvidence,
   recordSponsoredAtas,
   schema,
+  sponsorReserve,
   sponsorSpentSince,
   updateMarket,
 } from '@horagon/db'
@@ -24,12 +26,12 @@ import {
   toPoolState,
 } from '@horagon/sdk'
 import { ASSOCIATED_TOKEN_PROGRAM_ID, TOKEN_PROGRAM_ID } from '@solana/spl-token'
-import { ComputeBudgetProgram, Keypair, VersionedTransaction } from '@solana/web3.js'
+import { ComputeBudgetProgram, Keypair, PublicKey, VersionedTransaction } from '@solana/web3.js'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createApp } from '../src/app'
 import { pmAmmFaucet } from '../src/faucet'
 import { DEFAULT_SPONSOR_LIMITS } from '../src/sponsor/policy'
-import { hashIp, MarketSet } from '../src/sponsor/submit'
+import { exposureLamports, hashIp, MarketSet } from '../src/sponsor/submit'
 import { validateSponsoredTransaction } from '../src/sponsor/validate'
 import { configAccount } from './config-account'
 import { GAME_ID, makeEnv, program, type TestEnv, tokenAccount } from './helpers'
@@ -448,6 +450,145 @@ describe('POST /tx/submit', () => {
     expect(env.chain.simulated).toBe(0)
   })
 
+  /** What the sponsor reserves for one built trade (fees plus the rent of its new ATAs). */
+  async function exposureOf(base64: string): Promise<bigint> {
+    const rent = BigInt(await env.chain.asConnection().getMinimumBalanceForRentExemption(165))
+    const tx = VersionedTransaction.deserialize(Buffer.from(base64, 'base64'))
+    return exposureLamports(tx, rent, inspect(base64).ataCreates)
+  }
+  /**
+   * A sponsored trade of the user that landed: its reservation and its indexed trade. `daysAgo`
+   * moves the reservation to an earlier UTC day (it then no longer counts against today's cap).
+   */
+  async function landedSponsoredTrade(sig: string, daysAgo = 0) {
+    const wallet = env.user.publicKey.toBase58()
+    if (daysAgo > 0) {
+      const ts = new Date(Date.now() - daysAgo * 86_400_000)
+      await env.h.db
+        .insert(schema.sponsorLog)
+        .values({ sig, wallet, ipHash: 'h', lamports: 1n, ts })
+    } else {
+      await sponsorReserve(env.h.db, {
+        sig,
+        wallet,
+        ipHash: 'h',
+        lamports: 1n,
+        capLamports: 10n ** 18n,
+      })
+    }
+    await insertTrades(env.h.db, [
+      {
+        sig,
+        ixIndex: 2,
+        market: env.market.pubkey.toBase58(),
+        wallet,
+        direction: 'usdcToYes',
+        usdcAmount: 1n,
+        usdcDelta: -1n,
+        yesDelta: 1n,
+        noDelta: 0n,
+        fee: 0n,
+        slot: 1n,
+        blockTime: new Date(),
+      },
+    ])
+  }
+  const BET_WORDS = /\b(bet|bets|betting|wager|odds|gambl\w*)\b/i
+
+  it('keeps the reserve slice of the cap for wallets with a sponsored trade that landed', async () => {
+    const x = await exposureOf((await builtTrade()).tx)
+    // Open to every wallet: half a trade. The reserve: one more trade.
+    await replaceEnv({ capSol: Number((x * 3n) / 2n) / 1e9, reserveSol: Number(x) / 1e9 })
+    const refused = await post('/tx/submit', { tx: signAsUser((await builtTrade()).tx) })
+    expect(refused.status).toBe(429)
+    const body = (await refused.json()) as {
+      code: string
+      reason: string
+      detail: string
+      hint: string
+    }
+    expect(body).toMatchObject({ code: 'RATE_LIMITED', reason: 'RESERVE_ONLY' })
+    expect(body.hint).toMatch(/00:00 UTC/)
+    // Words, not a day-long countdown.
+    expect(refused.headers.get('retry-after')).toBeNull()
+    expect(`${body.detail} ${body.hint}`).not.toMatch(BET_WORDS)
+    expect(env.chain.simulated).toBe(0)
+    // A sponsored trade that landed today is not history yet: a burner whose first trade came
+    // from the open slice must not reach the reserve once that trade is indexed.
+    await landedSponsoredTrade('S-today')
+    expect((await post('/tx/submit', { tx: signAsUser((await builtTrade()).tx) })).status).toBe(429)
+    // The same wallet with a sponsored trade that landed on an earlier UTC day: the reserve is
+    // open to it.
+    await landedSponsoredTrade('S-landed', 2)
+    expect((await post('/tx/submit', { tx: signAsUser((await builtTrade()).tx) })).status).toBe(200)
+    expect(env.chain.sent).toHaveLength(1)
+  })
+
+  it('logs the first reserve-only refusal of a UTC day once, for the keeper to page', async () => {
+    const x = await exposureOf((await builtTrade()).tx)
+    await replaceEnv({ capSol: Number((x * 3n) / 2n) / 1e9, reserveSol: Number(x) / 1e9 })
+    const reserveOnly = async () =>
+      (await listOps(env.h.db))
+        .filter((o) => o.action === 'sponsor-reserve-only')
+        .map((o) => [o.actor, o.detail])
+    expect(await reserveOnly()).toEqual([])
+    for (const n of ['30', '31']) {
+      const res = await post('/tx/submit', { tx: signAsUser((await builtTrade(n)).tx) })
+      expect(((await res.json()) as { reason?: string }).reason).toBe('RESERVE_ONLY')
+    }
+    expect(await reserveOnly()).toEqual([
+      [
+        'api',
+        {
+          day: new Date().toISOString().slice(0, 10),
+          spentLamports: '0',
+          capLamports: ((x * 3n) / 2n).toString(),
+          reserveLamports: x.toString(),
+        },
+      ],
+    ])
+  })
+
+  it('tells a new wallet the budget is used up, not reserved, once the whole cap is spent', async () => {
+    const x = await exposureOf((await builtTrade()).tx)
+    await replaceEnv({ capSol: Number(x / 2n) / 1e9, reserveSol: Number(x / 4n) / 1e9 })
+    const res = await post('/tx/submit', { tx: signAsUser((await builtTrade()).tx) })
+    expect(res.status).toBe(429)
+    const body = (await res.json()) as { reason?: string; detail: string }
+    expect(body.reason).toBeUndefined()
+    expect(body.detail).toMatch(/used up/)
+  })
+
+  it('logs the 50% and the 80% marks of the daily cap once each', async () => {
+    const x = await exposureOf((await builtTrade()).tx)
+    // 3.5 trades a day: the second passes 50%, the third 80%.
+    await replaceEnv({ capSol: Number((x * 7n) / 2n) / 1e9 })
+    const marks = async () =>
+      (await listOps(env.h.db))
+        .filter((o) => o.action.startsWith('sponsor-cap-'))
+        .map((o) => [o.actor, o.action])
+    expect((await post('/tx/submit', { tx: signAsUser((await builtTrade('20')).tx) })).status).toBe(
+      200,
+    )
+    expect(await marks()).toEqual([])
+    expect((await post('/tx/submit', { tx: signAsUser((await builtTrade('21')).tx) })).status).toBe(
+      200,
+    )
+    expect(await marks()).toEqual([['api', 'sponsor-cap-50']])
+    expect((await post('/tx/submit', { tx: signAsUser((await builtTrade('22')).tx) })).status).toBe(
+      200,
+    )
+    expect((await marks()).sort()).toEqual([
+      ['api', 'sponsor-cap-50'],
+      ['api', 'sponsor-cap-80'],
+    ])
+    const mark = (await listOps(env.h.db)).find((o) => o.action === 'sponsor-cap-80')
+    expect(mark?.detail).toMatchObject({
+      day: new Date().toISOString().slice(0, 10),
+      capLamports: ((x * 7n) / 2n).toString(),
+    })
+  })
+
   it('answers a failed send with its signature and keeps the reservation, never echoing the RPC error', async () => {
     env.chain.sendFails = true
     const built = await builtTrade()
@@ -831,6 +972,68 @@ describe('status, claim, positions, faucet, health', () => {
     expect(first.headers.get('retry-after')).toBe('1200')
     expect((await post('/faucet', { wallet })).status).toBe(429)
     expect(calls).toBe(1)
+  })
+
+  it('adds the ops numbers, read once per 45 s, beside the health checks', async () => {
+    const t = Math.floor(Date.now() / 1000)
+    let now = t
+    env.deps.now = () => now
+    const { sponsor, chain, h, market } = env
+    const p = program
+    chain.set(sponsor.publicKey, {
+      data: Buffer.alloc(0),
+      owner: PublicKey.default,
+      lamports: 3_500_000_000,
+      executable: false,
+      rentEpoch: 0,
+    })
+    chain.set(p.treasury, tokenAccount(DEVNET_MUSDC_MINT, p.authority, 12_345_500_000n))
+    await updateMarket(h.db, market.pubkey.toBase58(), {
+      status: 'halted',
+      endTs: new Date((t - 600) * 1000),
+    })
+    await heartbeat(h.db, 'keeper', { index: { rounds: 9, lastRoundAt: t - 7 } })
+    const ops = async () => ((await (await get('/health')).json()) as { ops: unknown }).ops
+    const before = chain.multipleCalls
+    expect(await ops()).toEqual({
+      asOf: t,
+      sponsor: { lamports: 3_500_000_000 },
+      treasury: { musdc: 12_345.5 },
+      backlog: { count: 1, oldestAgeSecs: 600 },
+      index: { lagSecs: 7 },
+    })
+    expect(chain.multipleCalls - before).toBe(1)
+    // Within 45 s the numbers come from the cache: no RPC read. The index lag is the heartbeat's.
+    now = t + 44
+    chain.set(p.treasury, tokenAccount(DEVNET_MUSDC_MINT, p.authority, 1n))
+    expect(await ops()).toMatchObject({
+      asOf: t,
+      treasury: { musdc: 12_345.5 },
+      index: { lagSecs: 51 },
+    })
+    expect(chain.multipleCalls - before).toBe(1)
+    now = t + 46
+    expect(await ops()).toMatchObject({ asOf: t + 46, treasury: { musdc: 0.000001 } })
+    expect(chain.multipleCalls - before).toBe(2)
+  })
+
+  it('gives null and a reason for an ops number it cannot read, and stays healthy', async () => {
+    env.deps.now = () => Math.floor(Date.now() / 1000)
+    env.chain.accountsFail = true
+    // A keeper from before the index round time was in its heartbeat.
+    await heartbeat(env.h.db, 'keeper', { index: { rounds: 9 } })
+    const res = await get('/health')
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { ok: boolean; ops: Record<string, unknown> }
+    expect(body.ok).toBe(true)
+    expect(body.ops).toMatchObject({
+      sponsor: { lamports: null, reason: 'rpc unavailable' },
+      treasury: { musdc: null, reason: 'rpc unavailable' },
+      // The seeded market is open and past its end_ts by the wall clock.
+      backlog: { count: 1 },
+      index: { lagSecs: null, reason: 'no index round time in the keeper heartbeat' },
+    })
+    expect(JSON.stringify(body)).not.toMatch(/https?:/)
   })
 
   it('is degraded until the keeper heartbeats', async () => {

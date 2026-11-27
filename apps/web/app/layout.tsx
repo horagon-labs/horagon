@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from 'next'
 import { JetBrains_Mono, Space_Grotesk } from 'next/font/google'
 import Link from 'next/link'
+import { connection } from 'next/server'
 import type { ReactNode } from 'react'
 import { ChronoMotion } from '../components/chrono/motion'
 import { Wordmark } from '../components/chrono/wordmark'
@@ -39,7 +40,11 @@ export const viewport: Viewport = {
   themeColor: COLORS['enamel-900'],
 }
 
-export default function RootLayout({ children }: { children: ReactNode }) {
+export default async function RootLayout({ children }: { children: ReactNode }) {
+  // Every page renders per request: its scripts carry that request's CSP nonce (proxy.ts). A
+  // page prerendered at build time would hold scripts without one, and the browser would refuse
+  // them.
+  await connection()
   return (
     <html lang="en" className={`${grotesk.variable} ${mono.variable}`}>
       <body className="min-h-dvh pb-14">

@@ -112,6 +112,29 @@ export const markets = pgTable(
   (t) => [index('markets_game_idx').on(t.gameId), index('markets_status_idx').on(t.status)],
 )
 
+/**
+ * The market id the keeper drew for a game's market, stored before the create is sent. The id is
+ * 8 random bytes (u64), so nobody can create its pm-AMM PDA first; a restart reuses the stored
+ * id, so a create that landed unrecorded is adopted rather than made twice. An id whose PDA is
+ * taken by someone else is replaced by a new one. Markets created before this table keep the
+ * id in `markets.market_id` (derived from the game, spec 5.1).
+ */
+export const marketIdReservations = pgTable(
+  'market_id_reservations',
+  {
+    gameId: text('game_id')
+      .notNull()
+      .references(() => games.id),
+    /** 0 = winner, 1 = second half. */
+    kind: smallint('kind').notNull(),
+    /** u64 as a decimal string. */
+    marketId: text('market_id').notNull().unique(),
+    createdAt: ts('created_at').notNull().defaultNow(),
+    updatedAt: ts('updated_at').notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.gameId, t.kind] })],
+)
+
 /** One pm-AMM swap; amounts are the signer's balance deltas in that transaction. */
 export const trades = pgTable(
   'trades',
@@ -278,7 +301,7 @@ export const opsEvents = pgTable(
   {
     id: serial('id').primaryKey(),
     ts: ts('ts').notNull().defaultNow(),
-    /** keeper | indexer | guardian | admin | ops */
+    /** keeper | indexer | guardian | admin | ops | api */
     actor: text('actor').notNull(),
     action: text('action').notNull(),
     gameId: text('game_id'),

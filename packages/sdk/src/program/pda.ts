@@ -103,9 +103,28 @@ export function marketAddresses(
 export type MarketKindCode = 0 | 1
 
 /**
- * Spec section 5.1: the first 8 bytes of
+ * A new market id: 8 random bytes from WebCrypto, read as u64 LE (never 0). pm-AMM's
+ * `initialize_market` is open to any signer, so an id anyone can compute ahead of time
+ * (`marketIdFor`) lets them create its PDA first and block the game. The keeper stores the id it
+ * draws (`market_id_reservations`) before sending the create, and every reader takes the id from
+ * the database, never from the game.
+ */
+export function randomMarketId(
+  fill: (bytes: Uint8Array) => Uint8Array = (b) => crypto.getRandomValues(b),
+): bigint {
+  for (;;) {
+    const bytes = fill(new Uint8Array(8))
+    const id = new DataView(bytes.buffer, bytes.byteOffset, 8).getBigUint64(0, true)
+    if (id !== 0n) return id
+  }
+}
+
+/**
+ * Spec section 5.1, legacy: the first 8 bytes of
  * sha256("horagon:v1:" + league + ":" + external_game_id + ":" + kind), read as u64 LE.
  * `salt` n (1..9) appends ":salt" + n, for when the pm-AMM market PDA is already taken.
+ * Every input is public, so anyone can create these PDAs first: new markets use
+ * `randomMarketId`. This stays for markets created before it, which keep their stored id.
  */
 export async function marketIdFor(
   league: string,

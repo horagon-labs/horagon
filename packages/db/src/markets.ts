@@ -1,6 +1,21 @@
-import { and, asc, countDistinct, desc, eq, gte, inArray, isNull, max, ne, or } from 'drizzle-orm'
+import {
+  and,
+  asc,
+  count,
+  countDistinct,
+  desc,
+  eq,
+  gte,
+  inArray,
+  isNull,
+  lt,
+  max,
+  min,
+  ne,
+  or,
+} from 'drizzle-orm'
 import type { Db } from './client'
-import { markets, pricePoints, redeemsClaims, trades } from './schema'
+import { marketIdReservations, markets, pricePoints, redeemsClaims, trades } from './schema'
 
 export type NewMarket = typeof markets.$inferInsert
 export type TradeRow = typeof trades.$inferSelect
@@ -13,6 +28,59 @@ export async function upsertMarket(db: Db, m: NewMarket): Promise<void> {
     .insert(markets)
     .values(m)
     .onConflictDoUpdate({ target: markets.pubkey, set: { ...rest, updatedAt: new Date() } })
+}
+
+/** The market id stored for a game and kind (`market_id_reservations`), or null. */
+export async function getMarketIdReservation(
+  db: Db,
+  gameId: string,
+  kind: number,
+): Promise<string | null> {
+  const rows = await db
+    .select({ marketId: marketIdReservations.marketId })
+    .from(marketIdReservations)
+    .where(and(eq(marketIdReservations.gameId, gameId), eq(marketIdReservations.kind, kind)))
+  return rows[0]?.marketId ?? null
+}
+
+/**
+ * Stores `marketId` for the game and kind unless one is stored already, and returns the stored
+ * one: a second process (or a restart) that drew another id gets the first.
+ */
+export async function reserveMarketId(
+  db: Db,
+  r: { gameId: string; kind: number; marketId: string },
+): Promise<string> {
+  await db
+    .insert(marketIdReservations)
+    .values(r)
+    .onConflictDoNothing({ target: [marketIdReservations.gameId, marketIdReservations.kind] })
+  const stored = await getMarketIdReservation(db, r.gameId, r.kind)
+  if (stored === null) throw new Error(`no market id stored for ${r.gameId} kind ${r.kind}`)
+  return stored
+}
+
+/**
+ * Replaces the stored id `from` with `to` (its PDA was taken by someone else) and returns the id
+ * stored afterwards: `to`, or the id another process put there first.
+ */
+export async function replaceMarketIdReservation(
+  db: Db,
+  r: { gameId: string; kind: number; from: string; to: string },
+): Promise<string> {
+  await db
+    .update(marketIdReservations)
+    .set({ marketId: r.to, updatedAt: new Date() })
+    .where(
+      and(
+        eq(marketIdReservations.gameId, r.gameId),
+        eq(marketIdReservations.kind, r.kind),
+        eq(marketIdReservations.marketId, r.from),
+      ),
+    )
+  const stored = await getMarketIdReservation(db, r.gameId, r.kind)
+  if (stored === null) throw new Error(`no market id stored for ${r.gameId} kind ${r.kind}`)
+  return stored
 }
 
 export type MarketPatch = Partial<Omit<NewMarket, 'pubkey' | 'gameId' | 'marketId'>>
@@ -196,4 +264,23 @@ export async function marketsByStatus(db: Db, statuses: string[]) {
     .from(markets)
     .where(and(inArray(markets.status, statuses)))
     .orderBy(asc(markets.endTs))
+}
+
+/** Statuses of a market that nobody has proposed an outcome for yet. */
+const UNPROPOSED = ['open', 'halted']
+
+/**
+ * Markets past their `end_ts` with no proposal yet (open or halted): how many, and the `end_ts`
+ * of the oldest. The health endpoint shows it as the resolution backlog.
+ */
+export async function unresolvedBacklog(
+  db: Db,
+  now: Date,
+): Promise<{ count: number; oldestEndTs: Date | null }> {
+  const rows = await db
+    .select({ n: count(), oldest: min(markets.endTs) })
+    .from(markets)
+    .where(and(inArray(markets.status, UNPROPOSED), lt(markets.endTs, now)))
+  const row = rows[0]
+  return { count: Number(row?.n ?? 0), oldestEndTs: row?.oldest ?? null }
 }

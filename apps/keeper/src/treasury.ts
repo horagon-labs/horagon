@@ -8,7 +8,7 @@ import {
   createTransferCheckedInstruction,
   getAssociatedTokenAddressSync,
 } from '@solana/spl-token'
-import type { Keypair } from '@solana/web3.js'
+import type { Keypair, PublicKey } from '@solana/web3.js'
 import type { Logger } from 'pino'
 import type { Alerter } from './alerts'
 import type { TxSender } from './executor'
@@ -22,6 +22,11 @@ import type { SeedPolicy } from './planner'
 export const LAMPORTS_PER_MARKET = 36_000_000n
 /** Fees for one night of creates, halts, finalizes and recycles, with margin. */
 export const KEEPER_MIN_LAMPORTS = 200_000_000n
+/**
+ * The API's sponsor pays fees and ATA rent for sponsored trades: under this it pages
+ * (`sol-sponsor`). Half a day at the default cap (SPONSOR_DAILY_CAP_SOL=2).
+ */
+export const SPONSOR_MIN_LAMPORTS = 1_000_000_000n
 
 /** Next night's seeds + 20%, rounded up to whole mUSDC. */
 export function topUpTarget(seeds: readonly bigint[]): bigint {
@@ -49,6 +54,8 @@ export interface TreasuryDeps {
   /** Claims 1,000 mUSDC into `wallet`; throws when rate limited. */
   faucet: (wallet: string) => Promise<unknown>
   priorityMicroLamports: number
+  /** The API's sponsor, public key only (SPONSOR_PUBKEY): its SOL is checked too. */
+  sponsor?: PublicKey
 }
 
 /** Games starting in the next 36 h that have no market yet, earliest first. */
@@ -92,9 +99,11 @@ export async function treasuryTick(deps: TreasuryDeps): Promise<{ moved: bigint;
 
   // The SOL checks come first: a keeper out of SOL is the likeliest reason a send fails. The two
   // reads are independent: a failed one warns and skips only its own alert.
-  const [authorityRead, keeperRead] = await Promise.allSettled([
+  const sponsor = deps.sponsor
+  const [authorityRead, keeperRead, sponsorRead] = await Promise.allSettled([
     conn.getBalance(deps.program.authority, 'confirmed'),
     conn.getBalance(keeper, 'confirmed'),
+    sponsor ? conn.getBalance(sponsor, 'confirmed') : Promise.resolve(null),
   ])
   try {
     if (authorityRead.status === 'rejected') throw authorityRead.reason
@@ -124,6 +133,20 @@ export async function treasuryTick(deps: TreasuryDeps): Promise<{ moved: bigint;
     }
   } catch (err) {
     deps.log.warn({ error: errorSummary(err).message }, 'SOL balance check skipped: keeper')
+  }
+  if (sponsor) {
+    try {
+      if (sponsorRead.status === 'rejected') throw sponsorRead.reason
+      const sponsorSol = BigInt(sponsorRead.value ?? 0)
+      if (sponsorSol < SPONSOR_MIN_LAMPORTS) {
+        await deps.alerts.send(
+          'sol-sponsor',
+          `Sponsor ${sponsor.toBase58()} holds ${Number(sponsorSol) / 1e9} SOL, under ${Number(SPONSOR_MIN_LAMPORTS) / 1e9}: sponsored trades stop when it runs out`,
+        )
+      }
+    } catch (err) {
+      deps.log.warn({ error: errorSummary(err).message }, 'SOL balance check skipped: sponsor')
+    }
   }
 
   const keeperAta = getAssociatedTokenAddressSync(mint, keeper)

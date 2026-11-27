@@ -10,6 +10,7 @@ import {
   getEvidence,
   getGame,
   getHeartbeat,
+  getMarketIdReservation,
   heartbeat,
   insertPricePoint,
   insertTrades,
@@ -19,6 +20,7 @@ import {
   listIndexableMarkets,
   listMarketTrades,
   listOps,
+  listOpsSince,
   logOps,
   markAtaClosed,
   markAtasChecked,
@@ -28,15 +30,19 @@ import {
   rateLimitRefund,
   rateLimitTake,
   recordSponsoredAtas,
+  replaceMarketIdReservation,
+  reserveMarketId,
   rowsOf,
   schema,
   setFeatured,
   setWalletKind,
   sponsoredAtasToCheck,
+  sponsoredTradeLanded,
   sponsorRelease,
   sponsorReserve,
   sponsorSpentSince,
   teamWallets,
+  unresolvedBacklog,
   updateGameLive,
   updateMarket,
   upsertDraft,
@@ -53,7 +59,7 @@ beforeAll(async () => {
 // Every test starts from empty tables, so each one is self-contained (run alone with -t, or reordered).
 beforeEach(async () => {
   await h.db.execute(
-    sql`truncate table evidence, game_snapshots, resolution_drafts, markets, games, trades, price_points, redeems_claims, wallets, sponsor_log, sponsored_atas, rate_limits, keeper_heartbeats, ops_events restart identity`,
+    sql`truncate table evidence, game_snapshots, resolution_drafts, markets, market_id_reservations, games, trades, price_points, redeems_claims, wallets, sponsor_log, sponsored_atas, rate_limits, keeper_heartbeats, ops_events restart identity`,
   )
 })
 afterAll(async () => {
@@ -104,6 +110,7 @@ const TABLES = [
   'game_snapshots',
   'games',
   'keeper_heartbeats',
+  'market_id_reservations',
   'markets',
   'ops_events',
   'price_points',
@@ -370,11 +377,86 @@ describe('ops tables', () => {
     expect(events[1]?.detail).toEqual({})
   })
 
+  it('lists the ops events of some actions since a time, oldest first', async () => {
+    await logOps(h.db, { actor: 'api', action: 'sponsor-cap-50' })
+    await logOps(h.db, { actor: 'keeper', action: 'create' })
+    await logOps(h.db, { actor: 'api', action: 'sponsor-cap-80' })
+    await h.db.execute(sql`update ops_events set ts = now() - interval '2 days' where id = 1`)
+    await logOps(h.db, { actor: 'api', action: 'sponsor-cap-50' })
+    const since = new Date(Date.now() - 3_600_000)
+    const events = await listOpsSince(h.db, since, ['sponsor-cap-50', 'sponsor-cap-80'])
+    expect(events.map((e) => [e.id, e.action])).toEqual([
+      [3, 'sponsor-cap-80'],
+      [4, 'sponsor-cap-50'],
+    ])
+  })
+
   it('registers team wallets, and a later kind replaces the earlier one', async () => {
     await setWalletKind(h.db, 'T1', 'team')
     await setWalletKind(h.db, 'T2', 'team')
     await setWalletKind(h.db, 'T2', 'bot')
     expect(await teamWallets(h.db)).toEqual(['T1'])
+  })
+})
+
+describe('unresolvedBacklog', () => {
+  it('counts the markets past end_ts with no proposal and the age of the oldest', async () => {
+    const now = new Date('2026-11-21T00:00:00Z')
+    expect(await unresolvedBacklog(h.db, now)).toEqual({ count: 0, oldestEndTs: null })
+    await seedGames('nba-1', 'nba-2', 'nba-3', 'nba-4', 'nba-5')
+    const at = (iso: string) => new Date(iso)
+    await upsertMarket(h.db, market('M1', 'nba-1', { endTs: at('2026-11-20T22:00:00Z') }))
+    await upsertMarket(
+      h.db,
+      market('M2', 'nba-2', { endTs: at('2026-11-20T20:00:00Z'), status: 'halted' }),
+    )
+    // Proposed or past it, or not over yet: not backlog.
+    await upsertMarket(
+      h.db,
+      market('M3', 'nba-3', { endTs: at('2026-11-20T10:00:00Z'), status: 'proposed' }),
+    )
+    await upsertMarket(
+      h.db,
+      market('M4', 'nba-4', { endTs: at('2026-11-20T09:00:00Z'), status: 'finalized' }),
+    )
+    await upsertMarket(h.db, market('M5', 'nba-5', { endTs: at('2026-11-21T01:00:00Z') }))
+    expect(await unresolvedBacklog(h.db, now)).toEqual({
+      count: 2,
+      oldestEndTs: at('2026-11-20T20:00:00Z'),
+    })
+  })
+})
+
+describe('market id reservations', () => {
+  it('stores the first id for a game and kind, and hands that one back on a later reserve', async () => {
+    await seedGames('nba-1')
+    expect(await getMarketIdReservation(h.db, 'nba-1', 0)).toBeNull()
+    expect(await reserveMarketId(h.db, { gameId: 'nba-1', kind: 0, marketId: '111' })).toBe('111')
+    // A restart that drew another id gets the stored one: one market per game and kind.
+    expect(await reserveMarketId(h.db, { gameId: 'nba-1', kind: 0, marketId: '222' })).toBe('111')
+    expect(await getMarketIdReservation(h.db, 'nba-1', 0)).toBe('111')
+    expect(await getMarketIdReservation(h.db, 'nba-1', 1)).toBeNull()
+  })
+
+  it('replaces only the id it was asked to replace', async () => {
+    await seedGames('nba-1')
+    await reserveMarketId(h.db, { gameId: 'nba-1', kind: 0, marketId: '111' })
+    expect(
+      await replaceMarketIdReservation(h.db, { gameId: 'nba-1', kind: 0, from: '111', to: '333' }),
+    ).toBe('333')
+    // A stale replace (another process replaced it first) keeps the current id.
+    expect(
+      await replaceMarketIdReservation(h.db, { gameId: 'nba-1', kind: 0, from: '111', to: '444' }),
+    ).toBe('333')
+    expect(await getMarketIdReservation(h.db, 'nba-1', 0)).toBe('333')
+  })
+
+  it('never stores one id for two games', async () => {
+    await seedGames('nba-1', 'nba-2')
+    await reserveMarketId(h.db, { gameId: 'nba-1', kind: 0, marketId: '111' })
+    await expect(
+      reserveMarketId(h.db, { gameId: 'nba-2', kind: 0, marketId: '111' }),
+    ).rejects.toThrow()
   })
 })
 
@@ -455,6 +537,23 @@ describe('sponsor_reserve', () => {
     expect(await sponsorReserve(h.db, { ...r, sig: 'b' })).toBe('reserved')
     expect(await sponsorReserve(h.db, { ...r, sig: 'b' })).toBe('duplicate')
     expect(await sponsorSpentSince(h.db, new Date(0))).toBe(6_000_000n)
+  })
+
+  it('knows a wallet with a sponsored trade that landed before a given time', async () => {
+    const today = new Date(new Date().toISOString().slice(0, 10))
+    expect(await sponsoredTradeLanded(h.db, 'W1', today)).toBe(false)
+    // Reserved and sent, but not (yet) indexed as a trade: not history.
+    await sponsorReserve(h.db, { ...r, wallet: 'W1', sig: 'S1' })
+    expect(await sponsoredTradeLanded(h.db, 'W1', today)).toBe(false)
+    // A trade the wallet paid for itself is not a sponsored one.
+    await insertTrades(h.db, [trade('S9', { wallet: 'W1' })])
+    expect(await sponsoredTradeLanded(h.db, 'W1', today)).toBe(false)
+    // Landed today: not history yet, or a burner's first trade would open the reserve to it.
+    await insertTrades(h.db, [trade('S1', { wallet: 'W1' })])
+    expect(await sponsoredTradeLanded(h.db, 'W1', today)).toBe(false)
+    await h.db.execute(sql`update sponsor_log set ts = now() - interval '2 days' where sig = 'S1'`)
+    expect(await sponsoredTradeLanded(h.db, 'W1', today)).toBe(true)
+    expect(await sponsoredTradeLanded(h.db, 'W2', today)).toBe(false)
   })
 
   it('throws instead of guessing when the function returns something unexpected', async () => {

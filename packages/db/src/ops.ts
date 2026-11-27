@@ -8,6 +8,7 @@ import {
   inArray,
   isNotNull,
   isNull,
+  lt,
   ne,
   or,
   sql,
@@ -19,6 +20,7 @@ import {
   rateLimits,
   sponsoredAtas,
   sponsorLog,
+  trades,
   wallets,
 } from './schema'
 
@@ -98,6 +100,24 @@ export async function sponsorSpentSince(db: Db, since: Date): Promise<bigint> {
     .from(sponsorLog)
     .where(gte(sponsorLog.ts, since))
   return BigInt(rows[0]?.total ?? 0)
+}
+
+/**
+ * True when the wallet has a sponsored transaction that landed and was reserved before `before`
+ * (the start of the UTC day, for the sponsor reserve): one of its `sponsor_log` reservations
+ * from then is an indexed trade (the signature in `trades`). A reservation alone is not history,
+ * nor is a trade the wallet paid for itself, nor one from today: a fresh wallet whose first trade
+ * landed an hour ago must not open the reserve to itself. Reads `trades_wallet_idx`, then the
+ * `sponsor_log` primary key.
+ */
+export async function sponsoredTradeLanded(db: Db, wallet: string, before: Date): Promise<boolean> {
+  const rows = await db
+    .select({ sig: trades.sig })
+    .from(trades)
+    .innerJoin(sponsorLog, eq(sponsorLog.sig, trades.sig))
+    .where(and(eq(trades.wallet, wallet), lt(sponsorLog.ts, before)))
+    .limit(1)
+  return rows.length > 0
 }
 
 /**
@@ -268,6 +288,16 @@ export async function logOps(db: Db, e: OpsEvent): Promise<void> {
 
 export async function listOps(db: Db, limit = 100) {
   return db.select().from(opsEvents).orderBy(desc(opsEvents.ts), desc(opsEvents.id)).limit(limit)
+}
+
+/** The events of `actions` logged at or after `since`, oldest first (`ops_events_ts_idx`). */
+export async function listOpsSince(db: Db, since: Date, actions: readonly string[]) {
+  if (actions.length === 0) return []
+  return db
+    .select()
+    .from(opsEvents)
+    .where(and(gte(opsEvents.ts, since), inArray(opsEvents.action, [...actions])))
+    .orderBy(asc(opsEvents.ts), asc(opsEvents.id))
 }
 
 /** Team wallets never count in metrics (spec 6.4); `ops` registers them. */

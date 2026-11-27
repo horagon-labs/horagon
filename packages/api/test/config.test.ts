@@ -147,6 +147,7 @@ describe('depsFromEnv', () => {
     const deps = depsFromEnv({ ...base, SPONSOR_SECRET_KEY: bs58.encode(kp.secretKey) }, db)
     expect(deps.sponsor?.keypair.publicKey).toEqual(kp.publicKey)
     expect(deps.sponsor?.dailyCapLamports).toBe(2_000_000_000n)
+    expect(deps.sponsor?.reserveLamports).toBe(500_000_000n)
     expect(deps.sponsor?.txPerHour).toBe(30)
     expect(deps.sponsor?.atasPerDay).toEqual({ wallet: 26, ip: 78 })
   })
@@ -157,6 +158,7 @@ describe('depsFromEnv', () => {
         ...base,
         SPONSOR_SECRET_KEY: bs58.encode(Keypair.generate().secretKey),
         SPONSOR_DAILY_CAP_SOL: '0.5',
+        SPONSOR_RESERVE_SOL: '0',
         SPONSOR_TX_PER_HOUR: '12',
         SPONSOR_ATAS_PER_WALLET_DAY: '0',
         SPONSOR_ATAS_PER_IP_DAY: '0',
@@ -164,8 +166,25 @@ describe('depsFromEnv', () => {
       db,
     )
     expect(deps.sponsor?.dailyCapLamports).toBe(500_000_000n)
+    expect(deps.sponsor?.reserveLamports).toBe(0n)
     expect(deps.sponsor?.txPerHour).toBe(12)
     expect(deps.sponsor?.atasPerDay).toEqual({ wallet: 0, ip: 0 })
+  })
+
+  it('defaults the reserve to a quarter of a cap under 2 SOL, so a small cap still boots', () => {
+    const reserveFor = (cap: string) =>
+      depsFromEnv(
+        {
+          ...base,
+          SPONSOR_SECRET_KEY: bs58.encode(Keypair.generate().secretKey),
+          SPONSOR_DAILY_CAP_SOL: cap,
+        },
+        db,
+      ).sponsor?.reserveLamports
+    expect(reserveFor('0.3')).toBe(75_000_000n)
+    expect(reserveFor('1')).toBe(250_000_000n)
+    expect(reserveFor('2')).toBe(500_000_000n)
+    expect(reserveFor('10')).toBe(500_000_000n)
   })
 
   const perHour = 'SPONSOR_TX_PER_HOUR must be a whole number of 1 or more'
@@ -186,6 +205,10 @@ describe('depsFromEnv', () => {
     ],
     ['SPONSOR_DAILY_CAP_SOL', '-2', sol],
     ['SPONSOR_DAILY_CAP_SOL', 'lots', sol],
+    ['SPONSOR_RESERVE_SOL', '-1', 'SPONSOR_RESERVE_SOL must be an amount of SOL of 0 or more'],
+    // Cap 2 SOL: a reserve of the whole cap would leave new wallets nothing at all.
+    ['SPONSOR_RESERVE_SOL', '2.5', 'SPONSOR_RESERVE_SOL must be less than SPONSOR_DAILY_CAP_SOL'],
+    ['SPONSOR_RESERVE_SOL', '2', 'SPONSOR_RESERVE_SOL must be less than SPONSOR_DAILY_CAP_SOL'],
   ])('refuses %s=%s with a fixed message that names the variable', (name, value, message) => {
     const key = bs58.encode(Keypair.generate().secretKey)
     const err = thrown({ ...base, SPONSOR_SECRET_KEY: key, [name]: value })

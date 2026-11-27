@@ -22,6 +22,7 @@ import {
   marketIdFor,
   marketName,
   parseHoragonEvents,
+  randomMarketId,
 } from '../../src/program'
 import { key } from './idl-borsh'
 
@@ -42,6 +43,24 @@ describe('marketIdFor', () => {
       nodeMarketId('horagon:v1:NBA:401910007:0:salt3'),
     )
     await expect(marketIdFor('NBA', '1', 0, 10)).rejects.toThrow(HoragonError)
+  })
+})
+
+describe('randomMarketId', () => {
+  it('reads 8 random bytes as u64 LE and never answers 0', () => {
+    const draws = [new Uint8Array(8), Uint8Array.from([1, 0, 0, 0, 0, 0, 0, 0x80])]
+    const fill = (b: Uint8Array) => {
+      b.set(draws.shift() ?? new Uint8Array(8))
+      return b
+    }
+    // An all-zero draw is drawn again.
+    expect(randomMarketId(fill)).toBe(0x8000_0000_0000_0001n)
+  })
+
+  it('is a different u64 each time with the default source', () => {
+    const ids = new Set(Array.from({ length: 64 }, () => randomMarketId()))
+    expect(ids.size).toBe(64)
+    for (const id of ids) expect(id > 0n && id < 2n ** 64n).toBe(true)
   })
 })
 

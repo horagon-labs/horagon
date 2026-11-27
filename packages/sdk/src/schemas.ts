@@ -381,12 +381,34 @@ export const FaucetResponseSchema = z.object({
   amountUsdc: AmountSchema,
 })
 
+/** Why an ops number of /health is null (it could not be read); absent when it was. */
+const opsReason = z.string().optional()
+
 export const HealthSchema = z.object({
   ok: z.boolean(),
   db: z.object({ ok: z.boolean(), ms: z.number() }),
   rpc: z.object({ ok: z.boolean(), ms: z.number(), slot: z.number().int().nullable() }),
   keeper: z.object({ ok: z.boolean(), heartbeatAgeSecs: z.number().nullable() }),
   version: z.string(),
+  /**
+   * Ops numbers that never change `ok`: the sponsor's lamports, the treasury's mUSDC and the
+   * resolution backlog (markets past end_ts with no proposal) as read at `asOf` (unix seconds,
+   * kept up to 45 s), and the index lag (seconds since the keeper's index loop last ended a
+   * round). Older servers leave it out.
+   */
+  ops: z
+    .object({
+      asOf: z.number().int(),
+      sponsor: z.object({ lamports: z.number().int().nullable(), reason: opsReason }),
+      treasury: z.object({ musdc: z.number().nullable(), reason: opsReason }),
+      backlog: z.object({
+        count: z.number().int().nullable(),
+        oldestAgeSecs: z.number().nullable(),
+        reason: opsReason,
+      }),
+      index: z.object({ lagSecs: z.number().nullable(), reason: opsReason }),
+    })
+    .optional(),
 })
 
 /** RFC 9457 problem details, with Horagon's error code (spec section 19.3). */

@@ -10,10 +10,13 @@ import {
   getDraft,
   getEvidence,
   getHeartbeat,
+  getMarketIdReservation,
   heartbeat,
   insertSnapshot,
   listGames,
   logOps,
+  replaceMarketIdReservation,
+  reserveMarketId,
   setDraftState,
   updateGameLive,
   updateMarket,
@@ -32,10 +35,11 @@ import {
   marketName,
   outcomeFor,
   parseResolutionEvidence,
+  randomMarketId,
   winProbability,
 } from '@horagon/sdk'
 import { toHex } from '@horagon/sdk/evidence'
-import type { Keypair } from '@solana/web3.js'
+import { type AccountInfo, type Keypair, SystemProgram } from '@solana/web3.js'
 import type { Logger } from 'pino'
 import { z } from 'zod'
 import type { Alerter } from './alerts'
@@ -96,7 +100,12 @@ export interface KeeperDeps {
   feedEverySecs?: number
   /** Auto-propose (R6); absent means off. */
   autoPropose?: AutoProposeDeps
+  /** Draws the id of a new market (default `randomMarketId`); tests pin it. */
+  newMarketId?: () => bigint
 }
+
+/** Ids in a row whose PDAs someone else took before the create gives up for this tick. */
+const MARKET_ID_TRIES = 3
 
 /** One second-source check of a game's draft, kept in memory like `Keeper.observed`. */
 interface Check {
@@ -393,6 +402,13 @@ const TREASURY_UNREAD_ALERT_AFTER = 10
  * without it a second challenge round inside that window would go unheard.
  */
 const roundOf = (s: Pick<GameState, 'onchain'>) => s.onchain?.challengeCount ?? 0
+
+/**
+ * An address that was only sent lamports (system-owned, no data) is not an account yet: the
+ * program's `init` takes it over. The same rule as the SDK's fetchGameMarket.
+ */
+const isUnused = (info: AccountInfo<Uint8Array>) =>
+  info.owner.equals(SystemProgram.programId) && info.data.length === 0
 
 export class Keeper {
   private readonly observed = new Map<string, Observed>()
@@ -985,18 +1001,100 @@ export class Keeper {
     if (delivered !== false) this.paged.add(key)
   }
 
-  /** The first salted market id that is free or already ours (spec 5.1). */
-  private async marketIdFor(
+  /**
+   * The id of a game's winner market, and its GameMarket when one is already on chain.
+   * - An id stored for the game (`market_id_reservations`) is reused: a create that landed but
+   *   was never recorded (a crash, an UnresolvedAttempt) is adopted, never made a second time.
+   * - With none stored, a GameMarket of this game under an id derived from the game (spec 5.1,
+   *   salts 0-9: markets created before ids were random) is adopted. Otherwise a random id is
+   *   drawn and stored before anything is sent.
+   * - An id whose PDAs belong to someone else (a pm-AMM market with no GameMarket of ours: anyone
+   *   may call initialize_market; or an account of another owner at the GameMarket address) is
+   *   replaced by a new random id, with `market-id-taken`. A GameMarket address that was only
+   *   sent lamports is treated as absent (the create's `init` takes it over), never decoded.
+   */
+  private async marketIdOf(
     g: GameRow,
   ): Promise<{ marketId: bigint; existing: GameMarketAccount | null }> {
-    for (let salt = 0; salt <= 9; salt++) {
-      const marketId = await marketIdFor(g.league, g.externalId, 0, salt)
-      const existing = await this.d.program.fetchGameMarket(this.conn, marketId)
-      if (!existing) return { marketId, existing: null }
+    const draw = () => (this.d.newMarketId ?? randomMarketId)()
+    const stored = await getMarketIdReservation(this.d.db, g.id, 0)
+    let marketId: bigint
+    if (stored === null) {
+      const legacy = await this.legacyMarket(g)
+      if (legacy) return legacy
+      marketId = BigInt(
+        await reserveMarketId(this.d.db, { gameId: g.id, kind: 0, marketId: draw().toString() }),
+      )
+    } else {
+      marketId = BigInt(stored)
+    }
+    for (let i = 0; i < MARKET_ID_TRIES; i++) {
+      const a = this.d.program.addresses(marketId)
+      // One read: both accounts come from the same slot (create_game_market makes both at once).
+      const [gmInfo, ammInfo] = await this.conn.getMultipleAccountsInfo(
+        [a.gameMarket, a.market],
+        'confirmed',
+      )
+      if (gmInfo && !isUnused(gmInfo)) {
+        // Only an account of our program is decoded: another owner there means the id is taken.
+        if (gmInfo.owner.equals(this.d.program.programId)) {
+          const existing = decodeGameMarket(gmInfo, this.d.program.programId)
+          if (existing.externalGameId === g.externalId && existing.kind === 0)
+            return { marketId, existing }
+        }
+      } else if (!ammInfo) {
+        // Absent, or only sent lamports: create_game_market's `init` takes such an address over.
+        return { marketId, existing: null }
+      }
+      const from = marketId
+      marketId = BigInt(
+        await replaceMarketIdReservation(this.d.db, {
+          gameId: g.id,
+          kind: 0,
+          from: from.toString(),
+          to: draw().toString(),
+        }),
+      )
+      this.d.log.warn({ gameId: g.id, from: from.toString() }, 'market id taken on chain')
+      await logOps(this.d.db, {
+        actor: 'keeper',
+        action: 'market-id-replaced',
+        gameId: g.id,
+        market: a.market.toBase58(),
+        detail: { from: from.toString(), to: marketId.toString() },
+      })
+      await this.d.alerts.send(
+        `market-id-taken:${g.id}`,
+        `${g.id}: the PDAs of market id ${from} were taken by someone else; drew a new random id`,
+      )
+    }
+    throw new Error(`${g.id}: ${MARKET_ID_TRIES} market ids in a row were taken on chain`)
+  }
+
+  /** A GameMarket of this game under an id derived from it (spec 5.1), from before random ids. */
+  private async legacyMarket(
+    g: GameRow,
+  ): Promise<{ marketId: bigint; existing: GameMarketAccount } | null> {
+    const ids: bigint[] = []
+    for (let salt = 0; salt <= 9; salt++)
+      ids.push(await marketIdFor(g.league, g.externalId, 0, salt))
+    const infos = await this.conn.getMultipleAccountsInfo(
+      ids.map((id) => deriveGameMarket(id, this.d.program.programId)),
+      'confirmed',
+    )
+    for (const [i, info] of infos.entries()) {
+      const marketId = ids[i]
+      if (!info || marketId === undefined) continue
+      let existing: GameMarketAccount
+      try {
+        existing = decodeGameMarket(info, this.d.program.programId)
+      } catch {
+        continue // Not a GameMarket of ours: nothing to adopt there.
+      }
       if (existing.externalGameId === g.externalId && existing.kind === 0)
         return { marketId, existing }
     }
-    throw new Error(`${g.id}: market ids for salts 0-9 all belong to other games`)
+    return null
   }
 
   /**
@@ -1006,7 +1104,7 @@ export class Keeper {
    * seed is gone from the treasury, and reading first would report a false empty treasury.
    */
   private async create(a: Extract<Action, { type: 'create' }>, g: GameRow): Promise<void> {
-    const { marketId, existing } = await this.marketIdFor(g)
+    const { marketId, existing } = await this.marketIdOf(g)
     if (existing) {
       await this.record(g, marketId, {
         initialPriceBps: a.initialPriceBps,
