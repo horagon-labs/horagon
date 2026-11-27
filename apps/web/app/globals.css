@@ -115,3 +115,26 @@ html[data-motion="reduced"] *:not(.keep-motion) {
   animation: none;
   transition: none;
 }
+
+/* Clutch time (culture A2, R8): with the game close at the end and the price in doubt, the
+   dial's ticks and the screen's rules recede to rule-faint, 1.2 s in and 0.6 s out. The face
+   stays white; the numbers, the needle, the ◆, the buttons, the crown sheet and the banner are
+   not touched. Reduced motion: an instant change. */
+[data-hour] .dial [data-ticks] {
+  transition: stroke 0.6s ease-out;
+}
+[data-hour] [data-rule] {
+  transition: border-color 0.6s ease-out;
+}
+[data-hour="clutch"] .dial [data-ticks] {
+  stroke: var(--color-rule-faint);
+  transition-duration: 1.2s;
+}
+[data-hour="clutch"] [data-rule] {
+  border-color: var(--color-rule-faint);
+  transition-duration: 1.2s;
+}
+[data-hour][data-motion="reduced"] .dial [data-ticks],
+[data-hour][data-motion="reduced"] [data-rule] {
+  transition: none;
+}

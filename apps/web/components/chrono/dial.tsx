@@ -8,6 +8,13 @@ import { useMotionReduced } from '../../lib/chrono/feel'
 import { arcPath, polar, priceToAngle } from '../../lib/chrono/geometry'
 import type { DialState } from '../../lib/chrono/state'
 import {
+  isStoppedFace,
+  STOP_INDEX_AT_MS,
+  STOP_RING_IN_MS,
+  STOP_RING_OUT_MS,
+} from '../../lib/chrono/stop'
+import { MoveChip } from './buzzer-index'
+import {
   beatArmed,
   isBeat,
   needleClass,
@@ -69,6 +76,19 @@ export interface DialProps {
    * means not known yet (history still loading): the first key that follows is absorbed.
    */
   runKey?: string | null
+  /**
+   * The static buzzer index (A2, R8): the home side's price when trading stopped. Drawn on every
+   * stopped face (closed, proposed, challenged, resolved); null for none.
+   */
+  stopPrice?: number | null
+  /** Buzzer stops played on this page (useBuzzerStop): 1 plays the ring and drops the index. */
+  stop?: number
+  /** The holder's average entry as a home-side price (stop.ts entryMark): the face's ◆. */
+  entry?: number | null
+  /** "+5" / "−5" for 3 s after a move of 3 points or more (clutch.ts moveChip). */
+  chip?: string | null
+  /** Overrides the viewer's reduced-motion setting (the gallery's twins). */
+  reduced?: boolean
   className?: string
 }
 
@@ -89,8 +109,16 @@ function pts(...points: { x: number; y: number }[]): string {
 }
 
 export function Dial(p: DialProps) {
-  const reduced = useMotionReduced()
+  const systemReduced = useMotionReduced()
+  const reduced = p.reduced ?? systemReduced
   const flash = useBeat(p.runKey, beatArmed(p.loading, p.runKey))
+  // The Buzzer stop (A2): it cancels any other flash; with reduced motion, one still frame.
+  const stopping = (p.stop ?? 0) > 0
+  const animateStop = stopping && !reduced
+  const stopAt =
+    !p.loading && p.stopPrice != null && Number.isFinite(p.stopPrice) && isStoppedFace(p.state)
+      ? p.stopPrice
+      : null
   const settle = useBeat(p.state === 'resolved' ? 'resolved' : null, !p.loading)
   const price = p.state === 'void' ? null : p.price
   const ghost = p.loading ? null : (p.ghostPrice ?? null)
@@ -157,7 +185,7 @@ export function Dial(p: DialProps) {
             data-ring
           />
         )}
-        <g className={`stroke-ash-400 ${blink}`}>
+        <g className={`stroke-ash-400 ${blink}`} data-ticks>
           {TICKS.map((t) => {
             const a = priceToAngle(t)
             const major = t === 0 || t === 0.5 || t === 1
@@ -186,6 +214,36 @@ export function Dial(p: DialProps) {
             className="fill-brass-500"
             data-model={Math.round(p.modelProb * 100)}
           />
+        )}
+        {stopAt !== null && (
+          // The buzzer index: a brass bar from r84 to r93 where the price stood at the stop.
+          <g
+            transform={`rotate(${priceToAngle(stopAt)} ${C} ${C})`}
+            data-buzzer-index={Math.round(stopAt * 100)}
+          >
+            {animateStop ? (
+              <m.line
+                x1={C}
+                y1={C - 93}
+                x2={C}
+                y2={C - 84}
+                strokeWidth={1.8}
+                className="stroke-brass"
+                initial={{ opacity: 0, y: -6 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: STOP_INDEX_AT_MS / 1000, duration: 0.3 }}
+              />
+            ) : (
+              <line
+                x1={C}
+                y1={C - 93}
+                x2={C}
+                y2={C - 84}
+                strokeWidth={1.8}
+                className="stroke-brass"
+              />
+            )}
+          </g>
         )}
         {ghost !== null && price !== null && (
           <path
@@ -218,7 +276,18 @@ export function Dial(p: DialProps) {
           </Needle>
         )}
         {!p.loading && price !== null && (
-          <Needle angle={priceToAngle(price)} kind="price" className={needleClass(p.state)}>
+          <Needle
+            angle={priceToAngle(price)}
+            kind="price"
+            cut={stopping}
+            // At the Buzzer stop the needle turns ink-muted 400 ms in (STOP_NEEDLE_AT_MS), after
+            // the ring; the class is spelled out for Tailwind.
+            className={
+              animateStop
+                ? `${needleClass(p.state)} transition-[stroke] duration-0 delay-[400ms]`
+                : needleClass(p.state)
+            }
+          >
             {/* A proposal dashes the needle instead of fading it (review §3.4: 7.10, not 1.90). */}
             <line
               x1={C}
@@ -253,10 +322,42 @@ export function Dial(p: DialProps) {
             </text>
           )
         })}
+        {p.entry != null && Number.isFinite(p.entry) && p.state !== 'void' && (
+          // Yours (h): the average entry at r86, a live ◆ that stays live on a stopped face.
+          <text
+            x={polar(C, C, 86, priceToAngle(p.entry)).x}
+            y={polar(C, C, 86, priceToAngle(p.entry)).y}
+            textAnchor="middle"
+            dominantBaseline="central"
+            data-entry={Math.round(p.entry * 100)}
+            className="fill-live text-[8px]"
+          >
+            ◆
+          </text>
+        )}
         {/* The ink hub with a paper pin (review §4.2). */}
         <circle cx={C} cy={C} r={5} className="fill-brass-500" />
         <circle cx={C} cy={C} r={1.6} className="fill-enamel-900" />
-        {!reduced && flash > 0 && (
+        {animateStop && (
+          // The Buzzer stop's ink ring at r96: 150 ms in, 600 ms out.
+          <m.circle
+            key={`stop-${p.stop}`}
+            cx={C}
+            cy={C}
+            r={96}
+            fill="none"
+            strokeWidth={3}
+            className="stroke-ink"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: [0, 1, 0] }}
+            transition={{
+              duration: (STOP_RING_IN_MS + STOP_RING_OUT_MS) / 1000,
+              times: [0, STOP_RING_IN_MS / (STOP_RING_IN_MS + STOP_RING_OUT_MS), 1],
+            }}
+            data-beat="stop"
+          />
+        )}
+        {!reduced && !stopping && flash > 0 && (
           <m.circle
             key={`run-${flash}`}
             cx={C}
@@ -323,6 +424,7 @@ export function Dial(p: DialProps) {
             {p.caption}
           </span>
         )}
+        <MoveChip text={p.chip ?? null} />
         {p.detail && (
           <span className="bg-surface-raised font-mono text-12 text-ash-400">{p.detail}</span>
         )}

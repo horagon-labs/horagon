@@ -109,12 +109,13 @@ describe('haptics.ts stays off the board (I1b)', () => {
       .filter((f) => /\.tsx?$/.test(f))
       .map((f) => join(dir, f).replaceAll('\\', '/'))
 
-  it('is imported by the bezel and the HoldButton only', () => {
+  it('is imported by the bezel, the HoldButton and the game screen only (A2 Buzzer stop)', () => {
     const importers = [...sources('app'), ...sources('components'), ...sources('lib')].filter((f) =>
       /from '[./]+(lib\/chrono\/|chrono\/)?haptics'/.test(readFileSync(join(web, f), 'utf8')),
     )
     expect(importers.sort()).toEqual([
       'components/chrono/bezel.tsx',
+      'components/chrono/game-screen.tsx',
       'components/chrono/hold-button.tsx',
     ])
   })

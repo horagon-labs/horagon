@@ -2,19 +2,37 @@
 // The game screen (spec 4.2). One column on mobile: Scorebug, the big Dial, who traded (R2b),
 // Tape, then the Pusher, PositionCard and ResolutionCard. From 1024 px the same two halves sit
 // side by side: Scorebug, Dial, who traded and Tape on the left, the crown, PositionCard and
-// ResolutionCard on the right.
-import type { GameDetail, GameHistory } from '@horagon/sdk'
+// ResolutionCard on the right. Culture A2 (R8): the buzzer index on a stopped face, the Buzzer
+// stop (never on load), the ◆ at the average entry, the move chip, the story plate and clutch
+// dim (`data-hour`), each with its reduced-motion twin.
+import type { GameDetail, GameHistory, Position } from '@horagon/sdk'
 import Link from 'next/link'
 import type { ReactNode } from 'react'
 import { winnerOf } from '../../lib/chrono/board'
+import { clutchLine, isClutch, runFlashes } from '../../lib/chrono/clutch'
 import { faceCaption, liveNumber } from '../../lib/chrono/copy'
+import { useFeel, useMotionReduced } from '../../lib/chrono/feel'
 import { canTrade, type GameDial } from '../../lib/chrono/game'
+import { buzz } from '../../lib/chrono/haptics'
 import { findRuns, freshRun, latestRun } from '../../lib/chrono/runs'
+import {
+  atBuzzer,
+  entryMark,
+  holderLine,
+  isStoppedFace,
+  STOP_BUZZ,
+  STOP_SPOKEN,
+  stopLine,
+  stopPrice,
+} from '../../lib/chrono/stop'
+import { storyOf } from '../../lib/chrono/story'
 import { AgentLine } from './agent-line'
+import { useBuzzerStop, useMoveChip } from './buzzer-index'
 import { Dial } from './dial'
 import { runKeyOf, stateLine } from './dial-look'
 import { ResolutionCard } from './resolution-card'
 import { Scorebug } from './scorebug'
+import { StoryPlate } from './story-plate'
 import { Tape } from './tape'
 
 export interface GameScreenProps {
@@ -27,6 +45,8 @@ export interface GameScreenProps {
   stale: boolean
   /** The Pusher, the crown and the PositionCard (MarketBlock), or the positions alone. */
   right: ReactNode
+  /** The wallet's positions, for the ◆, string 15 and the holder's buzz (A2). */
+  positions?: readonly Position[]
 }
 
 /** The failing-poll line (spec 4.4), on the screen, the loading face and the crown. */
@@ -58,8 +78,36 @@ export function GameScreen(p: GameScreenProps) {
   // number still moves and the run is recent. The flash key keeps the unfiltered run.
   const live = game.status === 'live' && liveNumber(dial.state)
   const run = live && p.history ? freshRun(latest, p.history) : null
+  const [feel] = useFeel()
+  const reduced = useMotionReduced()
+  const trading = canTrade(dial.state)
+  const entry = entryMark(p.positions, game.id)
+  // The Buzzer stop plays once, on a page that saw the market trade (lib/chrono/stop.ts).
+  const stop = useBuzzerStop(trading, atBuzzer(game, winner?.status), () => {
+    if (entry !== null) buzz(feel, STOP_BUZZ)
+  })
+  const stopped = isStoppedFace(dial.state)
+  const atStop =
+    winner && stopped ? stopPrice(p.history, winner.pubkey, winner.endTs, winner.price) : null
+  const chip = useMoveChip(dial.price, trading)
+  const clutch = isClutch({ state: dial.state, price: dial.price, game, enabled: feel.clutchDim })
+  const story = stopped ? storyOf(game, winner, p.history) : null
+  // The run flash only for a run that moved the price 2 points or more; else the words only.
+  const flashKey =
+    latest && !runFlashes(latest.priceFrom, latest.priceTo) ? null : runKeyOf(p.history, latest)
+  const line =
+    stop > 0 && stopped
+      ? stopLine(game)
+      : clutch
+        ? clutchLine(game)
+        : stateLine(dial.state, game, dial.secsLeft, p.now)
+  const mine = stop > 0 && stopped ? holderLine(game, p.positions, atStop) : null
   return (
-    <div className="space-y-6">
+    <div
+      className="space-y-6"
+      data-hour={clutch ? 'clutch' : 'day'}
+      data-motion={reduced ? 'reduced' : 'full'}
+    >
       <Reconnecting stale={p.stale} />
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_24rem] lg:items-start">
         <div className="space-y-6" data-column="left">
@@ -74,10 +122,23 @@ export function GameScreen(p: GameScreenProps) {
               label={dial.label}
               liveDot={game.status === 'live'}
               stale={p.stale}
-              runKey={runKeyOf(p.history, latest)}
+              runKey={flashKey}
+              stopPrice={atStop}
+              stop={stop}
+              entry={entry}
+              chip={chip}
               className="mx-auto max-w-md"
             />
-            <StateLine>{stateLine(dial.state, game, dial.secsLeft, p.now)}</StateLine>
+            {story && (
+              <div className="mt-2 flex justify-center">
+                <StoryPlate story={story} />
+              </div>
+            )}
+            <StateLine>{line}</StateLine>
+            {mine && <p className="mt-1 text-center text-13 text-ink">{mine}</p>}
+            <p className="sr-only" aria-live="polite">
+              {stop > 0 ? STOP_SPOKEN : ''}
+            </p>
           </div>
           {winner && <AgentLine activity={game.activity} trading={canTrade(dial.state)} />}
           {winner && (
@@ -89,7 +150,7 @@ export function GameScreen(p: GameScreenProps) {
           <ResolutionCard game={game} state={dial.state} />
         </div>
       </div>
-      <details className="rounded-card border border-line p-4 text-13">
+      <details className="rounded-card border border-line p-4 text-13" data-rule>
         <summary className="min-h-11 cursor-pointer content-center font-semibold text-ivory-100">
           Market rules
         </summary>

@@ -22,6 +22,7 @@ import { GamePositions, MarketBlock } from './chrono/market-block'
 import { PracticeNote, PracticePlate } from './chrono/practice-plate'
 import { ErrorText } from './error-text'
 import { ShareButton } from './share-button'
+import { useWallet } from './wallet'
 
 const SLOW_POLL_MS = 60_000
 
@@ -36,6 +37,7 @@ export function GameView({
   counterparty?: PracticeResponse['counterparty'] | null
 }) {
   const detail = usePoll(`game:${id}`, () => api.games.get(id))
+  const { address, portfolio } = useWallet()
   const history = usePoll(`history:${id}`, () => api.games.history(id), 15_000)
   const game = detail.data ?? initial?.game
   const winner = game ? winnerOf(game) : undefined
@@ -93,6 +95,7 @@ export function GameView({
         dial={dial}
         now={now}
         stale={health.stale}
+        positions={portfolio?.wallet === address ? portfolio?.positions : undefined}
         right={
           winner ? (
             <MarketBlock

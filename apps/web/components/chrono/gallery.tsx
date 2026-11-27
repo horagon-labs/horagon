@@ -30,6 +30,7 @@ import { CrownPanel } from './crown-panel'
 import { CrownSheet } from './crown-sheet'
 import { Dial } from './dial'
 import { stateLine } from './dial-look'
+import { A2Gallery } from './gallery-a2'
 import { GameLoading, GameScreen, NoGame, StateLine } from './game-screen'
 import { MiniDial } from './mini-dial'
 import { PositionCard } from './position-card'
@@ -320,6 +321,9 @@ export function Gallery() {
       </Section>
       <Section title="Board error after three failures">
         <Board games={undefined} health={DOWN} />
+      </Section>
+      <Section title="The buzzer, clutch and Practice (R8)">
+        <A2Gallery />
       </Section>
       <Section title="Game screen">
         <GameSample stale={false} />
