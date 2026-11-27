@@ -378,7 +378,7 @@ export interface IndexerDeps {
   pace?: IndexPace
 }
 
-/** Market accounts per getMultipleAccountsInfo call (the RPC maximum). */
+/** Accounts per getMultipleAccountsInfo call (the RPC maximum). */
 const ACCOUNTS_PER_READ = 100
 /** The stop of a market whose signature list could not be read (not a signature). */
 const SIGNATURE_LIST = '(signature list)'
@@ -393,15 +393,25 @@ class RateLimitedPass extends Error {
   }
 }
 
-const accountHash = (info: AccountInfos[number]) =>
-  info ? createHash('sha256').update(info.data).digest('base64') : 'none'
+/**
+ * The hash of a market's account and its two outcome mints. claim_winnings and redeem_pair leave
+ * the market account as it was but burn shares, so a mint's supply is what shows them.
+ */
+function accountsHash(infos: AccountInfos): string {
+  const h = createHash('sha256')
+  for (const info of infos) {
+    if (!info) h.update('none;')
+    else h.update(`${info.data.length}:`).update(info.data).update(';')
+  }
+  return h.digest('base64')
+}
 
 /**
  * One pass over the indexable markets. Returns how many rows were written; `paused` when the
  * pace held the pass (no read at all).
  *
- * First one getMultipleAccountsInfo per 100 markets: the open markets' price points and each
- * market's account hash. With a pace, only the markets due (`IndexPace.due`: not indexed in full
+ * First one getMultipleAccountsInfo per 100 accounts (each market and its yes and no mints): the
+ * open markets' price points and each market's hash of the three. With a pace, only the markets due (`IndexPace.due`: not indexed in full
  * since start, account changed, or sweep due: 60 s open, 5 min otherwise) are asked for their
  * signatures, least recently indexed first, and none is started once the pass is PASS_BUDGET_MS
  * old, so the round's next tick is not kept waiting. A rate limit on any read stops the pass and,
@@ -428,22 +438,26 @@ export async function indexOnce(
     }
   }
 
-  // Every market's account: the open markets' prices, and what changed since the last pass.
+  // Every market's account and mints: the open markets' prices, and what changed since the last
+  // pass (a swap or liquidity change writes the market; a claim or redeem only the mints).
   const hashes = new Map<string, string>()
   let read = false
   if (markets.length > 0) {
     try {
-      for (let i = 0; i < markets.length; i += ACCOUNTS_PER_READ) {
-        const chunk = markets.slice(i, i + ACCOUNTS_PER_READ)
-        const infos = await deps.connection.getMultipleAccountsInfo(
-          chunk.map((m) => new PublicKey(m.pubkey)),
+      const keys = markets.flatMap((m) => [m.pubkey, m.yesMint, m.noMint])
+      const infos: AccountInfos = []
+      for (let i = 0; i < keys.length; i += ACCOUNTS_PER_READ) {
+        const chunk = keys.slice(i, i + ACCOUNTS_PER_READ)
+        const got = await deps.connection.getMultipleAccountsInfo(
+          chunk.map((k) => new PublicKey(k)),
           'confirmed',
         )
-        for (const [j, m] of chunk.entries()) {
-          const info = infos[j] ?? null
-          hashes.set(m.pubkey, accountHash(info))
-          if (isOpen(m)) prices += await pricePoint(deps, m, info, now)
-        }
+        for (const j of chunk.keys()) infos.push(got[j] ?? null)
+      }
+      for (const [j, m] of markets.entries()) {
+        const own = infos.slice(3 * j, 3 * j + 3)
+        hashes.set(m.pubkey, accountsHash(own))
+        if (isOpen(m)) prices += await pricePoint(deps, m, own[0] ?? null, now)
       }
       read = true
     } catch (err) {

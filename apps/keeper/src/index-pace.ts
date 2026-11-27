@@ -3,7 +3,7 @@
 // One object, made once in `main.ts` and shared by both: a rate limit on any of their reads
 // pauses them all with exponential back-off and jitter, and pages `index-rate-limited` once the
 // pause has lasted more than 15 min; signature reads are spaced; and a market is asked for its
-// signatures only when its account changed or its sweep is due. Everything here is in memory: a
+// signatures only when its account or its mints changed or its sweep is due. Everything here is in memory: a
 // restart indexes every market once and starts with no pause. It never sleeps through a pause:
 // a held pass returns at once, so the tick keeps its own cadence.
 import { errorSummary } from '@horagon/sdk'
@@ -76,7 +76,7 @@ export class IndexPace {
   /** The first rate limit since the last clean pass; null when there is none. */
   private since: number | null = null
   private lastSignatures = Number.NEGATIVE_INFINITY
-  /** Per market: its account data's hash and when (s) it was last indexed in full. */
+  /** Per market: the hash of its account and mints and when (s) it was last indexed in full. */
   private readonly marks = new Map<string, { hash: string | undefined; at: number }>()
 
   constructor(private readonly opts: PaceOptions) {

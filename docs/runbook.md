@@ -536,9 +536,11 @@ less with jitter, and back to 30 s after a pass whose reads all answered. Each p
 warning, `RPC rate-limited index reads; pausing them`, with its delay. Halts, proposals,
 finalizes and the rest of the tick do not use these reads and keep their cadence.
 
-Between pauses the indexer asks a market for its signatures only when its account changed since
-it was last indexed, or when its sweep is due: 60 s for an open market, 5 min for the others
-(claims and redeems do not change the market account, so the sweep is what finds them). Each
+Between pauses the indexer asks a market for its signatures only when its account or one of its
+two outcome mints changed since it was last indexed (a swap or liquidity change writes the
+market; a claim or redeem burns shares, which changes a mint's supply), or when its sweep is due:
+60 s for an open market, 5 min for the others (it catches what writes neither, such as a
+challenge or a failed transaction). Each
 market is indexed once after a start. Signature reads are 200 ms apart, and a pass starts no
 market after 3 s; the rest go first on the next pass.
 

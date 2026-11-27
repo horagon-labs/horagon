@@ -1,6 +1,6 @@
 // The indexer under an IndexPace (incident of 2026-11-25): a rate limit stops the pass and holds
-// the next ones, a market is asked for its signatures only when its account changed or its sweep
-// is due, and signature reads are spaced. Chain calls are fakes on a fake clock.
+// the next ones, a market is asked for its signatures only when its account or mints changed or
+// its sweep is due, and signature reads are spaced. Chain calls are fakes on a fake clock.
 import { type DbHandle, upsertMarket, upsertScheduledGames } from '@horagon/db'
 import { createTestDb } from '@horagon/db/testing'
 import { DEVNET_MUSDC_MINT, HoragonProgram } from '@horagon/sdk'
@@ -34,8 +34,10 @@ describe('indexOnce with an IndexPace', () => {
   /** The fake wall clock in ms; the keeper's `now` reads it in seconds. */
   let t: number
   let pace: IndexPace
-  /** Each market's account data; a market not here has no account. */
+  /** Each account's data (markets and their outcome mints); a key not here has no account. */
   let data: Map<string, Uint8Array>
+  /** Each market's outcome mints. */
+  let mints: Map<string, { yes: string; no: string }>
   /** getSignaturesForAddress calls: the market and the clock. */
   let sigCalls: Array<{ market: string; at: number }>
   let accountCalls: number[]
@@ -90,14 +92,16 @@ describe('indexOnce with an IndexPace', () => {
 
   async function addMarket(status: 'open' | 'halted' | 'resolved' | 'recycled', i: number) {
     const pubkey = Keypair.generate().publicKey.toBase58()
+    const yesMint = Keypair.generate().publicKey.toBase58()
+    const noMint = Keypair.generate().publicKey.toBase58()
     await upsertMarket(h.db, {
       pubkey,
       gameId: 'nba-1',
       kind: 0,
       marketId: `${status}-${i}`,
       gameMarketPda: Keypair.generate().publicKey.toBase58(),
-      yesMint: Keypair.generate().publicKey.toBase58(),
-      noMint: Keypair.generate().publicKey.toBase58(),
+      yesMint,
+      noMint,
       initialPriceBps: 5000,
       // Open markets end later; the others ended an hour ago.
       endTs: new Date(status === 'open' ? START + 7_200_000 + i : START - 3_600_000 + i),
@@ -106,6 +110,10 @@ describe('indexOnce with an IndexPace', () => {
       ...(status === 'recycled' ? { recycledAt: new Date(START - 1_800_000) } : {}),
     })
     data.set(pubkey, Uint8Array.of(1, i))
+    // A mint's data: its supply, here one byte.
+    data.set(yesMint, Uint8Array.of(10))
+    data.set(noMint, Uint8Array.of(10))
+    mints.set(pubkey, { yes: yesMint, no: noMint })
     return pubkey
   }
   const asked = () => sigCalls.map((c) => c.market)
@@ -114,6 +122,7 @@ describe('indexOnce with an IndexPace', () => {
     h = await createTestDb()
     t = START
     data = new Map()
+    mints = new Map()
     sigCalls = []
     accountCalls = []
     txCalls = 0
@@ -155,8 +164,8 @@ describe('indexOnce with an IndexPace', () => {
     const recycled = await addMarket('recycled', 2)
     await indexOnce(deps())
     expect(asked().sort()).toEqual([open, halted, recycled].sort())
-    // One account read covers indexing and the price of the open market.
-    expect(accountCalls).toEqual([3])
+    // One account read (each market and its two mints) covers indexing and the open price.
+    expect(accountCalls).toEqual([9])
 
     // 5 s later nothing changed: no signature read at all.
     sigCalls = []
@@ -170,6 +179,36 @@ describe('indexOnce with an IndexPace', () => {
     t += 5_000
     await indexOnce(deps())
     expect(asked()).toEqual([halted])
+  })
+
+  it('asks a resolved market on the next pass after a claim or redeem burns its shares', async () => {
+    const resolved = await addMarket('resolved', 0)
+    const other = await addMarket('resolved', 1)
+    await indexOnce(deps())
+    // claim_winnings and redeem_pair leave the market account as it was but burn shares: the
+    // outcome mints' supply changes, read in the same account call.
+    const m = mints.get(resolved)
+    if (!m) throw new Error('no mints')
+    data.set(m.yes, Uint8Array.of(7))
+    sigCalls = []
+    t += 5_000
+    await indexOnce(deps())
+    expect(asked()).toEqual([resolved])
+    expect(accountCalls).toEqual([6, 6])
+    // A redeem burns both; the other market is asked the same way.
+    const o = mints.get(other)
+    if (!o) throw new Error('no mints')
+    data.set(o.yes, Uint8Array.of(9))
+    data.set(o.no, Uint8Array.of(9))
+    sigCalls = []
+    t += 5_000
+    await indexOnce(deps())
+    expect(asked()).toEqual([other])
+    // Unchanged after: nothing is asked.
+    sigCalls = []
+    t += 5_000
+    await indexOnce(deps())
+    expect(asked()).toEqual([])
   })
 
   it('sweeps an open market every 60 s and a closed one every 5 min, unchanged', async () => {
@@ -202,11 +241,12 @@ describe('indexOnce with an IndexPace', () => {
     expect(gaps.every((g) => g >= 200)).toBe(true)
   })
 
-  it('reads accounts in chunks of 100 and leaves the markets past the pass budget for the next pass, first', async () => {
+  it('reads accounts in chunks of 100 keys and leaves the markets past the pass budget for the next pass, first', async () => {
     const keys: string[] = []
     for (let i = 0; i < 150; i++) keys.push(await addMarket('halted', i))
     await indexOnce(deps())
-    expect(accountCalls).toEqual([100, 50])
+    // 150 markets and their 300 mints.
+    expect(accountCalls).toEqual([100, 100, 100, 100, 50])
     // 200 ms apart, no market is started 3 s into the pass.
     const first = asked()
     expect(first).toHaveLength(16)
