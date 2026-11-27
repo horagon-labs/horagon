@@ -12,7 +12,7 @@ import type { Logger } from 'pino'
 
 /** Back-off of a rate limit: 30 s doubling to 10 min, minus up to 20% of jitter. */
 export const BACKOFF = { baseMs: 30_000, capMs: 600_000, jitter: 0.2 }
-/** A pause streak longer than this pages a person. */
+/** Every index RPC paused for longer than this, with no clean pass, pages `index-rate-limited`. */
 export const RATE_LIMIT_PAGE_AFTER_MS = 15 * 60_000
 /**
  * The least time between two getSignaturesForAddress calls, from the indexer and the ATA watch
