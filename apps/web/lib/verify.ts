@@ -74,10 +74,13 @@ export type CheckId =
   | 'evidence'
   | 'proposer'
 
+/** Pass or fail compares two values; unchecked: one value could not be read, so nothing was compared. */
+export type CheckState = 'pass' | 'fail' | 'unchecked'
+
 export interface Check {
   id: CheckId
   label: string
-  ok: boolean
+  state: CheckState
   /** The two values compared, in full. */
   values: Array<{ name: string; value: string }>
   note?: string
@@ -87,8 +90,11 @@ export interface VerifyResult {
   /** The status on chain; null when the account could not be read. */
   status: GameMarketAccount['status'] | null
   checks: Check[]
-  /** Match, a failed check, or a result with nothing on chain to check yet (wait). */
-  verdict: { kind: 'match' | 'fail' | 'wait'; text: string }
+  /**
+   * Match; a failed check; a check that could not run (unchecked, never a fail); or a result with
+   * nothing on chain to check yet (wait). A failed check outranks one that could not run.
+   */
+  verdict: { kind: 'match' | 'fail' | 'unchecked' | 'wait'; text: string }
   evidenceUri: string | null
   curl: string | null
   /** Unix seconds: when the challenge window of the proposal ends (proposed_at + window). */
@@ -115,6 +121,12 @@ const FAILED: Record<CheckId, string> = {
   proposer: 'the proposer is neither the attestor nor a guardian',
 }
 
+/** Only the checks whose other value can fail to load. */
+const UNCHECKED: Partial<Record<CheckId, string>> = {
+  hash: 'the evidence did not load, so nothing was hashed',
+  proposer: 'the Config account could not be read, so the proposer was not compared',
+}
+
 export const MATCH = 'Match: the published evidence is the one on chain'
 const UNDER_REVIEW =
   'Under review: a guardian challenged the proposed result, so no evidence is on chain until a guardian proposes again.'
@@ -122,11 +134,21 @@ const NOT_PROPOSED =
   'Nothing proposed yet: the result goes on-chain automatically 3 h after tip-off.'
 const FALLBACK_NOTE =
   "The URI on chain did not answer, so the evidence was read from Horagon's API copy."
+const NO_ANSWER_NOTE: Record<number, string> = {
+  0: 'The URI on chain is not an http(s) address, and the API gives no copy.',
+  1: 'The URI on chain did not answer.',
+  2: "Neither the URI on chain nor Horagon's API copy answered.",
+}
 
-const check = (id: CheckId, ok: boolean, values: Check['values'], note?: string): Check => ({
+const check = (
+  id: CheckId,
+  ok: boolean | 'unchecked',
+  values: Check['values'],
+  note?: string,
+): Check => ({
   id,
   label: LABEL[id],
-  ok,
+  state: ok === 'unchecked' ? 'unchecked' : ok ? 'pass' : 'fail',
   values,
   ...(note ? { note } : {}),
 })
@@ -158,12 +180,15 @@ function result(
   extra: Partial<VerifyResult> = {},
   pending?: string,
 ): VerifyResult {
-  const failed = checks.find((c) => !c.ok)
+  const failed = checks.find((c) => c.state === 'fail')
+  const unchecked = checks.find((c) => c.state === 'unchecked')
   const verdict = failed
     ? { kind: 'fail' as const, text: `No match: ${FAILED[failed.id]}` }
-    : pending
-      ? { kind: 'wait' as const, text: pending }
-      : { kind: 'match' as const, text: MATCH }
+    : unchecked
+      ? { kind: 'unchecked' as const, text: `Could not check: ${UNCHECKED[unchecked.id]}` }
+      : pending
+        ? { kind: 'wait' as const, text: pending }
+        : { kind: 'match' as const, text: MATCH }
   return { status, checks, verdict, evidenceUri: null, curl: null, windowEndsAt: null, ...extra }
 }
 
@@ -221,17 +246,60 @@ export async function verifyMarket(deps: VerifyDeps, input: VerifyInput): Promis
       // The next copy, if there is one.
     }
   }
-  if (!bytes) {
+  if (bytes) {
+    checks.push(...(await evidenceChecks(gm, bytes, onChainHash, note)))
+  } else {
+    // Nothing was read, so nothing was hashed: the rows that read the evidence cannot run.
     checks.push(
-      check('hash', false, [
-        { name: 'On chain', value: onChainHash },
-        { name: 'Computed', value: 'the evidence could not be read' },
-      ]),
+      check(
+        'hash',
+        'unchecked',
+        [
+          { name: 'On chain', value: onChainHash },
+          { name: 'Computed', value: 'nothing: the evidence did not load' },
+        ],
+        NO_ANSWER_NOTE[tries.length],
+      ),
     )
-    return result(gm.status, checks, extra)
   }
-  const computed = toHex(await sha256(Uint8Array.from(bytes)))
+
+  let role = 'not the attestor or a guardian'
+  let windowEndsAt: number | null = null
+  let configOk = false
+  try {
+    // A missing account, an RPC error and an unreadable one all leave the proposer uncompared.
+    const rawConfig = await deps.account(deriveConfig().toBase58())
+    if (!rawConfig) throw new Error('no Config account')
+    const config = decodeConfig({ owner: new PublicKey(rawConfig.owner), data: rawConfig.data })
+    configOk = true
+    windowEndsAt = gm.proposedAt + config.disputeWindowSecs
+    if (gm.proposer.equals(config.attestor)) role = 'automated attestor'
+    else if (config.guardians.some((g) => !g.equals(PublicKey.default) && g.equals(gm.proposer))) {
+      role = 'guardian'
+    }
+  } catch {
+    role = 'the Config account could not be read'
+  }
+  const known = role === 'automated attestor' || role === 'guardian'
   checks.push(
+    check('proposer', configOk ? known : 'unchecked', [
+      { name: 'Allowed', value: 'the attestor or a guardian, as Config names them' },
+      { name: 'Proposer', value: `${gm.proposer.toBase58()} (${role})` },
+    ]),
+  )
+  return result(gm.status, checks, { ...extra, windowEndsAt })
+}
+
+/** The hash, canonical form and result checks, once the evidence's bytes were read. */
+async function evidenceChecks(
+  gm: GameMarketAccount,
+  bytes: Uint8Array,
+  onChainHash: string,
+  note: string | undefined,
+): Promise<Check[]> {
+  const out: Check[] = []
+  const computed = toHex(await sha256(Uint8Array.from(bytes)))
+  out.push(
     check(
       'hash',
       computed === onChainHash,
@@ -252,7 +320,7 @@ export async function verifyMarket(deps: VerifyDeps, input: VerifyInput): Promis
   } catch {
     parsed = undefined
   }
-  checks.push(
+  out.push(
     check('canonical', parsed !== undefined && canonical === body, [
       { name: 'Published', value: body },
       { name: 'Canonical (RFC 8785)', value: parsed === undefined ? 'not JSON' : canonical },
@@ -269,35 +337,12 @@ export async function verifyMarket(deps: VerifyDeps, input: VerifyInput): Promis
   } catch (err) {
     evidenceSays = err instanceof Error ? err.message : 'not valid evidence'
   }
-  checks.push(
+  out.push(
     check('evidence', evidenceOk, [
       { name: 'On chain', value: chainSays },
       { name: 'Evidence', value: evidenceSays },
     ]),
   )
 
-  const rawConfig = await deps.account(deriveConfig().toBase58())
-  let role = 'not the attestor or a guardian'
-  let windowEndsAt: number | null = null
-  let configOk = false
-  try {
-    if (!rawConfig) throw new Error('no Config account')
-    const config = decodeConfig({ owner: new PublicKey(rawConfig.owner), data: rawConfig.data })
-    configOk = true
-    windowEndsAt = gm.proposedAt + config.disputeWindowSecs
-    if (gm.proposer.equals(config.attestor)) role = 'automated attestor'
-    else if (config.guardians.some((g) => !g.equals(PublicKey.default) && g.equals(gm.proposer))) {
-      role = 'guardian'
-    }
-  } catch {
-    role = 'the Config account could not be read'
-  }
-  const known = role === 'automated attestor' || role === 'guardian'
-  checks.push(
-    check('proposer', configOk && known, [
-      { name: 'Allowed', value: 'the attestor or a guardian, as Config names them' },
-      { name: 'Proposer', value: `${gm.proposer.toBase58()} (${role})` },
-    ]),
-  )
-  return result(gm.status, checks, { ...extra, windowEndsAt })
+  return out
 }

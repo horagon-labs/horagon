@@ -3,6 +3,7 @@
 // no web3.js; the checks are in lib/verify.ts.
 import type { Resolution } from '@horagon/sdk'
 import { etClock } from './chrono/time'
+import type { CheckState } from './verify'
 
 /** The page's lookup: the market's game, and the resolution that names the market. */
 export interface VerifyTarget {
@@ -55,5 +56,17 @@ export function verifyStatus(
       return 'Not proposed yet'
     default:
       return null
+  }
+}
+
+/** The word beside a check: a check that could not run reads apart from a failed one. */
+export function checkMark(state: CheckState): { text: string; tone: string } {
+  switch (state) {
+    case 'pass':
+      return { text: '✓ Pass', tone: 'text-ink' }
+    case 'fail':
+      return { text: '✗ Fail', tone: 'text-error' }
+    case 'unchecked':
+      return { text: '– Not checked', tone: 'text-ink-muted' }
   }
 }

@@ -8,7 +8,7 @@ import { api } from '../lib/api'
 import { DISABLED } from '../lib/chrono/controls'
 import { PUBLIC_RPC } from '../lib/format'
 import type { VerifyResult } from '../lib/verify'
-import { lookupTarget, type VerifyTarget, verifyStatus } from '../lib/verify-target'
+import { checkMark, lookupTarget, type VerifyTarget, verifyStatus } from '../lib/verify-target'
 
 const LINK = 'text-ink underline underline-offset-4'
 const BUTTON = `min-h-11 rounded-card border border-rule px-4 text-13 font-semibold text-ink ${DISABLED}`
@@ -154,13 +154,11 @@ export function VerifyView(p: {
                 key={c.id}
                 className="space-y-2 rounded-card border border-rule-faint bg-surface-raised p-3"
                 data-check={c.id}
-                data-ok={c.ok}
+                data-state={c.state}
               >
                 <p className="flex items-baseline gap-2 text-13 font-semibold text-ink">
-                  <span
-                    className={`shrink-0 whitespace-nowrap ${c.ok ? 'text-ink' : 'text-error'}`}
-                  >
-                    {c.ok ? '✓ Pass' : '✗ Fail'}
+                  <span className={`shrink-0 whitespace-nowrap ${checkMark(c.state).tone}`}>
+                    {checkMark(c.state).text}
                   </span>
                   <span>{c.label}</span>
                 </p>

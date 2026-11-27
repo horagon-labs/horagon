@@ -11,7 +11,7 @@ import {
 import { Keypair, PublicKey } from '@solana/web3.js'
 import { describe, expect, it } from 'vitest'
 import { curlLine, rpcAccount, type VerifyDeps, verifyMarket } from '../lib/verify'
-import { lookupTarget, verifyStatus } from '../lib/verify-target'
+import { checkMark, lookupTarget, verifyStatus } from '../lib/verify-target'
 
 const MARKET_ID = 77n
 const MARKET = Keypair.generate().publicKey.toBase58()
@@ -106,18 +106,27 @@ function configData(windowSecs = 900): Uint8Array {
 
 /** A chain of two accounts and an evidence host; `served` answers each URL, or fails it. */
 function deps(
-  over: { gameMarket?: Uint8Array; owner?: string; served?: Record<string, string | null> } = {},
+  over: {
+    gameMarket?: Uint8Array
+    owner?: string
+    served?: Record<string, string | null>
+    /** 'missing': no Config account; 'error': the RPC errors on it. */
+    config?: 'missing' | 'error'
+  } = {},
 ): VerifyDeps & { fetched: string[] } {
   const program = HORAGON_PROGRAM_ID.toBase58()
   const accounts = new Map([
     [GAME_MARKET, { owner: over.owner ?? program, data: over.gameMarket ?? gameMarketData() }],
-    [CONFIG, { owner: program, data: configData() }],
   ])
+  if (!over.config) accounts.set(CONFIG, { owner: program, data: configData() })
   const served = over.served ?? { [URI]: BODY }
   const fetched: string[] = []
   return {
     fetched,
-    account: async (address) => accounts.get(address) ?? null,
+    account: async (address) => {
+      if (address === CONFIG && over.config === 'error') throw new Error('RPC error')
+      return accounts.get(address) ?? null
+    },
     fetchBytes: async (url) => {
       fetched.push(url)
       const body = served[url]
@@ -134,14 +143,14 @@ const byId = (r: Awaited<ReturnType<typeof verifyMarket>>, id: string) =>
 describe('verifyMarket (R6 part B: /verify/[market])', () => {
   it('matches the published evidence with the one on chain, every check passing', async () => {
     const r = await verifyMarket(deps(), input)
-    expect(r.checks.map((c) => [c.id, c.ok])).toEqual([
-      ['owner', true],
-      ['address', true],
-      ['market', true],
-      ['hash', true],
-      ['canonical', true],
-      ['evidence', true],
-      ['proposer', true],
+    expect(r.checks.map((c) => [c.id, c.state])).toEqual([
+      ['owner', 'pass'],
+      ['address', 'pass'],
+      ['market', 'pass'],
+      ['hash', 'pass'],
+      ['canonical', 'pass'],
+      ['evidence', 'pass'],
+      ['proposer', 'pass'],
     ])
     expect(r.verdict).toEqual({
       kind: 'match',
@@ -167,14 +176,14 @@ describe('verifyMarket (R6 part B: /verify/[market])', () => {
       deps({ gameMarket: gameMarketData({ proposer: GUARDIAN }) }),
       input,
     )
-    expect(byId(r, 'proposer')?.ok).toBe(true)
+    expect(byId(r, 'proposer')?.state).toBe('pass')
     expect(byId(r, 'proposer')?.values[1]?.value).toBe(`${GUARDIAN.toBase58()} (guardian)`)
   })
 
   it('fails the hash check when one byte of the evidence changed', async () => {
     const changed = BODY.replace('"homeScore":110', '"homeScore":111')
     const r = await verifyMarket(deps({ served: { [URI]: changed } }), input)
-    expect(byId(r, 'hash')?.ok).toBe(false)
+    expect(byId(r, 'hash')?.state).toBe('fail')
     expect(r.verdict).toEqual({
       kind: 'fail',
       text: 'No match: the evidence does not hash to the hash on chain',
@@ -183,7 +192,7 @@ describe('verifyMarket (R6 part B: /verify/[market])', () => {
 
   it('stops at the owner check for an account another program owns', async () => {
     const r = await verifyMarket(deps({ owner: Keypair.generate().publicKey.toBase58() }), input)
-    expect(r.checks.map((c) => [c.id, c.ok])).toEqual([['owner', false]])
+    expect(r.checks.map((c) => [c.id, c.state])).toEqual([['owner', 'fail']])
     expect(r.verdict.text).toBe('No match: the account is not a Horagon GameMarket')
   })
 
@@ -191,7 +200,7 @@ describe('verifyMarket (R6 part B: /verify/[market])', () => {
     const other = Keypair.generate().publicKey.toBase58()
     const r = await verifyMarket(deps({ gameMarket: gameMarketData({ market: other }) }), input)
     expect(byId(r, 'market')).toMatchObject({
-      ok: false,
+      state: 'fail',
       values: [
         { name: 'This page', value: MARKET },
         { name: 'On chain', value: other },
@@ -204,11 +213,92 @@ describe('verifyMarket (R6 part B: /verify/[market])', () => {
     const d = deps({ served: { [URI]: null, [API_URL]: BODY } })
     const r = await verifyMarket(d, input)
     expect(d.fetched).toEqual([URI, API_URL])
-    expect(byId(r, 'hash')?.ok).toBe(true)
+    expect(byId(r, 'hash')?.state).toBe('pass')
     expect(byId(r, 'hash')?.note).toBe(
       "The URI on chain did not answer, so the evidence was read from Horagon's API copy.",
     )
     expect(r.verdict.kind).toBe('match')
+  })
+
+  it('could not check, never no match, when neither copy of the evidence answers', async () => {
+    const d = deps({ served: { [URI]: null, [API_URL]: null } })
+    const r = await verifyMarket(d, input)
+    expect(d.fetched).toEqual([URI, API_URL])
+    // Nothing was hashed, so the rows that read the evidence do not run; the proposer still does.
+    expect(r.checks.map((c) => [c.id, c.state])).toEqual([
+      ['owner', 'pass'],
+      ['address', 'pass'],
+      ['market', 'pass'],
+      ['hash', 'unchecked'],
+      ['proposer', 'pass'],
+    ])
+    expect(byId(r, 'hash')?.values).toEqual([
+      { name: 'On chain', value: toHex(HASH) },
+      { name: 'Computed', value: 'nothing: the evidence did not load' },
+    ])
+    expect(byId(r, 'hash')?.note).toBe("Neither the URI on chain nor Horagon's API copy answered.")
+    expect(r.verdict).toEqual({
+      kind: 'unchecked',
+      text: 'Could not check: the evidence did not load, so nothing was hashed',
+    })
+    expect(r.verdict.text).not.toMatch(/No match/)
+    expect(r.windowEndsAt).toBe(PROPOSED_AT + 900)
+    expect(r.curl).toBe(`curl -s '${URI}' | sha256sum`)
+  })
+
+  it('says only the URI on chain was tried when the API gives no copy', async () => {
+    const d = deps({ served: { [URI]: null } })
+    const r = await verifyMarket(d, { ...input, evidenceUrl: null })
+    expect(d.fetched).toEqual([URI])
+    expect(byId(r, 'hash')).toMatchObject({
+      state: 'unchecked',
+      note: 'The URI on chain did not answer.',
+    })
+    expect(r.verdict.kind).toBe('unchecked')
+  })
+
+  it.each([
+    ['missing', 'there is no Config account'],
+    ['error', 'the RPC errors on it'],
+  ] as const)(
+    'could not check the proposer when Config cannot be read (%s: %s)',
+    async (config, _why) => {
+      const r = await verifyMarket(deps({ config }), input)
+      expect(byId(r, 'proposer')).toMatchObject({
+        state: 'unchecked',
+        values: [
+          { name: 'Allowed', value: 'the attestor or a guardian, as Config names them' },
+          {
+            name: 'Proposer',
+            value: `${ATTESTOR.toBase58()} (the Config account could not be read)`,
+          },
+        ],
+      })
+      expect(r.verdict).toEqual({
+        kind: 'unchecked',
+        text: 'Could not check: the Config account could not be read, so the proposer was not compared',
+      })
+      expect(r.windowEndsAt).toBeNull()
+    },
+  )
+
+  it('a failed check outranks one that could not run', async () => {
+    const changed = BODY.replace('"homeScore":110', '"homeScore":111')
+    const r = await verifyMarket(deps({ served: { [URI]: changed }, config: 'missing' }), input)
+    expect(byId(r, 'proposer')?.state).toBe('unchecked')
+    expect(r.verdict).toEqual({
+      kind: 'fail',
+      text: 'No match: the evidence does not hash to the hash on chain',
+    })
+  })
+
+  it('still fails the proposer when Config reads and names someone else', async () => {
+    const r = await verifyMarket(
+      deps({ gameMarket: gameMarketData({ proposer: Keypair.generate().publicKey }) }),
+      input,
+    )
+    expect(byId(r, 'proposer')?.state).toBe('fail')
+    expect(r.verdict.text).toBe('No match: the proposer is neither the attestor nor a guardian')
   })
 
   it('fails the result check when the evidence names another game', async () => {
@@ -216,7 +306,7 @@ describe('verifyMarket (R6 part B: /verify/[market])', () => {
       deps({ gameMarket: gameMarketData({ gameId: '401810002' }) }),
       input,
     )
-    expect(byId(r, 'evidence')?.ok).toBe(false)
+    expect(byId(r, 'evidence')?.state).toBe('fail')
     expect(r.verdict.text).toBe('No match: the evidence does not name the result on chain')
   })
 
@@ -321,5 +411,13 @@ describe('verifyStatus (the line above the checks)', () => {
     expect(verifyStatus(of('open'), END)).toBe('Not proposed yet')
     expect(verifyStatus(of('halted'), END)).toBe('Not proposed yet')
     expect(verifyStatus(of('missing'), END)).toBeNull()
+  })
+})
+
+describe('checkMark (the word beside each check)', () => {
+  it('marks a check that could not run apart from a failed one', () => {
+    expect(checkMark('pass')).toEqual({ text: '✓ Pass', tone: 'text-ink' })
+    expect(checkMark('fail')).toEqual({ text: '✗ Fail', tone: 'text-error' })
+    expect(checkMark('unchecked')).toEqual({ text: '– Not checked', tone: 'text-ink-muted' })
   })
 })
