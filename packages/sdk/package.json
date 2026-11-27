@@ -132,6 +132,16 @@
         "types": "./dist/et.d.cts",
         "default": "./dist/et.cjs"
       }
+    },
+    "./study": {
+      "import": {
+        "types": "./dist/study.d.ts",
+        "default": "./dist/study.js"
+      },
+      "require": {
+        "types": "./dist/study.d.cts",
+        "default": "./dist/study.cjs"
+      }
     }
   },
   "files": [

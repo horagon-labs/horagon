@@ -16,6 +16,8 @@ export default defineConfig({
     notice: 'src/notice.ts',
     // The night's ET date for a browser page, without web3.js (R7).
     et: 'src/et.ts',
+    // The mechanism study: scores, depth curve and LP simulation, without web3.js (R10).
+    study: 'src/study/index.ts',
   },
   format: ['esm', 'cjs'],
   dts: true,
