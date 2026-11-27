@@ -1,11 +1,15 @@
-// The horagon program against real pm-AMM, on Surfpool (a devnet fork: pm-AMM and Metaplex
-// load on first use). Spec 15 and 20.3: the whole lifecycle, plus a wrong-signer call for
-// every instruction, and quote parity near end_ts. Needs a FRESH Surfpool process with the
-// program deployed (Config is a singleton, and the clock only moves forward):
+// The horagon program against real pm-AMM, on Surfpool, whose clock moves forward on request
+// (one market here lives two days). Spec 15 and 20.3: the whole lifecycle, plus a wrong-signer
+// call for every instruction, quote parity near end_ts, and three cases that record what the
+// program does not stop. Needs a FRESH chain with the program at its id and no Config yet
+// (Config is a singleton, and the clock only moves forward). scripts/program-it.sh builds one
+// and runs this file, as CI does (docs/testing.md):
+//   anchor build && bash scripts/program-it.sh
+// Against such a chain already running:
 //   HORAGON_IT_RPC=http://127.0.0.1:8899 pnpm --filter @horagon/integration test
 // The admin signs initialize_config, so it must be the program's upgrade authority on that
-// Surfpool: a throwaway key used to deploy there, read from HORAGON_IT_ADMIN (a keypair JSON
-// path, default .keys/it-admin.json). Never the devnet deployer.
+// chain: a throwaway key, read from HORAGON_IT_ADMIN (a keypair JSON path, default
+// .keys/it-admin.json). Never the devnet deployer.
 import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
