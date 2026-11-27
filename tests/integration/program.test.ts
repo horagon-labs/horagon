@@ -15,12 +15,17 @@ import {
   buildTradeTransaction,
   CREATE_MARKET_COMPUTE_UNITS,
   decodeMarketAccount,
+  deriveLpPosition,
+  deriveVault,
+  deriveYesMint,
   failedProgramError,
   HEAVY_IX_COMPUTE_UNITS,
   HoragonProgram,
   type HoragonProgramErrorName,
   marketIdFor,
   marketName,
+  PM_AMM_IX_DISCRIMINATORS,
+  PM_AMM_PROGRAM_ID,
   quoteSwap,
   type SwapDirection,
   toPoolState,
@@ -33,6 +38,7 @@ import {
   getAccount,
   getAssociatedTokenAddressSync,
   mintTo,
+  TOKEN_PROGRAM_ID,
   TokenAccountNotFoundError,
 } from '@solana/spl-token'
 import {
@@ -43,7 +49,7 @@ import {
   PublicKey,
   SYSVAR_CLOCK_PUBKEY,
   SystemProgram,
-  type TransactionInstruction,
+  TransactionInstruction,
   TransactionMessage,
   VersionedTransaction,
 } from '@solana/web3.js'
@@ -417,8 +423,8 @@ describe.skipIf(!RPC)('horagon program on Surfpool', () => {
     expect(Buffer.from(gm.evidenceHash).equals(evidenceHash)).toBe(true)
   })
 
-  const challenge = (who: Keypair) =>
-    send([program.ix.challenge({ guardian: who.publicKey, marketId })], who)
+  const challenge = (who: Keypair, id = marketId) =>
+    send([program.ix.challenge({ guardian: who.publicKey, marketId: id })], who)
   const finalize = (payer: Keypair, id = marketId) =>
     send([program.ix.finalize({ marketId: id })], payer, [], 1_400_000)
   const recycle = (payer: Keypair, id = marketId) =>
@@ -653,6 +659,152 @@ describe.skipIf(!RPC)('horagon program on Surfpool', () => {
         quoteSwap({ pool: after, direction: 'usdcToYes', amountIn, now: after.lastAccrualTs }),
       )
     }
+  })
+
+  // The next three cases record what the program does today where a summary could overstate it.
+  // They assert current behaviour, not a wish: a change to the program that alters one of these
+  // must change its case too.
+
+  /** A market of its own (`suffix` on the external id), open for `secs` from the chain clock. */
+  async function openMarket(suffix: string, secs = 600) {
+    const externalGameId = `${externalId}${suffix}`
+    const id = await marketIdFor('NBA', externalGameId, 0)
+    const end = (await chainTime()) + secs
+    await send(
+      [createIx(attestor.publicKey, { marketId: id, externalGameId, endTs: end })],
+      attestor,
+      [],
+      CREATE_MARKET_COMPUTE_UNITS,
+    )
+    return { id, end, gm: await gameMarket(id) }
+  }
+
+  /** pm-AMM deposit_liquidity (idls/pm_amm.json), from `owner`'s mUSDC account into `market`. */
+  const depositLiquidityIx = (owner: PublicKey, market: PublicKey, amount: bigint) => {
+    const data = Buffer.alloc(16)
+    data.set(PM_AMM_IX_DISCRIMINATORS.depositLiquidity, 0)
+    data.writeBigUInt64LE(amount, 8)
+    const w = (pubkey: PublicKey) => ({ pubkey, isSigner: false, isWritable: true })
+    const r = (pubkey: PublicKey) => ({ pubkey, isSigner: false, isWritable: false })
+    return new TransactionInstruction({
+      programId: PM_AMM_PROGRAM_ID,
+      keys: [
+        { pubkey: owner, isSigner: true, isWritable: true },
+        w(market),
+        r(mint),
+        w(deriveVault(market)),
+        w(getAssociatedTokenAddressSync(mint, owner)),
+        w(deriveLpPosition(market, owner)),
+        r(SystemProgram.programId),
+        r(TOKEN_PROGRAM_ID),
+      ],
+      data,
+    })
+  }
+
+  /** `shares: u128` of a pm-AMM LpPosition (after the discriminator, owner and market); 0 if none. */
+  const lpShares = async (address: PublicKey) => {
+    const info = await conn.getAccountInfo(address, 'confirmed')
+    if (!info || info.data.length < 88) return 0n
+    return info.data.readBigUInt64LE(72) | (info.data.readBigUInt64LE(80) << 64n)
+  }
+
+  // halt withdraws the Authority's own LP shares and nothing else (lib.rs, `halt`), and pm-AMM's
+  // deposit_liquidity takes any signer. So a wallet that deposited into a Horagon market keeps it
+  // trading after the halt. The keeper's indexer flags such a market (`externalLp` in the API).
+  it('halt is not a full stop when an outside wallet has deposited: a swap after the halt still fills', async () => {
+    const outsider = Keypair.generate()
+    await conn.confirmTransaction(await conn.requestAirdrop(outsider.publicKey, 2e9), 'confirmed')
+    const outsiderUsdc = getAssociatedTokenAddressSync(mint, outsider.publicKey)
+    await send(
+      [
+        createAssociatedTokenAccountIdempotentInstruction(
+          admin.publicKey,
+          outsiderUsdc,
+          outsider.publicKey,
+          mint,
+        ),
+      ],
+      admin,
+    )
+    await mintTo(conn, admin, mint, outsiderUsdc, admin, 100n * USDC)
+
+    const { id, gm } = await openMarket('o')
+    await send([depositLiquidityIx(outsider.publicKey, gm.market, 100n * USDC)], outsider)
+    const outsiderLp = deriveLpPosition(gm.market, outsider.publicKey)
+    const shares = await lpShares(outsiderLp)
+    expect(shares).toBeGreaterThan(0n)
+
+    await send(
+      program.ix.halt({ signer: attestor.publicKey, marketId: id }, attestor.publicKey),
+      attestor,
+      [],
+      HEAVY_IX_COMPUTE_UNITS,
+    )
+    expect((await gameMarket(id)).status).toBe('halted')
+    expect(await lpShares(outsiderLp)).toBe(shares)
+
+    const yesAta = getAssociatedTokenAddressSync(deriveYesMint(gm.market), trader.publicKey)
+    const yesBefore = (await tokenAccountOrNone(yesAta))?.amount ?? 0n
+    await swapOn(gm.market, 'usdcToYes', USDC)
+    expect((await getAccount(conn, yesAta, 'confirmed')).amount).toBeGreaterThan(yesBefore)
+  })
+
+  // challenge and finalize read Config.dispute_window_secs when they run, not as it was at the
+  // proposal (lib.rs, `challenge` and `finalize`), and the admin may set it at any time (60 s to
+  // 7 days). Shortening it ends the window of a result already pending, the guardians' chance to
+  // challenge included.
+  it('the dispute window is read at call time: shortening it while a result is pending lets finalize run early', async () => {
+    const longWindow = 3_600
+    const setWindow = (secs: number) =>
+      send([program.ix.updateConfig({ admin: admin.publicKey, disputeWindowSecs: secs })], admin)
+    await setWindow(longWindow)
+    try {
+      const { id, end } = await openMarket('w')
+      await travelTo(end + 1)
+      await propose(attestor, id)
+      const { proposedAt } = await gameMarket(id)
+      await travelTo(proposedAt + WINDOW_SECS + 1)
+      // Under the window in force at the proposal, it stays open for most of an hour.
+      await expectError(finalize(stranger, id), { name: 'WindowOpen' })
+
+      await setWindow(WINDOW_SECS)
+      await expectError(challenge(guardian, id), { name: 'WindowClosed' })
+      await finalize(stranger, id)
+      const gm = await gameMarket(id)
+      expect(gm.status).toBe('finalized')
+      expect(gm.finalizedAt).toBeLessThan(proposedAt + longWindow)
+    } finally {
+      // The other cases run with WINDOW_SECS: put it back if a step above failed first.
+      if ((await program.fetchConfig(conn))?.disputeWindowSecs !== WINDOW_SECS) {
+        await setWindow(WINDOW_SECS)
+      }
+    }
+  })
+
+  // propose_result takes the attestor or a guardian from Open, Halted or Challenged (lib.rs,
+  // `propose_result`). After a challenge, it is the keeper that leaves the next proposal to a
+  // guardian (apps/keeper/src/planner.ts); the program still accepts the attestor's key, and it
+  // keeps no record of the outcome that was struck.
+  it('after a challenge the program takes a new proposal from the attestor, even the outcome that was struck', async () => {
+    const { id, end } = await openMarket('a')
+    await travelTo(end + 1)
+    await propose(attestor, id, 'yes')
+    await challenge(guardian, id)
+    expect(await gameMarket(id)).toMatchObject({
+      status: 'challenged',
+      proposedOutcome: null,
+      challengeCount: 1,
+    })
+
+    await propose(attestor, id, 'yes')
+    const gm = await gameMarket(id)
+    expect(gm).toMatchObject({ status: 'proposed', proposedOutcome: 'yes', challengeCount: 1 })
+    expect(gm.proposer.equals(attestor.publicKey)).toBe(true)
+    // It finalizes like any other proposal once the window has passed.
+    await travelTo(gm.proposedAt + WINDOW_SECS + 1)
+    await finalize(stranger, id)
+    expect((await gameMarket(id)).status).toBe('finalized')
   })
 
   // Task 24 e2e: "Claim all" always failed, because claim_winnings closes the user's YES and NO
