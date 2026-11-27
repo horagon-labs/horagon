@@ -70,7 +70,12 @@ describe('contentSecurityPolicy', () => {
 
   it("adds 'unsafe-eval' in development only (React's error overlay)", () => {
     const dev = directives(
-      contentSecurityPolicy({ nonce: 'n', dev: true, apiBase: '/api/v1', pathname: '/' }),
+      contentSecurityPolicy({
+        nonce: 'n',
+        dev: true,
+        apiBase: '/api/v1',
+        pathname: '/',
+      }),
     )
     expect(dev.get('script-src')).toEqual([
       "'self'",
@@ -82,7 +87,12 @@ describe('contentSecurityPolicy', () => {
 
   it('adds https: to connect-src on a /verify page only, every other directive unchanged', () => {
     const verify = directives(
-      contentSecurityPolicy({ nonce: 'abc123', dev: false, apiBase: '/api/v1', pathname: VERIFY }),
+      contentSecurityPolicy({
+        nonce: 'abc123',
+        dev: false,
+        apiBase: '/api/v1',
+        pathname: VERIFY,
+      }),
     )
     expect(verify.get('connect-src')).toEqual(["'self'", 'https:'])
     for (const [name, values] of d) {
@@ -126,6 +136,8 @@ describe('isVerifyPage', () => {
       '/game/verify',
       '/me',
       '/agent',
+      '/practice',
+      '/study',
       '/verify',
       '/verify/',
       '/verifyx',
@@ -234,7 +246,15 @@ describe('proxy', () => {
     config.matcher.some((m) => new RegExp(`^${m.source}$`).test(path))
 
   it('runs for pages, not for the API, static files or images', () => {
-    for (const page of ['/', '/game/abc', '/me', '/agent', '/no-such-page']) {
+    for (const page of [
+      '/',
+      '/game/abc',
+      '/me',
+      '/agent',
+      '/practice',
+      '/study',
+      '/no-such-page',
+    ]) {
       expect(matches(page), page).toBe(true)
     }
     for (const file of [
