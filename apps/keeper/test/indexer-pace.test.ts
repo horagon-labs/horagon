@@ -13,6 +13,7 @@ import { Keypair, type PublicKey } from '@solana/web3.js'
 import type { Logger } from 'pino'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { IndexPace, SIGNATURES_SPACING_MS, TRANSACTION_CHUNK } from '../src/index-pace'
+import { IndexReads } from '../src/index-reads'
 import { type IndexerDeps, indexOnce, STUCK_AFTER } from '../src/indexer'
 
 // Market accounts are not decoded for real: the first data byte 1 is a price of 0.4.
@@ -39,6 +40,8 @@ describe('indexOnce with an IndexPace', () => {
   /** The fake wall clock in ms; the keeper's `now` reads it in seconds. */
   let t: number
   let pace: IndexPace
+  /** The keeper's reads over one endpoint, the fake chain, with `pace`. */
+  let reads: IndexReads<IndexerDeps['connection'] & object>
   /** Each account's data (markets and their outcome mints); a key not here has no account. */
   let data: Map<string, Uint8Array>
   /** Each market's outcome mints. */
@@ -76,8 +79,10 @@ describe('indexOnce with an IndexPace', () => {
     log: log(),
     now: () => Math.floor(t / 1000),
     stops: new Map(),
-    pace,
-    connection: {
+    reads,
+  })
+  const chain = (): NonNullable<IndexerDeps['connection']> =>
+    ({
       getSignaturesForAddress: async (a: PublicKey, o: { until?: string }) => {
         sigCalls.push({ market: a.toBase58(), at: t })
         return sigAnswer(a.toBase58(), o ?? {})
@@ -95,8 +100,7 @@ describe('indexOnce with an IndexPace', () => {
           return d ? { owner: program.authority, data: d } : null
         })
       },
-    } as unknown as IndexerDeps['connection'],
-  })
+    }) as unknown as NonNullable<IndexerDeps['connection']>
 
   async function addMarket(status: 'open' | 'halted' | 'resolved' | 'recycled', i: number) {
     const pubkey = Keypair.generate().publicKey.toBase58()
@@ -142,12 +146,20 @@ describe('indexOnce with an IndexPace', () => {
     txAnswer = () => undefined
     pace = new IndexPace({
       log: log(),
-      alerts: alerts(),
       clock: () => t,
       random: () => 0,
       sleep: async (ms) => {
         t += ms
       },
+    })
+    const connection = chain()
+    reads = new IndexReads({
+      endpoints: [
+        { name: 'HORAGON_RPC_URL', host: 'rpc.test', connection: () => connection, pace },
+      ],
+      log: log(),
+      alerts: alerts(),
+      clock: () => t,
     })
     await upsertScheduledGames(h.db, [
       {
@@ -465,4 +477,75 @@ describe('indexOnce with an IndexPace', () => {
     // Each market has had a turn: none waits behind the first one's backlog.
     for (const m of markets) expect(await cursorOf(m)).not.toBeNull()
   }, 60_000)
+  it('fails a read over to the next RPC mid-pass, keeping what was read and the cursors', async () => {
+    const m = await addMarket('open', 0)
+    const other = await addMarket('open', 1)
+    const list = Array.from({ length: 25 }, (_, i) => `f${String(i).padStart(2, '0')}`)
+    sigAnswer = (market, o) => (market === m ? history(list)(o) : [])
+    txAnswer = (sigs) => sigs.map(readable)
+    const fails = new Set<string>()
+    const used: string[] = []
+    /** An endpoint over the same fake chain that fails the methods in `fails` when it is `a`. */
+    const endpoint = (name: string, host: string) => {
+      const base = chain() as unknown as Record<string, (...args: unknown[]) => unknown>
+      const wrap =
+        (method: string) =>
+        async (...args: unknown[]) => {
+          used.push(`${host}:${method}`)
+          if (host === 'a.example' && fails.has(method))
+            throw new Error('503 Service Unavailable: ')
+          return base[method]?.(...args)
+        }
+      const connection = {
+        getMultipleAccountsInfo: wrap('getMultipleAccountsInfo'),
+        getSignaturesForAddress: wrap('getSignaturesForAddress'),
+        getTransactions: wrap('getTransactions'),
+      } as unknown as NonNullable<IndexerDeps['connection']>
+      const p = new IndexPace({
+        log: log(),
+        clock: () => t,
+        random: () => 0,
+        sleep: async (ms) => {
+          t += ms
+        },
+      })
+      return { name, host, connection: () => connection, pace: p }
+    }
+    reads = new IndexReads({
+      endpoints: [
+        endpoint('HORAGON_INDEX_RPC_URL', 'a.example'),
+        endpoint('HORAGON_RPC_URL', 'b.example'),
+      ],
+      log: log(),
+      alerts: alerts(),
+      clock: () => t,
+    })
+    await indexOnce(deps())
+    expect(await cursorOf(m)).toBe('f09')
+    expect(used.every((u) => u.startsWith('a.example'))).toBe(true)
+
+    // The next transaction batch fails on a: the same batch is read on b, in the same pass.
+    fails.add('getTransactions')
+    used.length = 0
+    t += 5_000
+    await indexOnce(deps())
+    expect(await cursorOf(m)).toBe('f19')
+    expect(used).toContain('a.example:getTransactions')
+    expect(used).toContain('b.example:getTransactions')
+    expect(sent.map((x) => x.key)).toEqual(['index-failover'])
+    expect(warns.find((w) => w.msg.includes('pausing'))?.obj).toMatchObject({
+      indexRpc: 'HORAGON_INDEX_RPC_URL',
+      indexRpcHost: 'a.example',
+      failure: 'server',
+    })
+    expect(JSON.stringify(warns)).not.toContain('https://')
+
+    // a is paused: b reads the rest; nothing is stuck and the other market was not lost.
+    t += 5_000
+    await indexOnce(deps())
+    expect(await cursorOf(m)).toBe('f24')
+    expect(sigCalls.map((c) => c.market)).toContain(other)
+    expect(sent.map((x) => x.key)).not.toContain('index-rate-limited')
+    expect(sent.some((x) => x.key.startsWith('index-stuck'))).toBe(false)
+  })
 })

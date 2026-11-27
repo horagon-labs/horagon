@@ -3,8 +3,9 @@
 // rent went anywhere but the sponsor is recorded and alerted, and the API then opens no more
 // accounts for that wallet (`atasClosedAway`). One close is expected: pm-AMM's claim_winnings
 // closes the user's YES and NO itself, rent to the user, once the market is resolved. Its reads
-// share the indexer's IndexPace: a pause holds them, a rate limit here pauses both, its signature
-// reads are spaced on the indexer's clock and its transaction reads come out of the same budget.
+// go through the indexer's IndexReads: the same RPCs, failover and pauses (when every RPC is
+// paused it reads nothing), signature reads spaced on the same clocks and transaction reads from
+// the same budgets.
 import {
   CLAIM_CLOSE,
   type Db,
@@ -25,7 +26,14 @@ import { type Connection, PublicKey, type VersionedTransactionResponse } from '@
 import type { Logger } from 'pino'
 import type { Alerter } from './alerts'
 import { base58Decode } from './base58'
-import { type IndexPace, isRateLimited } from './index-pace'
+import { isRateLimited } from './index-pace'
+import {
+  directPass,
+  EveryEndpointDown,
+  type IndexPass,
+  type IndexReads,
+  NOT_NOW,
+} from './index-reads'
 
 /** SPL Token `CloseAccount`: accounts [account, destination, owner]. */
 const CLOSE_ACCOUNT = 9
@@ -54,12 +62,15 @@ export interface TraceState {
 const defaultTraces = new Map<string, TraceState>()
 const TOKEN_PROGRAMS = [TOKEN_PROGRAM_ID.toBase58(), TOKEN_2022_PROGRAM_ID.toBase58()]
 
+type AtaConnection = Pick<
+  Connection,
+  'getMultipleAccountsInfo' | 'getSignaturesForAddress' | 'getTransaction'
+>
+
 export interface AtaWatchDeps {
   db: Db
-  connection: Pick<
-    Connection,
-    'getMultipleAccountsInfo' | 'getSignaturesForAddress' | 'getTransaction'
-  >
+  /** Without `reads`: every read straight on this connection, unpaced. */
+  connection?: AtaConnection
   sponsor: PublicKey
   alerts: Alerter
   log: Logger
@@ -72,8 +83,8 @@ export interface AtaWatchDeps {
   clock?: () => number
   /** Trace cursors per ATA creation; defaults to a module-level map. */
   traces?: Map<string, TraceState>
-  /** The indexer's read pace (`main.ts`): its pause holds this pass too. */
-  pace?: Pick<IndexPace, 'held' | 'rateLimited' | 'clean' | 'spaceSignatures' | 'takeTransactions'>
+  /** The indexer's IndexReads (`main.ts`): its RPCs, pauses and budgets. */
+  reads?: Pick<IndexReads<AtaConnection>, 'begin'>
 }
 
 export interface AtaClose {
@@ -156,6 +167,7 @@ interface Spent {
  */
 async function findClose(
   deps: AtaWatchDeps,
+  pass: IndexPass<AtaConnection>,
   ata: string,
   createdSig: string,
   state: TraceState,
@@ -166,11 +178,12 @@ async function findClose(
   const over = () => spent.txCalls >= budget.txCalls || clock() - spent.startedAt >= budget.ms
   for (;;) {
     if (over()) return 'cut'
-    await deps.pace?.spaceSignatures()
-    const sigs = await deps.connection.getSignaturesForAddress(
-      new PublicKey(ata),
-      { limit: PAGE, until: createdSig, ...(state.before ? { before: state.before } : {}) },
-      'confirmed',
+    const sigs = await pass.signatures((c) =>
+      c.getSignaturesForAddress(
+        new PublicKey(ata),
+        { limit: PAGE, until: createdSig, ...(state.before ? { before: state.before } : {}) },
+        'confirmed',
+      ),
     )
     if (sigs.length === 0) return { sig: null, to: 'unknown', byClaim: false }
     for (const s of sigs) {
@@ -180,12 +193,14 @@ async function findClose(
         // One entry of the transaction budget it shares with the indexer, waited for within
         // what is left of the pass.
         const left = Math.max(0, budget.ms - (clock() - spent.startedAt))
-        if (deps.pace && !(await deps.pace.takeTransactions(1, left))) return 'cut'
+        const tx = await pass.transactions(1, left, (c) =>
+          c.getTransaction(s.signature, {
+            commitment: 'confirmed',
+            maxSupportedTransactionVersion: 0,
+          }),
+        )
+        if (tx === NOT_NOW) return 'cut'
         spent.txCalls++
-        const tx = await deps.connection.getTransaction(s.signature, {
-          commitment: 'confirmed',
-          maxSupportedTransactionVersion: 0,
-        })
         const close = tx ? closeOf(tx, ata) : undefined
         if (close) return { sig: s.signature, ...close }
       }
@@ -199,22 +214,43 @@ export async function watchSponsoredAtas(
   deps: AtaWatchDeps,
 ): Promise<{ checked: number; closed: number; flagged: number }> {
   const none = { checked: 0, closed: 0, flagged: 0 }
-  if (await deps.pace?.held('ata-watch')) return none
+  let pass: IndexPass<AtaConnection> | null
+  if (deps.reads) pass = await deps.reads.begin('ata-watch')
+  else if (deps.connection) pass = directPass(deps.connection)
+  else throw new Error('watchSponsoredAtas needs reads or a connection')
+  if (!pass) return none
+  try {
+    return await watchPass(deps, pass)
+  } finally {
+    pass.end()
+  }
+}
+
+/** A read that stops the pass: every RPC paused, or (without IndexReads) a rate limit. */
+const stopsPass = (err: unknown) => err instanceof EveryEndpointDown || isRateLimited(err)
+
+async function watchPass(
+  deps: AtaWatchDeps,
+  pass: IndexPass<AtaConnection>,
+): Promise<{ checked: number; closed: number; flagged: number }> {
+  const none = { checked: 0, closed: 0, flagged: 0 }
   const batch = Math.min(Math.max(Math.trunc(deps.batch ?? MAX_BATCH), 1), MAX_BATCH)
   const rows = await sponsoredAtasToCheck(deps.db, batch)
   if (rows.length === 0) return none
   const nowSecs = deps.now()
   const now = new Date(nowSecs * 1000)
   const sponsor = deps.sponsor.toBase58()
-  let infos: Awaited<ReturnType<AtaWatchDeps['connection']['getMultipleAccountsInfo']>>
+  let infos: Awaited<ReturnType<AtaConnection['getMultipleAccountsInfo']>>
   try {
-    infos = await deps.connection.getMultipleAccountsInfo(
-      rows.map((r) => new PublicKey(r.ata)),
-      'confirmed',
+    infos = await pass.accounts((c) =>
+      c.getMultipleAccountsInfo(
+        rows.map((r) => new PublicKey(r.ata)),
+        'confirmed',
+      ),
     )
   } catch (err) {
-    if (!isRateLimited(err)) throw err
-    await rateLimited(deps, undefined, err)
+    if (!stopsPass(err)) throw err
+    stopped(deps, undefined, err)
     return none
   }
   const traces = deps.traces ?? defaultTraces
@@ -222,7 +258,6 @@ export async function watchSponsoredAtas(
   const stillOpen: string[] = []
   let closed = 0
   let flagged = 0
-  let limited = false
   for (const [i, row] of rows.entries()) {
     // Present, too young to judge, or not traceable this pass: stays open, checked again later.
     if (infos[i] || nowSecs - row.createdAt.getTime() / 1000 < MIN_AGE_SECS) {
@@ -234,12 +269,11 @@ export async function watchSponsoredAtas(
     traces.set(traceKey, state)
     let found: Found
     try {
-      found = await findClose(deps, row.ata, row.createdSig, state, spent)
+      found = await findClose(deps, pass, row.ata, row.createdSig, state, spent)
     } catch (err) {
-      if (isRateLimited(err)) {
+      if (stopsPass(err)) {
         // The pass stops here; this row and the ones after it stay first in line.
-        limited = true
-        await rateLimited(deps, row.ata, err)
+        stopped(deps, row.ata, err)
         break
       }
       deps.log.warn({ ata: row.ata, error: errorSummary(err).message }, 'ata close lookup failed')
@@ -293,17 +327,14 @@ export async function watchSponsoredAtas(
     )
   }
   await markAtasChecked(deps.db, stillOpen, now)
-  if (!limited) deps.pace?.clean()
   return { checked: rows.length, closed, flagged }
 }
 
-/** A read was rate-limited: the pace pauses every index read, or the pass just stops. */
-async function rateLimited(deps: AtaWatchDeps, ata: string | undefined, err: unknown) {
-  if (deps.pace) await deps.pace.rateLimited('ata-watch', err)
-  else {
-    deps.log.warn(
-      { ...(ata ? { ata } : {}), error: errorSummary(err).message },
-      'ata watch reads rate-limited; pass stopped',
-    )
-  }
+/** The pass stopped: IndexReads has logged it (and pages when it is long), or warn here. */
+function stopped(deps: AtaWatchDeps, ata: string | undefined, err: unknown) {
+  if (deps.reads) return
+  deps.log.warn(
+    { ...(ata ? { ata } : {}), error: errorSummary(err).message },
+    'ata watch reads rate-limited; pass stopped',
+  )
 }

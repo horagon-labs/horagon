@@ -5,7 +5,7 @@ import {
   backoffDelayMs,
   IndexPace,
   isRateLimited,
-  RATE_LIMIT_PAGE_AFTER_MS,
+  MarketMarks,
   SIGNATURES_SPACING_MS,
   TRANSACTION_CHUNK,
   TRANSACTION_SPACING_MS,
@@ -16,7 +16,6 @@ import {
 function fakePace(o: { random?: () => number } = {}) {
   let t = 1_000_000
   const warns: Array<{ obj: Record<string, unknown>; msg: string }> = []
-  const sent: Array<{ key: string; text: string }> = []
   const sleeps: number[] = []
   const pace = new IndexPace({
     log: {
@@ -24,11 +23,6 @@ function fakePace(o: { random?: () => number } = {}) {
       debug: () => {},
       info: () => {},
     } as unknown as Logger,
-    alerts: {
-      send: async (key, text) => {
-        sent.push({ key, text })
-      },
-    },
     clock: () => t,
     random: o.random ?? (() => 0),
     sleep: async (ms) => {
@@ -39,7 +33,6 @@ function fakePace(o: { random?: () => number } = {}) {
   return {
     pace,
     warns,
-    sent,
     sleeps,
     advance: (ms: number) => {
       t += ms
@@ -96,77 +89,39 @@ describe('backoffDelayMs', () => {
 })
 
 describe('IndexPace back-off', () => {
-  it('holds reads for the delay after a rate limit, logging once with the delay', async () => {
+  it('holds reads for the delay after a failure, logging once with the delay', async () => {
     const f = fakePace()
-    expect(await f.pace.held('index')).toBe(false)
-    const delay = await f.pace.rateLimited('index', new Error('429 Too Many Requests'))
+    expect(f.pace.held()).toBe(false)
+    const delay = f.pace.down('index', new Error('429 Too Many Requests'))
     expect(delay).toBe(30_000)
     expect(f.warns).toHaveLength(1)
     expect(f.warns[0]?.obj).toMatchObject({ source: 'index', delayMs: 30_000 })
-    expect(await f.pace.held('index')).toBe(true)
+    expect(f.pace.held()).toBe(true)
     f.advance(29_999)
-    expect(await f.pace.held('ata-watch')).toBe(true)
+    expect(f.pace.held()).toBe(true)
     f.advance(1)
-    expect(await f.pace.held('index')).toBe(false)
+    expect(f.pace.held()).toBe(false)
     // Held passes log nothing more.
     expect(f.warns).toHaveLength(1)
   })
 
-  it('grows the delay on each rate limit in a row and resets after a clean pass', async () => {
+  it('grows the delay on each failure in a row and resets after a clean pass', async () => {
     const f = fakePace()
     const delays: number[] = []
     for (let i = 0; i < 7; i++) {
-      delays.push(await f.pace.rateLimited('index', new Error('429')))
+      delays.push(f.pace.down('index', new Error('429')))
       f.advance(delays.at(-1) ?? 0)
     }
     expect(delays).toEqual([30_000, 60_000, 120_000, 240_000, 480_000, 600_000, 600_000])
     f.pace.clean()
-    expect(await f.pace.rateLimited('index', new Error('429'))).toBe(30_000)
+    expect(f.pace.down('index', new Error('429'))).toBe(30_000)
   })
 
   it('applies the jitter it is given', async () => {
     const f = fakePace({ random: () => 0.5 })
-    expect(await f.pace.rateLimited('index', new Error('429'))).toBe(
+    expect(f.pace.down('index', new Error('429'))).toBe(
       Math.round(30_000 * (1 - BACKOFF.jitter * 0.5)),
     )
-  })
-
-  it('pages index-rate-limited once the pause has lasted more than 15 min, until a clean pass', async () => {
-    const f = fakePace()
-    let elapsed = 0
-    // Rate-limited again at the end of every pause: 30 s, 1, 2, 4, 8 min = 15.5 min so far.
-    for (let i = 0; i < 5; i++) {
-      const d = await f.pace.rateLimited('index', new Error('429'))
-      expect(f.sent).toEqual([])
-      f.advance(d)
-      elapsed += d
-    }
-    expect(elapsed).toBeGreaterThan(RATE_LIMIT_PAGE_AFTER_MS)
-    await f.pace.rateLimited('index', new Error('429'))
-    expect(f.sent.map((s) => s.key)).toEqual(['index-rate-limited'])
-    expect(f.sent[0]?.text).toContain('15 min')
-    expect(f.sent[0]?.text).toContain('HORAGON_INDEX_RPC_URL')
-    // Every held pass sends it again: the alerter's window drops the repeats.
-    f.advance(1_000)
-    expect(await f.pace.held('index')).toBe(true)
-    expect(f.sent.map((s) => s.key)).toEqual(['index-rate-limited', 'index-rate-limited'])
-
-    f.advance(600_000)
-    expect(await f.pace.held('index')).toBe(false)
-    f.pace.clean()
-    await f.pace.rateLimited('index', new Error('429'))
-    expect(f.sent).toHaveLength(2)
-  })
-
-  it('does not page a pause streak of 15 min or less', async () => {
-    const f = fakePace()
-    await f.pace.rateLimited('index', new Error('429'))
-    f.advance(RATE_LIMIT_PAGE_AFTER_MS)
-    await f.pace.rateLimited('index', new Error('429'))
-    expect(f.sent).toEqual([])
-    f.advance(1)
-    expect(await f.pace.held('index')).toBe(true)
-    expect(f.sent.map((s) => s.key)).toEqual(['index-rate-limited'])
   })
 })
 
@@ -263,9 +218,9 @@ describe('IndexPace transaction budget', () => {
   })
 })
 
-describe('IndexPace change tracking', () => {
+describe('MarketMarks', () => {
   it('is due when never indexed, when the data changed, or when the sweep is due', () => {
-    const { pace } = fakePace()
+    const pace = new MarketMarks()
     expect(pace.due('m', 'h1', 60, 1_000)).toBe(true)
     pace.indexed('m', 'h1', 1_000)
     expect(pace.due('m', 'h1', 60, 1_005)).toBe(false)
@@ -280,8 +235,19 @@ describe('IndexPace change tracking', () => {
     expect(pace.due('m', 'h1', 60, 1_005)).toBe(true)
   })
 
+  it('keeps a market read in part due on every pass, behind the ones that waited longer', () => {
+    const marks = new MarketMarks()
+    marks.indexed('a', 'x', 10)
+    marks.partial('b', 20)
+    expect(marks.due('b', 'y', 60, 21)).toBe(true)
+    expect(marks.due('b', undefined, 60, 21)).toBe(true)
+    expect(marks.lastIndexedAt('a')).toBeLessThan(marks.lastIndexedAt('b'))
+    marks.indexed('b', 'y', 25)
+    expect(marks.due('b', 'y', 60, 30)).toBe(false)
+  })
+
   it('orders by last index and drops markets no longer indexable', () => {
-    const { pace } = fakePace()
+    const pace = new MarketMarks()
     pace.indexed('a', 'x', 10)
     pace.indexed('b', 'x', 5)
     expect(pace.lastIndexedAt('b')).toBeLessThan(pace.lastIndexedAt('a'))

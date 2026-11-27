@@ -32,6 +32,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { Alerter } from '../src/alerts'
 import { type AtaWatchDeps, closeOf, watchSponsoredAtas } from '../src/ata-watch'
 import { IndexPace } from '../src/index-pace'
+import { IndexReads } from '../src/index-reads'
 
 const sponsor = Keypair.generate().publicKey
 const mint = Keypair.generate().publicKey
@@ -675,7 +676,6 @@ describe('watchSponsoredAtas', () => {
         log: {
           warn: (obj: Record<string, unknown>, msg: string) => paceWarns.push({ obj, msg }),
         } as unknown as Logger,
-        alerts: { send: async () => {} },
         clock: () => t,
         random: () => 0,
         sleep: async (ms) => {
@@ -684,11 +684,30 @@ describe('watchSponsoredAtas', () => {
       })
     })
 
+    /** The deps of `depsWith`, reading through IndexReads over one endpoint with `pace`. */
+    const paced = (
+      connection: Record<string, unknown>,
+      extra: Partial<AtaWatchDeps> = {},
+    ): AtaWatchDeps => {
+      const d = depsWith(connection, extra)
+      const c = d.connection as NonNullable<AtaWatchDeps['connection']>
+      const { connection: _direct, ...rest } = d
+      return {
+        ...rest,
+        reads: new IndexReads({
+          endpoints: [{ name: 'HORAGON_RPC_URL', host: 'rpc.test', connection: () => c, pace }],
+          log: d.log,
+          alerts: d.alerts,
+          clock: () => t,
+        }),
+      }
+    }
+
     it('makes no read while the indexer is paused, and leaves the rows unchecked', async () => {
       await record(2)
-      await pace.rateLimited('index', RATE_LIMIT())
+      pace.down('index', RATE_LIMIT())
       const calls: string[] = []
-      const deps = depsWith(
+      const deps = paced(
         {
           getMultipleAccountsInfo: async (keys: PublicKey[]) => {
             calls.push('accounts')
@@ -699,7 +718,7 @@ describe('watchSponsoredAtas', () => {
             return []
           },
         },
-        { pace },
+        {},
       )
       expect(await watchSponsoredAtas(deps)).toEqual({ checked: 0, closed: 0, flagged: 0 })
       expect(calls).toEqual([])
@@ -712,49 +731,49 @@ describe('watchSponsoredAtas', () => {
     it('stops the pass on a rate-limited signature read and pauses the indexer too', async () => {
       await record(3)
       const asked: string[] = []
-      const deps = depsWith(
+      const deps = paced(
         {
           getSignaturesForAddress: async (k: PublicKey) => {
             asked.push(k.toBase58())
             throw RATE_LIMIT()
           },
         },
-        { pace },
+        {},
       )
       expect(await watchSponsoredAtas(deps)).toEqual({ checked: 3, closed: 0, flagged: 0 })
       expect(asked).toHaveLength(1)
       expect(paceWarns).toHaveLength(1)
       expect(paceWarns[0]?.obj).toMatchObject({ source: 'ata-watch', delayMs: 30_000 })
-      expect(await pace.held('index')).toBe(true)
+      expect(pace.held()).toBe(true)
       // Nothing was closed or flagged: every row stays open.
       expect(await sponsoredAtasToCheck(h.db)).toHaveLength(3)
     })
 
     it('pauses on a rate-limited account read', async () => {
       await record(1)
-      const deps = depsWith(
+      const deps = paced(
         {
           getMultipleAccountsInfo: async () => {
             throw RATE_LIMIT()
           },
         },
-        { pace },
+        {},
       )
       expect(await watchSponsoredAtas(deps)).toEqual({ checked: 0, closed: 0, flagged: 0 })
-      expect(await pace.held('ata-watch')).toBe(true)
+      expect(pace.held()).toBe(true)
     })
 
     it('spaces its signature reads 350 ms apart on the pace clock', async () => {
       await record(3)
       const at: number[] = []
-      const deps = depsWith(
+      const deps = paced(
         {
           getSignaturesForAddress: async () => {
             at.push(t)
             return []
           },
         },
-        { pace },
+        {},
       )
       await watchSponsoredAtas(deps)
       expect(at).toHaveLength(3)
@@ -777,7 +796,7 @@ describe('watchSponsoredAtas', () => {
         expect(await pace.takeTransactions(10, Number.POSITIVE_INFINITY)).toBe(true)
         for (let k = 0; k < 10; k++) txAt.push(t)
       }
-      const deps = depsWith(
+      const deps = paced(
         {
           getSignaturesForAddress: async () => {
             sigAt.push(t)
@@ -788,7 +807,7 @@ describe('watchSponsoredAtas', () => {
             return null
           },
         },
-        { pace, clock: () => t },
+        { clock: () => t },
       )
       await watchSponsoredAtas(deps)
       const busiest = (at: number[]) =>

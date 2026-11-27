@@ -30,6 +30,7 @@ import { espnFeed, RawArchive } from './feeds/espn'
 import { loadReplayDir, replayFeed } from './feeds/replay'
 import type { Feed } from './feeds/types'
 import { IndexPace } from './index-pace'
+import { IndexReads } from './index-reads'
 import { indexOnce } from './indexer'
 import { dueEvery, FailureStreak, type RoundStep, roundSteps, runRound, runStep } from './loop'
 import { evidenceUri } from './propose'
@@ -90,7 +91,22 @@ async function main(): Promise<void> {
       )
     },
   })
-  const pace = new IndexPace({ log, alerts })
+  // One endpoint for now: the index RPC when it was verified, else the main one.
+  const indexEndpoint = {
+    name: cfg.indexRpcUrl ? 'HORAGON_INDEX_RPC_URL' : 'HORAGON_RPC_URL',
+    host: rpcHost(cfg.indexRpcUrl ?? cfg.rpcs[0]?.url ?? ''),
+  }
+  const reads = new IndexReads({
+    endpoints: [
+      {
+        ...indexEndpoint,
+        connection: indexConnection,
+        pace: new IndexPace({ log }),
+      },
+    ],
+    log,
+    alerts,
+  })
   const program = new HoragonProgram({ collateralMint: cfg.collateralMint })
   const ratings = await loadRatings(cfg.eloFile)
   const now = () => Math.floor(Date.now() / 1000)
@@ -188,8 +204,7 @@ async function main(): Promise<void> {
         const index = await step('index', () =>
           indexOnce({
             db,
-            connection: indexConnection(),
-            pace,
+            reads,
             collateralMint: cfg.collateralMint,
             authority: program.authority,
             alerts,
@@ -237,12 +252,11 @@ async function main(): Promise<void> {
         await step('ata-watch', () =>
           watchSponsoredAtas({
             db,
-            connection: indexConnection(),
+            reads,
             sponsor,
             alerts,
             log,
             now,
-            pace,
           }),
         )
       },

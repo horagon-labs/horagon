@@ -1,16 +1,14 @@
-// The pace of the indexer's and the ATA watch's RPC reads (incident of 2026-11-25: a public RPC
-// held the keeper's IP in a per-method rate limit that its own reads every 5 s kept alive).
-// One object, made once in `main.ts` and shared by both: a rate limit on any of their reads
-// pauses them all with exponential back-off and jitter, and pages `index-rate-limited` once the
-// pause has lasted more than 15 min; signature reads are spaced, transaction reads (each entry
-// of a batch) come out of a budget per 10 s; and a market is asked for its signatures only when
-// its account or its mints changed or its sweep is due.
-// Everything here is in memory: a restart indexes every market once and starts with no pause.
-// It never sleeps through a pause: a held pass returns at once, so the tick keeps its own
-// cadence.
+// The pace of the keeper's index reads (the indexer's and the ATA watch's) on one RPC endpoint
+// (incident of 2026-11-25: a public RPC held the keeper's IP in a per-method rate limit that its
+// own reads every 5 s kept alive). Each endpoint of `IndexReads` (`index-reads.ts`) has one: a
+// failure of the endpoint pauses its reads with exponential back-off and jitter, signature reads
+// are spaced, and transaction reads (each entry of a batch) come out of a budget per 10 s, for
+// the indexer and the ATA watch together. `MarketMarks` keeps, for the indexer, which markets
+// changed: a market is asked for its signatures only when its account or its mints changed or
+// its sweep is due. Everything here is in memory: a restart indexes every market once and starts
+// with no pause. It never sleeps through a pause: a held pass returns at once.
 import { errorSummary } from '@horagon/sdk'
 import type { Logger } from 'pino'
-import type { Alerter } from './alerts'
 
 /** Back-off of a rate limit: 30 s doubling to 10 min, minus up to 20% of jitter. */
 export const BACKOFF = { baseMs: 30_000, capMs: 600_000, jitter: 0.2 }
@@ -74,7 +72,6 @@ export function backoffDelayMs(attempt: number, random: () => number = Math.rand
 
 export interface PaceOptions {
   log: Logger
-  alerts: Alerter
   /** Wall clock in ms; defaults to Date.now. */
   clock?: () => number
   /** In [0, 1); defaults to Math.random. */
@@ -82,30 +79,21 @@ export interface PaceOptions {
   sleep?: (ms: number) => Promise<void>
 }
 
+/** The pace of one endpoint's index reads. */
 export class IndexPace {
   readonly clock: () => number
   private readonly random: () => number
   private readonly sleep: (ms: number) => Promise<void>
-  /** Rate limits since the last clean pass. */
+  /** Failures since the last clean pass. */
   private attempt = 0
   /** Reads are held until this time (ms). */
   private until = 0
-  /** The first rate limit since the last clean pass; null when there is none. */
-  private since: number | null = null
   /** When (ms) the last call of each spaced method was made. */
   private readonly lastCall = { signatures: Number.NEGATIVE_INFINITY }
   /** getTransaction entries taken in the last window: when (ms) and how many. */
   private taken: Array<{ at: number; n: number }> = []
   /** No getTransaction read before this time (ms): the last one's entries times the spacing. */
   private transactionsFrom = Number.NEGATIVE_INFINITY
-  /**
-   * Per market: the hash of its account and mints and when (s) it was last indexed in full, or
-   * read in part (`partial`: due on every pass until it is read in full).
-   */
-  private readonly marks = new Map<
-    string,
-    { hash: string | undefined; at: number; partial?: true }
-  >()
 
   constructor(private readonly opts: PaceOptions) {
     this.clock = opts.clock ?? Date.now
@@ -113,42 +101,42 @@ export class IndexPace {
     this.sleep = opts.sleep ?? ((ms) => new Promise<void>((r) => setTimeout(r, ms)))
   }
 
-  /** True while a pause holds reads; pages if the streak has lasted too long. */
-  async held(_source: PaceSource): Promise<boolean> {
-    const now = this.clock()
-    if (now >= this.until) return false
-    await this.pageIfLong(now)
-    return true
+  /** True while a pause holds this endpoint's reads. */
+  held(): boolean {
+    return this.clock() < this.until
   }
 
-  /** A read was rate-limited: pause all reads, log once with the delay. Returns the delay. */
-  async rateLimited(source: PaceSource, err: unknown): Promise<number> {
+  /**
+   * A read failed on this endpoint (a rate limit, an auth refusal, a 5xx, a timeout...): pause
+   * its reads, log once with the delay and the endpoint's name and host. Returns the delay.
+   */
+  down(
+    source: PaceSource,
+    err: unknown,
+    failure = 'rate-limit',
+    endpoint?: { name: string; host: string },
+  ): number {
     const now = this.clock()
-    this.since ??= now
     const delayMs = backoffDelayMs(this.attempt, this.random)
     this.attempt++
     this.until = now + delayMs
     this.opts.log.warn(
-      { source, delayMs, attempt: this.attempt, error: errorSummary(err).message },
-      'RPC rate-limited index reads; pausing them',
+      {
+        source,
+        ...(endpoint ? { indexRpc: endpoint.name, indexRpcHost: endpoint.host } : {}),
+        failure,
+        delayMs,
+        attempt: this.attempt,
+        error: errorSummary(err).message,
+      },
+      'index RPC read failed; pausing its reads',
     )
-    await this.pageIfLong(now)
     return delayMs
   }
 
-  /** A pass whose reads all answered: the next rate limit starts the back-off over. */
+  /** A pass whose reads on this endpoint all answered: the next failure starts the back-off over. */
   clean(): void {
     this.attempt = 0
-    this.since = null
-  }
-
-  private async pageIfLong(now: number): Promise<void> {
-    if (this.since === null || now - this.since <= RATE_LIMIT_PAGE_AFTER_MS) return
-    const mins = Math.floor((now - this.since) / 60_000)
-    await this.opts.alerts.send(
-      'index-rate-limited',
-      `The RPC has rate-limited the keeper's index reads for ${mins} min (paused up to 10 min between tries): trades, claims and prices are not being indexed. Wait, or set HORAGON_INDEX_RPC_URL (runbook)`,
-    )
   }
 
   /** Waits until the last getSignaturesForAddress is at least SIGNATURES_SPACING_MS old. */
@@ -201,6 +189,17 @@ export class IndexPace {
     }
     return ready
   }
+}
+
+/**
+ * Per market, for the indexer: the hash of its account and mints and when (s) it was last indexed
+ * in full, or read in part (`partial`: due on every pass until it is read in full).
+ */
+export class MarketMarks {
+  private readonly marks = new Map<
+    string,
+    { hash: string | undefined; at: number; partial?: true }
+  >()
 
   /**
    * Whether `market` needs its signatures read: never indexed in full since start, its account

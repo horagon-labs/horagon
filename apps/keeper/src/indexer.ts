@@ -2,10 +2,11 @@
 // than a day ago), decoded into trades and redeems/claims from token balance deltas, plus one
 // price point per open market. Only top-level pm-AMM instructions are user activity; the same
 // instructions inside a Horagon transaction are the keeper's own CPIs. Token accounts that a
-// sponsored transaction created for its user are recorded for `ata-watch.ts`. With an
-// IndexPace (`index-pace.ts`, the keeper's), one account read per 100 markets drives the pass:
-// a market's signatures are read only when its account changed or its sweep is due, and a rate
-// limit stops the pass and holds the next ones.
+// sponsored transaction created for its user are recorded for `ata-watch.ts`. With IndexReads
+// (`index-reads.ts`, the keeper's), one account read per 100 accounts drives the pass: a
+// market's signatures are read only when its account or mints changed or its sweep is due, every
+// read is paced and fails over to the next RPC, and when every RPC is paused the pass stops and
+// the next ones are held.
 import { createHash } from 'node:crypto'
 import {
   type Db,
@@ -41,13 +42,14 @@ import {
 import type { Logger } from 'pino'
 import type { Alerter } from './alerts'
 import { base58Decode } from './base58'
+import { isRateLimited, PASS_BUDGET_MS, SWEEP_SECS, TRANSACTION_CHUNK } from './index-pace'
 import {
-  type IndexPace,
-  isRateLimited,
-  PASS_BUDGET_MS,
-  SWEEP_SECS,
-  TRANSACTION_CHUNK,
-} from './index-pace'
+  directPass,
+  EveryEndpointDown,
+  type IndexPass,
+  type IndexReads,
+  NOT_NOW,
+} from './index-reads'
 
 type TradeInsert = Parameters<typeof insertTrades>[1][number] & { botMemo: boolean }
 type ClaimInsert = Parameters<typeof insertClaims>[1][number]
@@ -367,7 +369,8 @@ const defaultStops = new Map<string, StopState>()
 
 export interface IndexerDeps {
   db: Db
-  connection: Connection
+  /** Without `reads`: every read straight on this connection, every market every pass. */
+  connection?: Connection
   collateralMint: PublicKey
   authority: PublicKey
   alerts: Alerter
@@ -378,10 +381,11 @@ export interface IndexerDeps {
   /** Stop counters per market; defaults to a module-level map. */
   stops?: Map<string, StopState>
   /**
-   * The read pace (`main.ts` passes the keeper's). Without one every market is read on every
-   * pass, unspaced, and a rate limit only stops the pass.
+   * The keeper's index reads (`main.ts`): paced, change-driven, failing over between RPCs.
+   * Without them every market is read on every pass through `connection`, unspaced, and a rate
+   * limit only stops the pass.
    */
-  pace?: IndexPace
+  reads?: IndexReads<Connection>
 }
 
 /** Accounts per getMultipleAccountsInfo call (the RPC maximum). */
@@ -391,7 +395,10 @@ const SIGNATURE_LIST = '(signature list)'
 
 type AccountInfos = Awaited<ReturnType<Connection['getMultipleAccountsInfo']>>
 
-/** A read of the pass was rate-limited after the market's progress was saved: the pass stops. */
+/**
+ * A read of the pass was rate-limited (or every RPC was paused) after the market's progress was
+ * saved: the pass stops.
+ */
 class RateLimitedPass extends Error {
   override name = 'RateLimitedPass'
   constructor(readonly error: unknown) {
@@ -414,49 +421,69 @@ function accountsHash(infos: AccountInfos): string {
 
 /**
  * One pass over the indexable markets. Returns how many rows were written; `paused` when the
- * pace held the pass (no read at all).
+ * reads were held (every RPC paused: no read at all).
  *
  * First one getMultipleAccountsInfo per 100 accounts (each market and its yes and no mints): the
- * open markets' price points and each market's hash of the three. With a pace, only the markets due (`IndexPace.due`: not indexed in full
- * since start, account changed, or sweep due: 60 s open, 5 min otherwise) are asked for their
- * signatures, least recently indexed first, and none is started once the pass is PASS_BUDGET_MS
- * old, so the round's next tick is not kept waiting. A rate limit on any read stops the pass and,
- * with a pace, holds the next ones.
+ * open markets' price points and each market's hash of the three. With IndexReads, only the
+ * markets due (`MarketMarks.due`: not indexed in full since start, account changed, or sweep due:
+ * 60 s open, 5 min otherwise) are asked for their signatures, least recently indexed first, and
+ * none is started once the pass is PASS_BUDGET_MS old. When every RPC is paused the pass stops
+ * and the next ones are held; without IndexReads a rate limit only stops the pass.
  */
 export async function indexOnce(
   deps: IndexerDeps,
 ): Promise<{ trades: number; claims: number; prices: number; paused?: true }> {
-  const pace = deps.pace
-  if (pace && (await pace.held('index'))) return { trades: 0, claims: 0, prices: 0, paused: true }
+  const reads = deps.reads
+  let pass: IndexPass<Connection> | null
+  if (reads) pass = await reads.begin('index')
+  else if (deps.connection) pass = directPass(deps.connection)
+  else throw new Error('indexOnce needs reads or a connection')
+  if (!pass) return { trades: 0, claims: 0, prices: 0, paused: true }
+  try {
+    return await indexPass(deps, pass)
+  } finally {
+    pass.end()
+  }
+}
+
+/** A read that stops the pass: every RPC paused, or (without IndexReads) a rate limit. */
+const stopsPass = (err: unknown) => err instanceof EveryEndpointDown || isRateLimited(err)
+
+async function indexPass(
+  deps: IndexerDeps,
+  pass: IndexPass<Connection>,
+): Promise<{ trades: number; claims: number; prices: number }> {
+  const marks = deps.reads?.marks
+  const clock = deps.reads?.clock
   const now = deps.now()
   const markets = await listIndexableMarkets(deps.db, new Date(now * 1000))
   let trades = 0
   let claims = 0
   let prices = 0
   const isOpen = (m: MarketRow) => m.status === 'open' && m.endTs.getTime() / 1000 > now
-  const stopPass = async (market: string | undefined, err: unknown) => {
-    if (pace) await pace.rateLimited('index', err)
-    else {
-      deps.log.warn(
-        { ...(market ? { market } : {}), error: errorSummary(err).message },
-        'index reads rate-limited; pass stopped',
-      )
-    }
+  // With IndexReads the endpoint's pace has logged it (and IndexReads pages when it is long).
+  const stopPass = (market: string | undefined, err: unknown) => {
+    if (deps.reads) return
+    deps.log.warn(
+      { ...(market ? { market } : {}), error: errorSummary(err).message },
+      'index reads rate-limited; pass stopped',
+    )
   }
 
   // Every market's account and mints: the open markets' prices, and what changed since the last
   // pass (a swap or liquidity change writes the market; a claim or redeem only the mints).
   const hashes = new Map<string, string>()
-  let read = false
   if (markets.length > 0) {
     try {
       const keys = markets.flatMap((m) => [m.pubkey, m.yesMint, m.noMint])
       const infos: AccountInfos = []
       for (let i = 0; i < keys.length; i += ACCOUNTS_PER_READ) {
         const chunk = keys.slice(i, i + ACCOUNTS_PER_READ)
-        const got = await deps.connection.getMultipleAccountsInfo(
-          chunk.map((k) => new PublicKey(k)),
-          'confirmed',
+        const got = await pass.accounts((c) =>
+          c.getMultipleAccountsInfo(
+            chunk.map((k) => new PublicKey(k)),
+            'confirmed',
+          ),
         )
         for (const j of chunk.keys()) infos.push(got[j] ?? null)
       }
@@ -465,10 +492,9 @@ export async function indexOnce(
         hashes.set(m.pubkey, accountsHash(own))
         if (isOpen(m)) prices += await pricePoint(deps, m, own[0] ?? null, now)
       }
-      read = true
     } catch (err) {
-      if (isRateLimited(err)) {
-        await stopPass(undefined, err)
+      if (stopsPass(err)) {
+        stopPass(undefined, err)
         return { trades, claims, prices }
       }
       deps.log.warn({ error: errorSummary(err).message }, 'price read failed')
@@ -476,46 +502,43 @@ export async function indexOnce(
   }
 
   let due = markets
-  if (pace) {
-    pace.retain(new Set(markets.map((m) => m.pubkey)))
+  if (marks) {
+    marks.retain(new Set(markets.map((m) => m.pubkey)))
     const sweep = (m: MarketRow) => (isOpen(m) ? SWEEP_SECS.open : SWEEP_SECS.closed)
     due = markets
-      .filter((m) => pace.due(m.pubkey, hashes.get(m.pubkey), sweep(m), now))
-      .sort((a, b) => pace.lastIndexedAt(a.pubkey) - pace.lastIndexedAt(b.pubkey))
+      .filter((m) => marks.due(m.pubkey, hashes.get(m.pubkey), sweep(m), now))
+      .sort((a, b) => marks.lastIndexedAt(a.pubkey) - marks.lastIndexedAt(b.pubkey))
   }
   const stops = deps.stops ?? defaultStops
-  const startedAt = pace?.clock() ?? 0
-  let limited = false
+  const startedAt = clock?.() ?? 0
   for (const [i, m] of due.entries()) {
-    if (pace && i > 0 && pace.clock() - startedAt >= PASS_BUDGET_MS) {
+    if (clock && i > 0 && clock() - startedAt >= PASS_BUDGET_MS) {
       deps.log.debug?.({ left: due.length - i }, 'index pass budget spent; the rest go next pass')
       break
     }
     try {
-      const left = () => Math.max(0, PASS_BUDGET_MS - ((pace?.clock() ?? 0) - startedAt))
-      const r = await indexMarket(deps, m, left)
+      const left = () => Math.max(0, PASS_BUDGET_MS - ((clock?.() ?? 0) - startedAt))
+      const r = await indexMarket(deps, pass, m, left)
       trades += r.trades
       claims += r.claims
       if (r.partial) {
         // The transaction budget ran out: the market goes on next pass, after the markets that
         // waited longer, and nothing else is started (it would only read signatures).
-        pace?.partial(m.pubkey, now)
+        marks?.partial(m.pubkey, now)
         break
       }
       // Indexed in full unless it stopped at something it could not read.
-      if (stops.has(m.pubkey)) pace?.forget(m.pubkey)
-      else pace?.indexed(m.pubkey, hashes.get(m.pubkey), now)
+      if (stops.has(m.pubkey)) marks?.forget(m.pubkey)
+      else marks?.indexed(m.pubkey, hashes.get(m.pubkey), now)
     } catch (err) {
-      pace?.forget(m.pubkey)
-      if (err instanceof RateLimitedPass || isRateLimited(err)) {
-        limited = true
-        await stopPass(m.pubkey, err instanceof RateLimitedPass ? err.error : err)
+      marks?.forget(m.pubkey)
+      if (err instanceof RateLimitedPass || stopsPass(err)) {
+        stopPass(m.pubkey, err instanceof RateLimitedPass ? err.error : err)
         break
       }
       deps.log.warn({ market: m.pubkey, error: errorSummary(err).message }, 'index failed')
     }
   }
-  if (pace && read && !limited) pace.clean()
   return { trades, claims, prices }
 }
 
@@ -575,12 +598,13 @@ async function noteStop(deps: IndexerDeps, m: MarketRow, sig: string): Promise<v
 }
 
 /**
- * One market from its cursor. With a pace, each batch of transactions comes out of the
+ * One market from its cursor. With IndexReads, each batch of transactions comes out of the
  * transaction budget, waited for no longer than `budgetLeft()`; when it would come later the scan
  * stops there (`partial`), the cursor at the last transaction read.
  */
 async function indexMarket(
   deps: IndexerDeps,
+  pass: IndexPass<Connection>,
   m: MarketRow,
   budgetLeft: () => number = () => 0,
 ): Promise<{ trades: number; claims: number; partial?: true }> {
@@ -589,19 +613,21 @@ async function indexMarket(
   const sigs: string[] = []
   let newestFetched: string | undefined
   let before: string | undefined
-  // Newest first; page back until the cursor (the newest signature already indexed). A rate
-  // limit is the pace's (it stops the pass); any other failure counts toward index-stuck.
+  // Newest first; page back until the cursor (the newest signature already indexed). A read
+  // that stops the pass (every RPC paused, a rate limit without IndexReads) is not the market's;
+  // any other failure counts toward index-stuck.
   try {
     for (;;) {
-      await deps.pace?.spaceSignatures()
-      const page = await deps.connection.getSignaturesForAddress(
-        address,
-        {
-          limit: 1000,
-          ...(before ? { before } : {}),
-          ...(m.indexCursor ? { until: m.indexCursor } : {}),
-        },
-        'confirmed',
+      const page = await pass.signatures((c) =>
+        c.getSignaturesForAddress(
+          address,
+          {
+            limit: 1000,
+            ...(before ? { before } : {}),
+            ...(m.indexCursor ? { until: m.indexCursor } : {}),
+          },
+          'confirmed',
+        ),
       )
       newestFetched ??= page[0]?.signature
       sigs.push(...page.filter((s) => s.err === null).map((s) => s.signature))
@@ -609,7 +635,7 @@ async function indexMarket(
       before = page.at(-1)?.signature
     }
   } catch (err) {
-    if (!isRateLimited(err)) await noteStop(deps, m, SIGNATURE_LIST)
+    if (!stopsPass(err)) await noteStop(deps, m, SIGNATURE_LIST)
     throw err
   }
   // Nothing fetched: the market did not move past a signature, so a stall counter stays; one
@@ -630,17 +656,27 @@ async function indexMarket(
   let partial = false
   scan: for (let i = 0; i < ordered.length; i += TRANSACTION_CHUNK) {
     const chunk = ordered.slice(i, i + TRANSACTION_CHUNK)
-    if (deps.pace && !(await deps.pace.takeTransactions(chunk.length, budgetLeft()))) {
-      partial = true
-      break
-    }
     let answer: Array<VersionedTransactionResponse | null>
     try {
-      answer = await deps.connection.getTransactions(chunk, {
-        maxSupportedTransactionVersion: 0,
-        commitment: 'confirmed',
-      })
+      const got = await pass.transactions(chunk.length, budgetLeft(), (c) =>
+        c.getTransactions(chunk, { maxSupportedTransactionVersion: 0, commitment: 'confirmed' }),
+      )
+      if (got === NOT_NOW) {
+        partial = true
+        break
+      }
+      answer = got
     } catch (err) {
+      if (err instanceof EveryEndpointDown) {
+        // Every RPC is paused: not this market's fault, so no index-stuck count. The cursor
+        // keeps what earlier chunks read, and the pass stops.
+        deps.log.warn(
+          { market: m.pubkey, sig: chunk[0], size: chunk.length, error: err.message },
+          'transaction batch read failed',
+        )
+        rateLimited = { error: err }
+        break
+      }
       // web3.js fails the whole batch on one error entry (a rate limit, a node hiccup). Read it
       // as nothing available: the scan stops at the chunk's first signature, the cursor keeps
       // what earlier chunks read, and a market that keeps failing reaches index-stuck.
@@ -698,10 +734,10 @@ async function indexMarket(
     }
   }
   if (stoppedAt) await noteStop(deps, m, stoppedAt)
-  else if (!partial) stops.delete(m.pubkey)
+  else if (!partial && !rateLimited) stops.delete(m.pubkey)
   // Without a stop everything fetched is done, failed signatures included, so a market with
   // failing swaps does not page through the same failures every tick.
-  const cursor = stoppedAt || partial ? processed : newestFetched
+  const cursor = stoppedAt || partial || rateLimited ? processed : newestFetched
   if (cursor) {
     await updateMarket(deps.db, m.pubkey, {
       indexCursor: cursor,
