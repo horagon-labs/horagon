@@ -87,6 +87,7 @@ export default async function TonightPage() {
           "How it works" under the board at 375, the compact story, then the Practice line. */}
       <TonightBoard
         initial={initial}
+        state={state}
         idleFace={face}
         idleFoot={foot}
         openFoot={

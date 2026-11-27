@@ -11,9 +11,30 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
 import { BoardView, type BoardViewProps } from '../components/chrono/board-view'
 import { StoryCard } from '../components/story-card'
-import { marketOpen, swapHeld } from '../lib/chrono/board'
+import { TonightBoard } from '../components/tonight-board'
+import { WalletProvider } from '../components/wallet'
+import { faceGone, marketOpen } from '../lib/chrono/board'
 import { at, game, market } from '../lib/chrono/fixtures'
-import { screenState } from '../lib/server/first-screen'
+import { type ScreenState, screenState } from '../lib/server/first-screen'
+import type { InitialBoard } from '../lib/server/initial'
+
+// TonightBoard's poll and clock, for its render tests: the games a tick answered and the
+// browser's clock. Unset, the board shows the server's first frame (no answer, clock 0 while
+// hydrating), and nothing else here calls either.
+const stub = vi.hoisted(() => ({ games: undefined as Game[] | undefined, now: 0 }))
+vi.mock('../lib/use-poll', () => ({
+  POLL_MS: 3_000,
+  usePoll: (key: string | null) => ({
+    data: key === 'games' ? stub.games : undefined,
+    error: undefined,
+    failures: 0,
+    refresh: () => {},
+  }),
+}))
+vi.mock('../lib/chrono/now', async (actual) => ({
+  ...(await actual<typeof import('../lib/chrono/now')>()),
+  useNow: () => stub.now,
+}))
 
 const WEB = join(import.meta.dirname, '..')
 const read = (...p: string[]) => readFileSync(join(WEB, ...p), 'utf8')
@@ -213,6 +234,8 @@ describe('a market opening under the poll swaps the idle face, no reload (G4, C1
     sched('nba-401909326', 'MIA', 'NYK', '2026-11-28T00:00:00.000Z', 0.788),
     sched('nba-401909327', 'MIL', 'DET', '2026-11-28T00:30:00.000Z', 0.917),
   ]
+  // 5:58 PM ET: S2, no market open yet.
+  const S2_LATER = at('2026-11-27T22:58:00Z')
   // 7:00 PM ET minus 59 min: NYK's market has just opened at the model's chance.
   const OPEN_NOW = at('2026-11-27T23:01:00Z')
   const opened = (n: number) =>
@@ -322,22 +345,35 @@ describe('a market opening under the poll swaps the idle face, no reload (G4, C1
       })),
     }))
 
-  it('holds the swap: once the poll has seen a market open, the face stays gone', () => {
+  it('a market open takes the slot from any face, by the rule the server picks S3/S4 by', () => {
     // The same rule the server picks S3/S4 by: a listed winner market trades now.
-    expect(marketOpen(friday(), at('2026-11-27T22:58:00Z'))).toBe(false)
+    expect(marketOpen(friday(), S2_LATER)).toBe(false)
     expect(marketOpen(opened(1), OPEN_NOW)).toBe(true)
     expect(marketOpen(stopped(), NIGHT_OVER)).toBe(false)
     expect(marketOpen(undefined, OPEN_NOW)).toBe(false)
-    // S2, then NYK opens, then the night ends: held from the first open on.
-    let held = false
-    held = swapHeld(held, friday(), at('2026-11-27T22:58:00Z'))
-    expect(held).toBe(false)
-    held = swapHeld(held, opened(1), OPEN_NOW)
-    expect(held).toBe(true)
-    held = swapHeld(held, stopped(), NIGHT_OVER)
-    expect(held).toBe(true)
-    // A page that never saw a market open keeps its face (S1, S2, S5 from the first frame).
-    expect(swapHeld(false, stopped(), NIGHT_OVER)).toBe(false)
+    for (const built of ['rest', 'later', 'after'] as const) {
+      // S2: no market open and the night not over, so every idle face stays.
+      expect(faceGone(built, friday(), S2_LATER), built).toBe(false)
+      expect(faceGone(built, undefined, S2_LATER), built).toBe(false)
+      expect(faceGone(built, opened(1), OPEN_NOW), built).toBe(true)
+    }
+  })
+
+  // Refix 2: holding the swap only helps while the poll runs. usePoll skips every tick while the
+  // tab is hidden and no timer runs while the machine sleeps, so a page loaded in S2 during the
+  // day and looked at again after the last game may see the night over first, with no open seen
+  // in between. Its face (the night before) would sit under "All stopped." where S5 tells the
+  // night that just ended. Only a face the server built for S5 fits a night that is over.
+  it('drops a face built before the night ended once the poll sees the night over', () => {
+    expect(faceGone('later', stopped(), NIGHT_OVER)).toBe(true)
+    expect(faceGone('rest', stopped(), NIGHT_OVER)).toBe(true)
+    // After midnight ET and before the 06:00 rollover it is still the night that just ended.
+    expect(faceGone('later', stopped(), at('2026-11-28T05:30:00Z'))).toBe(true)
+    expect(faceGone('after', stopped(), at('2026-11-28T05:30:00Z'))).toBe(false)
+    // An S5 face tells the night that just ended: it stays.
+    expect(faceGone('after', stopped(), NIGHT_OVER)).toBe(false)
+    // An S1 or S2 page whose poll saw the night end the usual way: the open dropped it first.
+    expect(faceGone('later', opened(1), OPEN_NOW)).toBe(true)
   })
 
   it('counts every listed market, whatever the follow filter shows, as the server does', () => {
@@ -366,12 +402,85 @@ describe('a market opening under the poll swaps the idle face, no reload (G4, C1
     expect(html).not.toContain('data-count')
   })
 
-  it("TonightBoard holds the swap with the server's rule and hands no face once held", () => {
+  // TonightBoard itself, its poll and clock stubbed (web tests have no DOM): one render with what
+  // the poll answered, as the browser renders it after a tick.
+  const tonight = (p: {
+    initial: InitialBoard
+    state?: ScreenState
+    poll?: Game[]
+    now?: number
+  }) => {
+    stub.games = p.poll
+    stub.now = p.now ?? 0
+    try {
+      return renderToStaticMarkup(
+        <WalletProvider>
+          <TonightBoard
+            initial={p.initial}
+            state={p.state}
+            idleFace={<p data-test-face>FACE</p>}
+            idleFoot={<p data-test-foot>FOOT</p>}
+            openFoot={<p data-test-open>COMPACT</p>}
+          />
+        </WalletProvider>,
+      )
+    } finally {
+      stub.games = undefined
+      stub.now = 0
+    }
+  }
+  const S2_FIRST = { games: friday(), upcoming: null, now: S2_LATER }
+
+  it('an S2 page whose first tick comes after the last game shows no S2 face under "All stopped."', () => {
+    // Loaded in S2 in the day, the tab hidden (or the machine asleep) all evening: the first tick
+    // on its return sees only stopped games, and no market was ever seen open.
+    const html = tonight({ initial: S2_FIRST, state: 'later', poll: stopped(), now: NIGHT_OVER })
+    expect(html).toMatch(/<p [^>]*data-stopped[^>]*>All stopped\.<\/p>/)
+    expect(html).not.toContain('data-test-face')
+    expect(html).not.toContain('data-test-foot')
+    expect(html).toContain('role="listbox"')
+    expect(html).toContain('<div data-open-foot="true"><p data-test-open="true">COMPACT</p></div>')
+  })
+
+  it('an S1 page the same: its face told an older night too', () => {
+    const html = tonight({
+      initial: { games: [], upcoming: null, now: at('2026-11-27T08:16:00Z') },
+      state: 'rest',
+      poll: stopped(),
+      now: NIGHT_OVER,
+    })
+    expect(html).not.toContain('data-test-face')
+    expect(html).toContain('data-test-open')
+  })
+
+  it('an S5 page keeps its face, which tells the night that just ended', () => {
+    const html = tonight({
+      initial: { games: stopped(), upcoming: null, now: NIGHT_OVER },
+      state: 'after',
+      poll: stopped(),
+      now: NIGHT_OVER + 60,
+    })
+    expect(html).toContain('data-test-face')
+    expect(html).toContain('data-test-foot')
+    expect(html).not.toContain('data-test-open')
+  })
+
+  it("the first frame keeps the server's face: hydration matches the server's HTML", () => {
+    // No answer yet and the clock still the server's (useNow is 0 while hydrating).
+    const html = tonight({ initial: S2_FIRST, state: 'later' })
+    expect(html).toContain('data-test-face')
+    expect(html).toContain('data-test-foot')
+    expect(html).not.toContain('data-test-open')
+  })
+
+  it('TonightBoard latches the drop (lib/use-latch.ts); / tells it the state its faces are for', () => {
     const src = read('components', 'tonight-board.tsx')
-    expect(src).toMatch(/const \[held, setHeld\] = useState\(false\)/)
-    expect(src).toMatch(/swapHeld\(held, shown, now\)/)
-    expect(src).toContain('idleFace={swap ? undefined : idleFace}')
-    expect(src).toContain('idleFoot={swap ? undefined : idleFoot}')
+    expect(src).toMatch(/const gone = useLatch\(faceGone\(state, shown, now\)\)/)
+    expect(src).toContain('idleFace={gone ? undefined : idleFace}')
+    expect(src).toContain('idleFoot={gone ? undefined : idleFoot}')
+    // No second, hand-rolled latch beside it (refix 1's setter went untested).
+    expect(src).not.toMatch(/setHeld|swapHeld/)
+    expect(read('app', 'page.tsx')).toMatch(/<TonightBoard\s[^>]*\bstate=\{state\}/)
     // One rule for S3/S4 on the server and the swap in the browser.
     expect(read('lib', 'server', 'first-screen.ts')).toContain('marketOpen(games, now)')
   })

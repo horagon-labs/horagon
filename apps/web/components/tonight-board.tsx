@@ -4,14 +4,17 @@
 // The server's first frame (R5, lib/server/initial.ts) fills the board until the first poll
 // answers, so the page never opens on "Setting the dial…" while the API is up. While no market is
 // open, the server's idle face (the story card) takes the dial's slot; once the poll has seen a
-// market open, the Night dial keeps it until a reload.
+// market open, or the night over under a face built before it ended, the Night dial keeps it until
+// a reload.
 import { type ReactNode, useEffect, useState } from 'react'
 import { boardApi } from '../lib/api'
-import { swapHeld } from '../lib/chrono/board'
+import { faceGone } from '../lib/chrono/board'
 import { pollHealth } from '../lib/chrono/health'
 import { useNow } from '../lib/chrono/now'
 import { loadFollows, toggleFollow } from '../lib/follows'
+import type { ScreenState } from '../lib/server/first-screen'
 import type { InitialBoard } from '../lib/server/initial'
+import { useLatch } from '../lib/use-latch'
 import { usePoll } from '../lib/use-poll'
 import { BoardView } from './chrono/board-view'
 import { useWallet } from './wallet'
@@ -26,17 +29,21 @@ const storage = () => {
 
 /**
  * `idleFace` and `idleFoot`: the server-rendered story card and what follows it (first-screen W5),
- * shown in the dial's slot until the poll first sees a market open, and not again on this page.
- * `openFoot`: the compact story and the Practice line, shown under the board once a market is
- * open, so the poll swaps them in (G4).
+ * built for the server's `state`, shown in the dial's slot until they stop fitting what the poll
+ * sees (lib/chrono/board.ts faceGone), and not again on this page. `openFoot`: the compact story
+ * and the Practice line, shown under the board once no idle face shows, so the poll swaps them in
+ * (G4).
  */
 export function TonightBoard({
   initial,
+  state,
   idleFace,
   idleFoot,
   openFoot,
 }: {
   initial: InitialBoard
+  /** The first-screen state the server picked (lib/server/first-screen.ts) and built the faces for. */
+  state?: ScreenState
   idleFace?: ReactNode
   idleFoot?: ReactNode
   openFoot?: ReactNode
@@ -53,11 +60,10 @@ export function TonightBoard({
   const [hoverId, setHoverId] = useState<string | null>(null)
   useEffect(() => setFollows(loadFollows(storage())), [])
   const shown = games.data ?? initial.games
-  // The swap holds until a reload (lib/chrono/board.ts swapHeld): when the night's markets stop,
-  // the page keeps the dial and its "All stopped." line, never the night it was loaded with.
-  const [held, setHeld] = useState(false)
-  const swap = swapHeld(held, shown, now)
-  if (swap && !held) setHeld(true)
+  // The server built the faces for the state it saw. Once they stop fitting what the poll sees (a
+  // market open, or the night over under a face built before it ended), they go and stay gone
+  // until a reload (lib/use-latch.ts), so no S1 or S2 face ever sits under "All stopped.".
+  const gone = useLatch(faceGone(state, shown, now))
 
   return (
     <BoardView
@@ -77,8 +83,8 @@ export function TonightBoard({
       onSelect={setSelectedId}
       hoverId={hoverId}
       onHover={setHoverId}
-      idleFace={swap ? undefined : idleFace}
-      idleFoot={swap ? undefined : idleFoot}
+      idleFace={gone ? undefined : idleFace}
+      idleFoot={gone ? undefined : idleFoot}
       openFoot={openFoot}
     />
   )

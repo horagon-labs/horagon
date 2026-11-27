@@ -1,7 +1,7 @@
 // The first screen's state (first-screen spec §3), picked on the server from the board's first
-// frame. The board re-checks the part that matters to the browser (a market open or not) on every
-// poll, by the same `marketOpen`; the page uses this to lay out the idle face, or the compact story
-// under the Night dial.
+// frame. The page lays out the idle face by it, or the compact story under the Night dial, and
+// hands it to the board, which re-checks on every poll whether that face still fits, by the same
+// `marketOpen` and `nightOver` (lib/chrono/board.ts faceGone).
 import type { Game } from '@horagon/sdk'
 import { marketOpen, nightOver } from '../chrono/board'
 import { isTonight } from '../format'

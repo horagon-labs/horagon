@@ -5,6 +5,7 @@ import { formatAmount, parseAmount } from '@horagon/sdk/amount'
 import { etNight } from '@horagon/sdk/et'
 import { effectiveTime } from '@horagon/sdk/math'
 import { countdown, isTonight, percent, usdc } from '../format'
+import type { ScreenState } from '../server/first-screen'
 import { rowSubject, started } from './copy'
 import { timeLeftFraction } from './geometry'
 import {
@@ -205,13 +206,20 @@ export const marketOpen = (games: readonly Game[] | undefined, now: number): boo
   (games ?? []).some((g) => isTonight(g, now * 1000) && openNow(boardItem(g, undefined, now)))
 
 /**
- * The swap at the first open holds until a reload (G4). The idle face is the server's, for the
- * state it saw: a page loaded in S2 holds the night before. Brought back when the markets stop, it
- * would retell that night under "All stopped." (S5 tells the night that just ended, which only the
- * server knows), so once the poll has seen a market open the page stays as one loaded in S3/S4.
+ * The server's idle face no longer fits what the poll sees (G4), so the board drops it, and keeps
+ * it dropped until a reload (components/tonight-board.tsx): a market is open (the Night dial takes
+ * the slot), or the night is over under a face `built` for an earlier state. The face is the
+ * server's, for the state it saw (lib/server/first-screen.ts): an S1 or S2 face tells an older
+ * night, while S5 tells the night that just ended, which only the server knows. A poll that ran all
+ * evening drops it at the first open; one that slept (a hidden tab skips every tick, and no timer
+ * runs while the machine sleeps) may first see the night over. Either way the page then shows what
+ * an S3/S4-loaded one shows at the night's end: the dial, "All stopped." and the compact story.
  */
-export const swapHeld = (held: boolean, games: readonly Game[] | undefined, now: number): boolean =>
-  held || marketOpen(games, now)
+export const faceGone = (
+  built: ScreenState | undefined,
+  games: readonly Game[] | undefined,
+  now: number,
+): boolean => marketOpen(games, now) || (built !== 'after' && nightOver(games ?? [], now))
 
 /**
  * The H1 may say "Prices move with every run." (first-screen C2b) only when a moved market is on
