@@ -7,6 +7,7 @@ import {
   isRateLimited,
   RATE_LIMIT_PAGE_AFTER_MS,
   SIGNATURES_SPACING_MS,
+  TRANSACTION_SPACING_MS,
 } from '../src/index-pace'
 
 /** A pace on a fake clock: `sleep` moves the clock, `random` is fixed unless given. */
@@ -167,8 +168,12 @@ describe('IndexPace back-off', () => {
   })
 })
 
-describe('IndexPace signature spacing', () => {
-  it('spaces signature reads at least 200 ms apart on the clock', async () => {
+describe('IndexPace read spacing', () => {
+  /** The most calls at times `at` (ms) that fall in any window of `windowMs`. */
+  const busiest = (at: number[], windowMs: number) =>
+    Math.max(...at.map((t0) => at.filter((t) => t >= t0 && t < t0 + windowMs).length))
+
+  it('spaces signature reads SIGNATURES_SPACING_MS apart on the clock', async () => {
     const f = fakePace()
     const at: number[] = []
     for (let i = 0; i < 4; i++) {
@@ -176,16 +181,43 @@ describe('IndexPace signature spacing', () => {
       at.push(f.now())
     }
     const gaps = at.slice(1).map((t, i) => t - (at[i] ?? 0))
-    expect(gaps).toEqual([200, 200, 200])
-    expect(SIGNATURES_SPACING_MS).toBe(200)
+    expect(gaps).toEqual([350, 350, 350])
+    expect(SIGNATURES_SPACING_MS).toBe(350)
     // Time already gone by counts.
     f.advance(150)
     await f.pace.spaceSignatures()
-    expect(f.sleeps.at(-1)).toBe(50)
+    expect(f.sleeps.at(-1)).toBe(200)
     f.advance(500)
     const before = f.sleeps.length
     await f.pace.spaceSignatures()
     expect(f.sleeps).toHaveLength(before)
+  })
+
+  it('keeps any 10 s window to 30 signature reads, under the public 40 per 10 s per method', async () => {
+    const f = fakePace()
+    const at: number[] = []
+    for (let i = 0; i < 120; i++) {
+      await f.pace.spaceSignatures()
+      at.push(f.now())
+    }
+    expect(busiest(at, 10_000)).toBeLessThanOrEqual(30)
+  })
+
+  it('spaces transaction reads on their own clock, as the RPC limits each method apart', async () => {
+    const f = fakePace()
+    expect(TRANSACTION_SPACING_MS).toBe(350)
+    await f.pace.spaceSignatures()
+    // A transaction read right after a signature read does not wait for it.
+    const before = f.sleeps.length
+    await f.pace.spaceTransactions()
+    expect(f.sleeps).toHaveLength(before)
+    const at: number[] = []
+    for (let i = 0; i < 120; i++) {
+      await f.pace.spaceTransactions()
+      at.push(f.now())
+    }
+    expect((at[1] ?? 0) - (at[0] ?? 0)).toBe(350)
+    expect(busiest(at, 10_000)).toBeLessThanOrEqual(30)
   })
 })
 

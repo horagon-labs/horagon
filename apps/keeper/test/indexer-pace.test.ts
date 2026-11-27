@@ -7,7 +7,7 @@ import { DEVNET_MUSDC_MINT, HoragonProgram } from '@horagon/sdk'
 import { Keypair, type PublicKey } from '@solana/web3.js'
 import type { Logger } from 'pino'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { IndexPace } from '../src/index-pace'
+import { IndexPace, SIGNATURES_SPACING_MS } from '../src/index-pace'
 import { type IndexerDeps, indexOnce, STUCK_AFTER } from '../src/indexer'
 
 // Market accounts are not decoded for real: the first data byte 1 is a price of 0.4.
@@ -233,12 +233,12 @@ describe('indexOnce with an IndexPace', () => {
     expect(await pass(305)).toEqual([])
   })
 
-  it('spaces signature reads at least 200 ms apart within a pass', async () => {
+  it('spaces signature reads at least SIGNATURES_SPACING_MS apart within a pass', async () => {
     for (let i = 0; i < 5; i++) await addMarket('open', i)
     await indexOnce(deps())
     expect(sigCalls).toHaveLength(5)
     const gaps = sigCalls.slice(1).map((c, i) => c.at - (sigCalls[i]?.at ?? 0))
-    expect(gaps.every((g) => g >= 200)).toBe(true)
+    expect(gaps.every((g) => g >= SIGNATURES_SPACING_MS)).toBe(true)
   })
 
   it('reads accounts in chunks of 100 keys and leaves the markets past the pass budget for the next pass, first', async () => {
@@ -247,14 +247,14 @@ describe('indexOnce with an IndexPace', () => {
     await indexOnce(deps())
     // 150 markets and their 300 mints.
     expect(accountCalls).toEqual([100, 100, 100, 100, 50])
-    // 200 ms apart, no market is started 3 s into the pass.
+    // 350 ms apart, no market is started 3 s into the pass.
     const first = asked()
-    expect(first).toHaveLength(16)
+    expect(first).toHaveLength(10)
     sigCalls = []
     t += 5_000
     await indexOnce(deps())
     const second = asked()
-    expect(second).toHaveLength(16)
+    expect(second).toHaveLength(10)
     expect(second.filter((k) => first.includes(k))).toEqual([])
   }, 60_000)
 
@@ -285,11 +285,11 @@ describe('indexOnce with an IndexPace', () => {
     expect(warns.filter((w) => w.msg.includes('pausing'))).toHaveLength(1)
 
     // Then b and c are asked (b was not indexed, c never reached), a is not: it did not change.
-    // The pause runs from b's read, 200 ms into the first pass.
+    // The pause runs from b's read, SIGNATURES_SPACING_MS into the first pass.
     t = START + 30_000
     expect(await indexOnce(deps())).toMatchObject({ paused: true })
     sigAnswer = () => []
-    t = START + 30_200
+    t = START + 30_000 + SIGNATURES_SPACING_MS
     await indexOnce(deps())
     expect(asked().sort()).toEqual([b, c].sort())
   })

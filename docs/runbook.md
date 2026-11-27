@@ -540,9 +540,10 @@ Between pauses the indexer asks a market for its signatures only when its accoun
 two outcome mints changed since it was last indexed (a swap or liquidity change writes the
 market; a claim or redeem burns shares, which changes a mint's supply), or when its sweep is due:
 60 s for an open market, 5 min for the others (it catches what writes neither, such as a
-challenge or a failed transaction). Each
-market is indexed once after a start. Signature reads are 200 ms apart, and a pass starts no
-market after 3 s; the rest go first on the next pass.
+challenge or a failed transaction). Each market is indexed once after a start. Signature reads
+are 350 ms apart, indexer and ATA watch together (at most 29 in any 10 s, under the public devnet
+limit of 40 calls of one method per 10 s), and so are the ATA watch's transaction reads. A pass
+starts no market after 3 s; the rest go first on the next pass.
 
 When `index-rate-limited` pages (a pause over 15 min):
 

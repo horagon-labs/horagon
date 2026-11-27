@@ -2,10 +2,11 @@
 // held the keeper's IP in a per-method rate limit that its own reads every 5 s kept alive).
 // One object, made once in `main.ts` and shared by both: a rate limit on any of their reads
 // pauses them all with exponential back-off and jitter, and pages `index-rate-limited` once the
-// pause has lasted more than 15 min; signature reads are spaced; and a market is asked for its
-// signatures only when its account or its mints changed or its sweep is due. Everything here is in memory: a
-// restart indexes every market once and starts with no pause. It never sleeps through a pause:
-// a held pass returns at once, so the tick keeps its own cadence.
+// pause has lasted more than 15 min; signature and transaction reads are spaced; and a market
+// is asked for its signatures only when its account or its mints changed or its sweep is due.
+// Everything here is in memory: a restart indexes every market once and starts with no pause.
+// It never sleeps through a pause: a held pass returns at once, so the tick keeps its own
+// cadence.
 import { errorSummary } from '@horagon/sdk'
 import type { Logger } from 'pino'
 import type { Alerter } from './alerts'
@@ -14,8 +15,15 @@ import type { Alerter } from './alerts'
 export const BACKOFF = { baseMs: 30_000, capMs: 600_000, jitter: 0.2 }
 /** A pause streak longer than this pages a person. */
 export const RATE_LIMIT_PAGE_AFTER_MS = 15 * 60_000
-/** The least time between two getSignaturesForAddress calls. */
-export const SIGNATURES_SPACING_MS = 200
+/**
+ * The least time between two getSignaturesForAddress calls, from the indexer and the ATA watch
+ * together: at most 29 in any 10 s. The public devnet RPC allows 40 calls of one method per 10 s
+ * per IP, and that limit is the one behind the incident; the margin covers a restart, which
+ * forgets the last call.
+ */
+export const SIGNATURES_SPACING_MS = 350
+/** The same for the ATA watch's getTransaction calls, which the RPC counts apart. */
+export const TRANSACTION_SPACING_MS = 350
 /** After this long into a pass no further market is started; the rest go first next pass. */
 export const PASS_BUDGET_MS = 3_000
 /** A market's signatures are read at least this often even when its account did not change. */
@@ -75,7 +83,11 @@ export class IndexPace {
   private until = 0
   /** The first rate limit since the last clean pass; null when there is none. */
   private since: number | null = null
-  private lastSignatures = Number.NEGATIVE_INFINITY
+  /** When (ms) the last call of each spaced method was made. */
+  private readonly lastCall = {
+    signatures: Number.NEGATIVE_INFINITY,
+    transaction: Number.NEGATIVE_INFINITY,
+  }
   /** Per market: the hash of its account and mints and when (s) it was last indexed in full. */
   private readonly marks = new Map<string, { hash: string | undefined; at: number }>()
 
@@ -124,10 +136,19 @@ export class IndexPace {
   }
 
   /** Waits until the last getSignaturesForAddress is at least SIGNATURES_SPACING_MS old. */
-  async spaceSignatures(): Promise<void> {
-    const wait = this.lastSignatures + SIGNATURES_SPACING_MS - this.clock()
+  spaceSignatures(): Promise<void> {
+    return this.space('signatures', SIGNATURES_SPACING_MS)
+  }
+
+  /** Waits until the last getTransaction is at least TRANSACTION_SPACING_MS old. */
+  spaceTransactions(): Promise<void> {
+    return this.space('transaction', TRANSACTION_SPACING_MS)
+  }
+
+  private async space(method: 'signatures' | 'transaction', spacingMs: number): Promise<void> {
+    const wait = this.lastCall[method] + spacingMs - this.clock()
     if (wait > 0) await this.sleep(wait)
-    this.lastSignatures = this.clock()
+    this.lastCall[method] = this.clock()
   }
 
   /**

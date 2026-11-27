@@ -744,7 +744,7 @@ describe('watchSponsoredAtas', () => {
       expect(await pace.held('ata-watch')).toBe(true)
     })
 
-    it('spaces its signature reads 200 ms apart on the pace clock', async () => {
+    it('spaces its signature reads 350 ms apart on the pace clock', async () => {
       await record(3)
       const at: number[] = []
       const deps = depsWith(
@@ -758,7 +758,40 @@ describe('watchSponsoredAtas', () => {
       )
       await watchSponsoredAtas(deps)
       expect(at).toHaveLength(3)
-      expect(at.slice(1).map((x, i) => x - (at[i] ?? 0))).toEqual([200, 200])
+      expect(at.slice(1).map((x, i) => x - (at[i] ?? 0))).toEqual([350, 350])
+    })
+
+    it('keeps signature and transaction reads to 30 per 10 s each, after an index pass, over a full batch of closed ATAs', async () => {
+      // The worst pass: 100 closed rows still to trace (the first pass after a night of claims,
+      // or the first after a deploy), each with some noise before its close, right after an
+      // index pass that read signatures on the same pace.
+      await record(100)
+      const sigAt: number[] = []
+      const txAt: number[] = []
+      for (let i = 0; i < 9; i++) {
+        await pace.spaceSignatures()
+        sigAt.push(t)
+      }
+      const deps = depsWith(
+        {
+          getSignaturesForAddress: async () => {
+            sigAt.push(t)
+            return ['n1', 'n2', 'n3'].map((signature) => ({ signature, err: null }))
+          },
+          getTransaction: async () => {
+            txAt.push(t)
+            return null
+          },
+        },
+        { pace, clock: () => t },
+      )
+      await watchSponsoredAtas(deps)
+      const busiest = (at: number[]) =>
+        Math.max(...at.map((t0) => at.filter((x) => x >= t0 && x < t0 + 10_000).length))
+      expect(sigAt.length).toBeGreaterThan(9)
+      expect(txAt.length).toBeGreaterThan(30)
+      expect(busiest(sigAt)).toBeLessThanOrEqual(30)
+      expect(busiest(txAt)).toBeLessThanOrEqual(30)
     })
   })
 })
