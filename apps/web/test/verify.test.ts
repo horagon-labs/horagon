@@ -62,6 +62,7 @@ interface Fields {
   uri?: string
   proposer?: PublicKey
   gameId?: string
+  endTs?: number
 }
 
 function gameMarketData(f: Fields = {}): Uint8Array {
@@ -76,7 +77,7 @@ function gameMarketData(f: Fields = {}): Uint8Array {
     .fixed(asciiField('CLE', 4, 'home'), 4)
     .fixed(asciiField('MEM', 4, 'away'), 4)
     .i64(1_795_000_000)
-    .i64(1_795_010_800)
+    .i64(f.endTs ?? 1_795_010_800)
     .u64(300_000_000n)
     .u8(f.status ?? STATUS.proposed)
     .option<number>(proposed ? (f.outcome === undefined ? 0 : f.outcome) : null, (w, v) => w.u8(v))
@@ -317,11 +318,32 @@ describe('verifyMarket (R6 part B: /verify/[market])', () => {
     )
     expect(r.checks.map((c) => c.id)).toEqual(['owner', 'address', 'market'])
     expect(r.status).toBe('challenged')
+    // The keeper's policy, not a program rule: the program would take the attestor's proposal too.
     expect(r.verdict).toEqual({
       kind: 'wait',
-      text: 'Under review: a guardian challenged the proposed result, so no evidence is on chain until a guardian proposes again.',
+      text: 'Under review: a guardian challenged the proposed result, so no evidence is on chain until a new proposal. The keeper leaves it to a guardian.',
     })
+    expect(r.verdict.text).not.toContain('a guardian proposes again')
     expect(r.curl).toBeNull()
+  })
+
+  it("says when a result can go on-chain from the account's own end_ts, before a proposal", async () => {
+    const wait = async (endTs?: number) =>
+      (
+        await verifyMarket(
+          deps({ gameMarket: gameMarketData({ status: STATUS.open, endTs }) }),
+          input,
+        )
+      ).verdict
+    // Today's markets end 3 h after tip-off; the shakedown ones of ET 11-24 and 11-25, 2 h 10 min.
+    expect(await wait()).toEqual({
+      kind: 'wait',
+      text: "Nothing proposed yet: a result can go on-chain from this market's end_ts, 3 h after tip-off.",
+    })
+    expect((await wait(1_795_007_800)).text).toBe(
+      "Nothing proposed yet: a result can go on-chain from this market's end_ts, 2 h 10 min after tip-off.",
+    )
+    expect((await wait()).text).not.toContain('automatically')
   })
 
   it('never builds a curl line that a quote in the URI could break', () => {

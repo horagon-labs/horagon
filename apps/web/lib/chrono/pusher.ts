@@ -5,7 +5,7 @@ import type { TradeAction } from '@horagon/sdk'
 import { parseAmount } from '@horagon/sdk/amount'
 import { countdown } from '../format'
 import type { Ready } from '../trade-view'
-import { CLOSED_LINE, NO_MARKET } from './copy'
+import { type CloseGame, closedLine, NO_MARKET } from './copy'
 import type { ErrorEffect } from './errors'
 import type { DialState } from './state'
 
@@ -28,6 +28,8 @@ export interface PusherInput {
   secsLeft: number | null
   /** The game is on the court or over: a missing market will not open (R5c M3). */
   started?: boolean
+  /** The game's tip-off and markets: the closed line names when a result can go on-chain. */
+  close?: CloseGame
 }
 
 /** A ready wallet known to hold nothing to spend; an unknown balance is not an empty one. */
@@ -48,7 +50,7 @@ export function pusherMode(i: PusherInput): PusherMode {
     case 'void':
       return { kind: 'none' }
     case 'closed':
-      return { kind: 'line', text: CLOSED_LINE }
+      return { kind: 'line', text: closedLine(i.close ?? {}) }
     case 'halted':
       return { kind: 'buy', locked: true, note: null }
     default:

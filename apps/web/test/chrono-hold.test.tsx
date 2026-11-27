@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest'
 import { HoldButton } from '../components/chrono/hold-button'
 import { Pusher } from '../components/chrono/pusher'
 import { errorEffect } from '../lib/chrono/errors'
+import { market } from '../lib/chrono/fixtures'
 import { type HoldInput, type HoldResult, hold, IDLE } from '../lib/chrono/hold'
 import { type PusherInput, type PusherMode, pusherMode } from '../lib/chrono/pusher'
 
@@ -156,7 +157,20 @@ describe('pusherMode (spec 3.2, 4.3, 6.1)', () => {
   it('says one line once trading is over, and nothing once there is a result', () => {
     expect(mode({ state: 'closed' })).toEqual({
       kind: 'line',
-      text: 'Trading closed. The result goes on-chain automatically 3 h after tip-off, then a guardian has 15 minutes to challenge it.',
+      text: "Trading closed. The result goes on-chain no earlier than the market's end time, then a guardian can challenge it before it is final.",
+    })
+    // With the game, the time comes from its own market's end_ts.
+    const tip = Date.parse('2026-11-28T00:00:00Z') / 1000
+    const close = (endTs: number) => ({
+      scheduledTipoff: '2026-11-28T00:00:00.000Z',
+      markets: [{ ...market(), endTs }],
+    })
+    expect(mode({ state: 'closed', close: close(tip + 10_800) })).toEqual({
+      kind: 'line',
+      text: 'Trading closed. The result goes on-chain no earlier than 3 h after tip-off, then a guardian can challenge it before it is final.',
+    })
+    expect(mode({ state: 'closed', close: close(tip + 7_800) })).toMatchObject({
+      text: expect.stringContaining('no earlier than 2 h 10 min after tip-off'),
     })
     expect(mode({ state: 'pre', secsLeft: null })).toEqual({
       kind: 'line',

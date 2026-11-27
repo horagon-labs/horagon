@@ -226,6 +226,7 @@ const PUSHER_BASE: PusherInput = {
   effect: null,
   failedAction: 'buy',
   secsLeft: 3_730,
+  close: game(),
 }
 /** The third entry is the side the crown is on (desktop): picked, then halted, reads disabled. */
 const PUSHER_SAMPLES: [string, Partial<PusherInput>, Side?][] = [

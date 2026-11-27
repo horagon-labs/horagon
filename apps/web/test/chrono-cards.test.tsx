@@ -130,7 +130,7 @@ describe('ResolutionCard (spec 3.2)', () => {
     const final = detail({ status: 'final', homeScore: 105, awayScore: 107, resolutions: [open] })
     const html = renderToStaticMarkup(<ResolutionCard game={final} state="closed" now={NOW} />)
     expect(html).toContain(
-      'Final MEM 107–105 CLE. The result goes on-chain automatically 3 h after tip-off, then a guardian has 15 minutes to challenge it.',
+      'Final MEM 107–105 CLE. The result goes on-chain no earlier than 2 h 10 min after tip-off, then a guardian can challenge it before it is final.',
     )
     expect(html).not.toContain('Winner market')
   })

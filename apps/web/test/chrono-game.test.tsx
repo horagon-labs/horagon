@@ -286,7 +286,7 @@ describe('dev gallery (spec 6.2)', () => {
     expect(html).toContain('closes in 4:12')
     expect(html).toContain('Get 1,000 play mUSDC')
     expect(html).toContain(
-      'Trading closed. The result goes on-chain automatically 3 h after tip-off, then a guardian has 15 minutes to challenge it.',
+      'Trading closed. The result goes on-chain no earlier than 2 h 10 min after tip-off, then a guardian can challenge it before it is final.',
     )
     expect(html).toContain('<dialog aria-label="Back CLE"')
   })
