@@ -94,6 +94,30 @@ describe('the horn (stop.ts)', () => {
     })
     expect(checkTrade({ ...open, hornFrame: false }).ok).toBe(true)
   })
+
+  it('never reads halftime or the end of Q1 to Q3 at 0:00 as the horn: it still trades', () => {
+    // ESPN halftime and the end of Q1 to Q3 read 0 s with the scores apart.
+    const open = market({ status: 'open' })
+    for (const period of [1, 2, 3]) {
+      const end = { ...horn, period }
+      expect(isHornFrame(end)).toBe(false)
+      expect(atBuzzer(end)).toBe(false)
+      expect(deriveDialState(end, open, NOW)).toBe('live')
+      expect(isClutch({ state: 'live', price: 0.5, game: end, enabled: true })).toBe(false)
+    }
+    const base = {
+      action: 'buy' as const,
+      amount: '10',
+      balance: '100',
+      shares: undefined,
+      marketStatus: 'open' as const,
+      gameStatus: 'live' as const,
+      hornFrame: isHornFrame({ ...horn, period: 2 }),
+      endTs: NOW + 600,
+      nowSecs: NOW,
+    }
+    expect(checkTrade(base).ok).toBe(true)
+  })
 })
 
 describe('the buzzer index and the Buzzer stop (stop.ts)', () => {

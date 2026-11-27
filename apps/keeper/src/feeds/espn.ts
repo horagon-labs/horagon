@@ -85,14 +85,17 @@ function points(score: string | undefined, optional: boolean): number | null {
 }
 
 /**
- * A live game's seconds left (`secsLeft`: under a second reads 1). 0 is the horn, and only ESPN's
- * end of a period reads 0. A game still in progress at 0.0 reads 1: free throws or a review at the
+ * A live game's seconds left (`secsLeft`: under a second reads 1). 0 is the horn of a period:
+ * ESPN's end of a period, halftime, or 0.0 in Q1 to Q3 (the web shows Half or End Q1). In Q4 or an
+ * overtime, a game not at ESPN's end of a period reads 1 at 0.0: free throws or a review at the
  * horn can tie the game, and overtime must find the market open. No clock is null, never 0: a
  * missing field must not read as the horn (R8).
  */
-function liveClock(s: { clock?: number; type: { name: string } }): number | null {
+function liveClock(s: { clock?: number; period: number; type: { name: string } }): number | null {
   if (s.type.name === 'STATUS_END_PERIOD') return 0
-  return s.clock === undefined ? null : Math.max(1, secsLeft(s.clock))
+  if (s.clock === undefined) return null
+  const left = secsLeft(s.clock)
+  return s.period >= 4 ? Math.max(1, left) : left
 }
 
 export interface ParseResult {

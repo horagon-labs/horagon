@@ -450,11 +450,12 @@ ssh "$HORAGON_VPS" systemctl --user stop horagon-agent
   market after the last one decided, wrapping around, so the markets late in the list (by
   `end_ts`, then address) get their turn on a busy night.
 - **The horn.** At the end of Q4 or an overtime, ESPN can show the game still live for up to about
-  two minutes before Final, and the model already reads 0 or 1. The keeper reads 0 s only from
-  ESPN's end of a period (`STATUS_END_PERIOD`). A game still in progress at 0.0 (free throws or a
-  review at the horn) reads 1 s, since a tie there goes to overtime. The agent skips a game that
-  reads period 4 or later at 0 s (skip reason `horn`), so it never buys a decided game before the
-  keeper halts its market.
+  two minutes before Final, and the model already reads 0 or 1. In Q4 or an overtime the keeper
+  reads 0 s only from ESPN's end of a period (`STATUS_END_PERIOD`). A game still in progress there
+  at 0.0 (free throws or a review at the horn) reads 1 s, since a tie there goes to overtime.
+  Halftime and 0.0 in Q1 to Q3 read 0 s (the board shows Half or End Q1), and only period 4 or
+  later at 0 s is ever the horn. The agent skips a game that reads period 4 or later at 0 s (skip
+  reason `horn`), so it never buys a decided game before the keeper halts its market.
 - **When it cannot run.** A start that fails (a bad `AGENT_*` line, the key file, the cluster
   check, a database that does not answer), or a loop that ends on an error, logs
   `agent failed to start: ...` (or `agent stopped on an error: ...`), pages `agent-down` and

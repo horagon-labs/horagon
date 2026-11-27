@@ -26,6 +26,11 @@ describe('gameClock', () => {
     expect(clock({ period: 3, clockSecs: 312 })).toBe('Q3 5:12')
     expect(clock({ period: 2, clockSecs: 0 })).toBe('Half')
     expect(clock({ period: 4, clockSecs: 0 })).toBe('End Q4')
+    // ESPN halftime and the end of Q1 or Q3 read 0 s (keeper feeds/espn.ts).
+    expect(clock({ period: 1, clockSecs: 0 })).toBe('End Q1')
+    expect(clock({ period: 3, clockSecs: 0 })).toBe('End Q3')
+    // Free throws at 0.0 of Q4 or an overtime read 1 s: time left, not the horn.
+    expect(clock({ period: 4, clockSecs: 1 })).toBe('Q4 0:01')
     expect(clock({ period: 5, clockSecs: 65 })).toBe('OT 1:05')
     expect(clock({ period: 6, clockSecs: null })).toBe('2OT')
     expect(clock({ status: 'final', period: 4 })).toBe('Final')
