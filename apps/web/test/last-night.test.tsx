@@ -235,3 +235,14 @@ describe('the strip markup (R10)', () => {
     expect(read('lib', 'server', 'api.ts')).toMatch(/export function initialLastNight\(\)/)
   })
 })
+
+describe('the dev gallery (R10)', () => {
+  it('draws the strip from a fixture night, outside the client gallery', () => {
+    const src = readFileSync(
+      join(import.meta.dirname, '..', 'app', 'dev', 'chrono', 'page.tsx'),
+      'utf8',
+    )
+    expect(src).toContain('<LastNightStrip')
+    expect(src).toContain('data-dev-last-night')
+  })
+})
