@@ -1,4 +1,4 @@
-import { and, asc, countDistinct, desc, eq, gte, inArray, isNull, ne, or } from 'drizzle-orm'
+import { and, asc, countDistinct, desc, eq, gte, inArray, isNull, max, ne, or } from 'drizzle-orm'
 import type { Db } from './client'
 import { markets, pricePoints, redeemsClaims, trades } from './schema'
 
@@ -104,6 +104,22 @@ export async function listMarketTrades(db: Db, marketKeys: string[]): Promise<Tr
     .from(trades)
     .where(inArray(trades.market, marketKeys))
     .orderBy(asc(trades.blockTime), asc(trades.sig), asc(trades.ixIndex))
+}
+
+/**
+ * The slot of each market's newest indexed trade, for the markets that have one. The indexer
+ * writes a market's cursor after its rows, so this is a lower bound of the cursor's slot.
+ */
+export async function latestTradeSlots(db: Db, marketKeys: string[]): Promise<Map<string, bigint>> {
+  const out = new Map<string, bigint>()
+  if (marketKeys.length === 0) return out
+  const rows = await db
+    .select({ market: trades.market, slot: max(trades.slot) })
+    .from(trades)
+    .where(inArray(trades.market, marketKeys))
+    .groupBy(trades.market)
+  for (const row of rows) if (row.slot !== null) out.set(row.market, row.slot)
+  return out
 }
 
 /** Everything a wallet did on Horagon markets, oldest first: the input of the position view. */

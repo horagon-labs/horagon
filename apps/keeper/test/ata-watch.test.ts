@@ -31,6 +31,8 @@ import pino, { type Logger } from 'pino'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { Alerter } from '../src/alerts'
 import { type AtaWatchDeps, closeOf, watchSponsoredAtas } from '../src/ata-watch'
+import { IndexPace } from '../src/index-pace'
+import { IndexReads } from '../src/index-reads'
 
 const sponsor = Keypair.generate().publicKey
 const mint = Keypair.generate().publicKey
@@ -660,5 +662,160 @@ describe('watchSponsoredAtas', () => {
     await watchSponsoredAtas(deps)
     expect(sent).toHaveLength(1)
     expect(await atasClosedAway(h.db, f.wallet.toBase58(), sponsor.toBase58())).toBe(0)
+  })
+  describe('under the shared IndexPace', () => {
+    const RATE_LIMIT = () =>
+      new Error('429 Too Many Requests: Too many requests for a specific RPC call')
+    let t: number
+    let pace: IndexPace
+    let paceWarns: Array<{ obj: Record<string, unknown>; msg: string }>
+    beforeEach(() => {
+      t = 1_000_000
+      paceWarns = []
+      pace = new IndexPace({
+        log: {
+          warn: (obj: Record<string, unknown>, msg: string) => paceWarns.push({ obj, msg }),
+        } as unknown as Logger,
+        clock: () => t,
+        random: () => 0,
+        sleep: async (ms) => {
+          t += ms
+        },
+      })
+    })
+
+    /** The deps of `depsWith`, reading through IndexReads over one endpoint with `pace`. */
+    const paced = (
+      connection: Record<string, unknown>,
+      extra: Partial<AtaWatchDeps> = {},
+    ): AtaWatchDeps => {
+      const d = depsWith(connection, extra)
+      const c = d.connection as NonNullable<AtaWatchDeps['connection']>
+      const { connection: _direct, ...rest } = d
+      return {
+        ...rest,
+        reads: new IndexReads({
+          endpoints: [{ name: 'HORAGON_RPC_URL', host: 'rpc.test', connection: () => c, pace }],
+          log: d.log,
+          alerts: d.alerts,
+          clock: () => t,
+        }),
+      }
+    }
+
+    it('makes no read while the indexer is paused, and leaves the rows unchecked', async () => {
+      await record(2)
+      pace.down('index', RATE_LIMIT())
+      const calls: string[] = []
+      const deps = paced(
+        {
+          getMultipleAccountsInfo: async (keys: PublicKey[]) => {
+            calls.push('accounts')
+            return keys.map(() => null)
+          },
+          getSignaturesForAddress: async () => {
+            calls.push('signatures')
+            return []
+          },
+        },
+        {},
+      )
+      expect(await watchSponsoredAtas(deps)).toEqual({ checked: 0, closed: 0, flagged: 0 })
+      expect(calls).toEqual([])
+      const rows = await sponsoredAtasToCheck(h.db)
+      expect(rows.every((r) => r.checkedAt === null)).toBe(true)
+      t += 30_000
+      expect(await watchSponsoredAtas(deps)).toEqual({ checked: 2, closed: 2, flagged: 2 })
+    })
+
+    it('stops the pass on a rate-limited signature read and pauses the indexer too', async () => {
+      await record(3)
+      const asked: string[] = []
+      const deps = paced(
+        {
+          getSignaturesForAddress: async (k: PublicKey) => {
+            asked.push(k.toBase58())
+            throw RATE_LIMIT()
+          },
+        },
+        {},
+      )
+      expect(await watchSponsoredAtas(deps)).toEqual({ checked: 3, closed: 0, flagged: 0 })
+      expect(asked).toHaveLength(1)
+      expect(paceWarns).toHaveLength(1)
+      expect(paceWarns[0]?.obj).toMatchObject({ source: 'ata-watch', delayMs: 30_000 })
+      expect(pace.held()).toBe(true)
+      // Nothing was closed or flagged: every row stays open.
+      expect(await sponsoredAtasToCheck(h.db)).toHaveLength(3)
+    })
+
+    it('pauses on a rate-limited account read', async () => {
+      await record(1)
+      const deps = paced(
+        {
+          getMultipleAccountsInfo: async () => {
+            throw RATE_LIMIT()
+          },
+        },
+        {},
+      )
+      expect(await watchSponsoredAtas(deps)).toEqual({ checked: 0, closed: 0, flagged: 0 })
+      expect(pace.held()).toBe(true)
+    })
+
+    it('spaces its signature reads 350 ms apart on the pace clock', async () => {
+      await record(3)
+      const at: number[] = []
+      const deps = paced(
+        {
+          getSignaturesForAddress: async () => {
+            at.push(t)
+            return []
+          },
+        },
+        {},
+      )
+      await watchSponsoredAtas(deps)
+      expect(at).toHaveLength(3)
+      expect(at.slice(1).map((x, i) => x - (at[i] ?? 0))).toEqual([350, 350])
+    })
+
+    it('keeps signature and transaction reads to 30 per 10 s each, after an index pass on the same budgets, over a full batch of closed ATAs', async () => {
+      // The worst pass: 100 closed rows still to trace (the first pass after a night of claims,
+      // or the first after a deploy), each with some noise before its close, right after an
+      // index pass that read signatures on the same pace.
+      await record(100)
+      const sigAt: number[] = []
+      const txAt: number[] = []
+      for (let i = 0; i < 9; i++) {
+        await pace.spaceSignatures()
+        sigAt.push(t)
+      }
+      // ... and two transaction batches of 10 from the same budget.
+      for (let i = 0; i < 2; i++) {
+        expect(await pace.takeTransactions(10, Number.POSITIVE_INFINITY)).toBe(true)
+        for (let k = 0; k < 10; k++) txAt.push(t)
+      }
+      const deps = paced(
+        {
+          getSignaturesForAddress: async () => {
+            sigAt.push(t)
+            return ['n1', 'n2', 'n3'].map((signature) => ({ signature, err: null }))
+          },
+          getTransaction: async () => {
+            txAt.push(t)
+            return null
+          },
+        },
+        { clock: () => t },
+      )
+      await watchSponsoredAtas(deps)
+      const busiest = (at: number[]) =>
+        Math.max(...at.map((t0) => at.filter((x) => x >= t0 && x < t0 + 10_000).length))
+      expect(sigAt.length).toBeGreaterThan(9)
+      expect(txAt.length).toBeGreaterThan(30)
+      expect(busiest(sigAt)).toBeLessThanOrEqual(30)
+      expect(busiest(txAt)).toBeLessThanOrEqual(30)
+    })
   })
 })

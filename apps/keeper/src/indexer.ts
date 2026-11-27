@@ -2,12 +2,18 @@
 // than a day ago), decoded into trades and redeems/claims from token balance deltas, plus one
 // price point per open market. Only top-level pm-AMM instructions are user activity; the same
 // instructions inside a Horagon transaction are the keeper's own CPIs. Token accounts that a
-// sponsored transaction created for its user are recorded for `ata-watch.ts`.
+// sponsored transaction created for its user are recorded for `ata-watch.ts`. With IndexReads
+// (`index-reads.ts`, the keeper's), one account read per 100 accounts drives the pass: a
+// market's signatures are read only when its account or mints changed or its sweep is due, every
+// read is paced and fails over to the next RPC, and when every RPC is paused the pass stops and
+// the next ones are held.
+import { createHash } from 'node:crypto'
 import {
   type Db,
   insertClaims,
   insertPricePoint,
   insertTrades,
+  latestTradeSlots,
   listIndexableMarkets,
   type MarketRow,
   recordSponsoredAtas,
@@ -37,6 +43,14 @@ import {
 import type { Logger } from 'pino'
 import type { Alerter } from './alerts'
 import { base58Decode } from './base58'
+import { isRateLimited, PASS_BUDGET_MS, SWEEP_SECS, TRANSACTION_CHUNK } from './index-pace'
+import {
+  directPass,
+  EveryEndpointDown,
+  type IndexPass,
+  type IndexReads,
+  NOT_NOW,
+} from './index-reads'
 
 type TradeInsert = Parameters<typeof insertTrades>[1][number] & { botMemo: boolean }
 type ClaimInsert = Parameters<typeof insertClaims>[1][number]
@@ -356,7 +370,8 @@ const defaultStops = new Map<string, StopState>()
 
 export interface IndexerDeps {
   db: Db
-  connection: Connection
+  /** Without `reads`: every read straight on this connection, every market every pass. */
+  connection?: Connection
   collateralMint: PublicKey
   authority: PublicKey
   alerts: Alerter
@@ -366,62 +381,215 @@ export interface IndexerDeps {
   sponsor?: PublicKey
   /** Stop counters per market; defaults to a module-level map. */
   stops?: Map<string, StopState>
+  /**
+   * The keeper's index reads (`main.ts`): paced, change-driven, failing over between RPCs.
+   * Without them every market is read on every pass through `connection`, unspaced, and a rate
+   * limit only stops the pass.
+   */
+  reads?: IndexReads<Connection>
 }
 
-/** One pass over every indexable market. Returns how many rows were written. */
+/** Accounts per getMultipleAccountsInfo call (the RPC maximum). */
+const ACCOUNTS_PER_READ = 100
+/** The stop of a market whose signature list could not be read (not a signature). */
+const SIGNATURE_LIST = '(signature list)'
+/**
+ * The stop of a market whose signature list came from an RPC behind its cursor (not a
+ * signature): the newest signature listed is older than the one the cursor was written to.
+ */
+const RPC_BEHIND = '(index RPC behind)'
+
+type AccountInfos = Awaited<ReturnType<Connection['getMultipleAccountsInfo']>>
+
+/**
+ * A read of the pass was rate-limited (or every RPC was paused) after the market's progress was
+ * saved: the pass stops.
+ */
+class RateLimitedPass extends Error {
+  override name = 'RateLimitedPass'
+  constructor(readonly error: unknown) {
+    super('rate limited')
+  }
+}
+
+/**
+ * The hash of a market's account and its two outcome mints. claim_winnings and redeem_pair leave
+ * the market account as it was but burn shares, so a mint's supply is what shows them.
+ */
+function accountsHash(infos: AccountInfos): string {
+  const h = createHash('sha256')
+  for (const info of infos) {
+    if (!info) h.update('none;')
+    else h.update(`${info.data.length}:`).update(info.data).update(';')
+  }
+  return h.digest('base64')
+}
+
+/**
+ * One pass over the indexable markets. Returns how many rows were written; `paused` when the
+ * reads were held (every RPC paused: no read at all).
+ *
+ * First one getMultipleAccountsInfo per 100 accounts (each market and its yes and no mints): the
+ * open markets' price points and each market's hash of the three. With IndexReads, only the
+ * markets due (`MarketMarks.due`: not indexed in full since start, account changed, or sweep due:
+ * 60 s open, 5 min otherwise) are asked for their signatures, least recently indexed first, and
+ * none is started once the pass is PASS_BUDGET_MS old. When every RPC is paused the pass stops
+ * and the next ones are held; without IndexReads a rate limit only stops the pass.
+ */
 export async function indexOnce(
   deps: IndexerDeps,
+): Promise<{ trades: number; claims: number; prices: number; paused?: true }> {
+  const reads = deps.reads
+  let pass: IndexPass<Connection> | null
+  if (reads) pass = await reads.begin('index')
+  else if (deps.connection) pass = directPass(deps.connection)
+  else throw new Error('indexOnce needs reads or a connection')
+  if (!pass) return { trades: 0, claims: 0, prices: 0, paused: true }
+  try {
+    return await indexPass(deps, pass)
+  } finally {
+    pass.end()
+  }
+}
+
+/** A read that stops the pass: every RPC paused, or (without IndexReads) a rate limit. */
+const stopsPass = (err: unknown) => err instanceof EveryEndpointDown || isRateLimited(err)
+
+async function indexPass(
+  deps: IndexerDeps,
+  pass: IndexPass<Connection>,
 ): Promise<{ trades: number; claims: number; prices: number }> {
+  const marks = deps.reads?.marks
+  const clock = deps.reads?.clock
   const now = deps.now()
   const markets = await listIndexableMarkets(deps.db, new Date(now * 1000))
   let trades = 0
   let claims = 0
   let prices = 0
-  for (const m of markets) {
+  const isOpen = (m: MarketRow) => m.status === 'open' && m.endTs.getTime() / 1000 > now
+  // With IndexReads the endpoint's pace has logged it (and IndexReads pages when it is long).
+  const stopPass = (market: string | undefined, err: unknown) => {
+    if (deps.reads) return
+    deps.log.warn(
+      { ...(market ? { market } : {}), error: errorSummary(err).message },
+      'index reads rate-limited; pass stopped',
+    )
+  }
+
+  // Every market's account and mints: the open markets' prices, and what changed since the last
+  // pass (a swap or liquidity change writes the market; a claim or redeem only the mints).
+  const hashes = new Map<string, string>()
+  if (markets.length > 0) {
     try {
-      const r = await indexMarket(deps, m)
-      trades += r.trades
-      claims += r.claims
+      const keys = markets.flatMap((m) => [m.pubkey, m.yesMint, m.noMint])
+      const infos: AccountInfos = []
+      for (let i = 0; i < keys.length; i += ACCOUNTS_PER_READ) {
+        const chunk = keys.slice(i, i + ACCOUNTS_PER_READ)
+        const got = await pass.accounts((c) =>
+          c.getMultipleAccountsInfo(
+            chunk.map((k) => new PublicKey(k)),
+            'confirmed',
+          ),
+        )
+        for (const j of chunk.keys()) infos.push(got[j] ?? null)
+      }
+      for (const [j, m] of markets.entries()) {
+        const own = infos.slice(3 * j, 3 * j + 3)
+        hashes.set(m.pubkey, accountsHash(own))
+        if (isOpen(m)) prices += await pricePoint(deps, m, own[0] ?? null, now)
+      }
     } catch (err) {
-      deps.log.warn({ market: m.pubkey, error: errorSummary(err).message }, 'index failed')
+      if (stopsPass(err)) {
+        stopPass(undefined, err)
+        return { trades, claims, prices }
+      }
+      deps.log.warn({ error: errorSummary(err).message }, 'price read failed')
     }
   }
-  const open = markets.filter((m) => m.status === 'open' && m.endTs.getTime() / 1000 > now)
-  if (open.length > 0) {
-    let infos: Awaited<ReturnType<Connection['getMultipleAccountsInfo']>>
-    try {
-      infos = await deps.connection.getMultipleAccountsInfo(
-        open.map((m) => new PublicKey(m.pubkey)),
-        'confirmed',
+
+  let due = markets
+  if (marks) {
+    marks.retain(new Set(markets.map((m) => m.pubkey)))
+    const sweep = (m: MarketRow) => (isOpen(m) ? SWEEP_SECS.open : SWEEP_SECS.closed)
+    due = markets
+      .filter((m) => marks.due(m.pubkey, hashes.get(m.pubkey), sweep(m), now))
+      .sort((a, b) => marks.lastIndexedAt(a.pubkey) - marks.lastIndexedAt(b.pubkey))
+    // After a start no cursor slot is known yet: the slot of each market's newest trade stands in
+    // (the cursor is written after its rows, so it is at or past it), one query for them all.
+    const unseeded = due.filter((m) => m.indexCursor && marks.needsCursorSlot(m.pubkey))
+    if (unseeded.length > 0) {
+      const slots = await latestTradeSlots(
+        deps.db,
+        unseeded.map((m) => m.pubkey),
       )
-    } catch (err) {
-      deps.log.warn({ error: errorSummary(err).message }, 'price read failed')
-      return { trades, claims, prices }
-    }
-    for (const [i, info] of infos.entries()) {
-      const m = open[i]
-      if (!info || !m) continue
-      try {
-        const live = liveMarket(decodeMarketAccount(info), now)
-        if (live.price === null) continue
-        await insertPricePoint(deps.db, {
-          market: m.pubkey,
-          ts: new Date(now * 1000),
-          price: live.price,
-        })
-        prices++
-      } catch (err) {
-        deps.log.warn({ market: m.pubkey, error: errorSummary(err).message }, 'price point failed')
+      for (const m of unseeded) {
+        const slot = slots.get(m.pubkey)
+        marks.seedCursorSlot(m.pubkey, slot === undefined ? null : Number(slot))
       }
+    }
+  }
+  const stops = deps.stops ?? defaultStops
+  const startedAt = clock?.() ?? 0
+  for (const [i, m] of due.entries()) {
+    if (clock && i > 0 && clock() - startedAt >= PASS_BUDGET_MS) {
+      deps.log.debug?.({ left: due.length - i }, 'index pass budget spent; the rest go next pass')
+      break
+    }
+    try {
+      const left = () => Math.max(0, PASS_BUDGET_MS - ((clock?.() ?? 0) - startedAt))
+      const r = await indexMarket(deps, pass, m, left)
+      trades += r.trades
+      claims += r.claims
+      if (r.partial) {
+        // The transaction budget ran out: the market goes on next pass, after the markets that
+        // waited longer, and nothing else is started (it would only read signatures).
+        marks?.partial(m.pubkey, now)
+        break
+      }
+      // Indexed in full unless it stopped at something it could not read.
+      if (stops.has(m.pubkey)) marks?.forget(m.pubkey)
+      else marks?.indexed(m.pubkey, hashes.get(m.pubkey), now)
+    } catch (err) {
+      marks?.forget(m.pubkey)
+      if (err instanceof RateLimitedPass || stopsPass(err)) {
+        stopPass(m.pubkey, err instanceof RateLimitedPass ? err.error : err)
+        break
+      }
+      deps.log.warn({ market: m.pubkey, error: errorSummary(err).message }, 'index failed')
     }
   }
   return { trades, claims, prices }
 }
 
+/** The price point of an open market from its account; 1 when one was written. */
+async function pricePoint(
+  deps: IndexerDeps,
+  m: MarketRow,
+  info: AccountInfos[number],
+  now: number,
+): Promise<number> {
+  if (!info) return 0
+  try {
+    const live = liveMarket(decodeMarketAccount(info), now)
+    if (live.price === null) return 0
+    await insertPricePoint(deps.db, {
+      market: m.pubkey,
+      ts: new Date(now * 1000),
+      price: live.price,
+    })
+    return 1
+  } catch (err) {
+    deps.log.warn({ market: m.pubkey, error: errorSummary(err).message }, 'price point failed')
+    return 0
+  }
+}
+
 /**
- * A market stopped at `sig`: warn at most once a minute per market; from STUCK_AFTER stops on,
- * send `index-stuck` on every stop. The alerter's dedupe throttles it, and re-arms the key after
- * a failed delivery, which is why this must not be a one-shot.
+ * A market stopped at `sig` (or at SIGNATURE_LIST: its signatures could not be listed; or at
+ * RPC_BEHIND: they were listed by an RPC behind the cursor): warn at
+ * most once a minute per market; from STUCK_AFTER stops on, send `index-stuck` on every stop.
+ * The alerter's dedupe throttles it, and re-arms the key after a failed delivery, which is why
+ * this must not be a one-shot.
  */
 async function noteStop(deps: IndexerDeps, m: MarketRow, sig: string): Promise<void> {
   const stops = deps.stops ?? defaultStops
@@ -435,44 +603,88 @@ async function noteStop(deps: IndexerDeps, m: MarketRow, sig: string): Promise<v
     st.warnedAt = now
     deps.log.warn(
       { market: m.pubkey, sig, stops: st.count },
-      'transaction not readable yet; indexing waits',
+      sig === SIGNATURE_LIST
+        ? 'signature list not readable; indexing waits'
+        : sig === RPC_BEHIND
+          ? 'index RPC behind the cursor; indexing waits'
+          : 'transaction not readable yet; indexing waits',
     )
   }
   if (st.count >= STUCK_AFTER) {
+    const what =
+      sig === SIGNATURE_LIST
+        ? `its signature list has been unreadable for ${st.count} passes`
+        : sig === RPC_BEHIND
+          ? `the index RPC has been behind its cursor for ${st.count} passes`
+          : `signature ${sig} has been unreadable for ${st.count} passes`
     await deps.alerts.send(
       `index-stuck:${m.pubkey}`,
-      `Indexing of ${m.gameId} (market ${m.pubkey}) is stuck: signature ${sig} has been unreadable for ${st.count} passes`,
+      `Indexing of ${m.gameId} (market ${m.pubkey}) is stuck: ${what}`,
     )
   }
 }
 
+/**
+ * One market from its cursor. With IndexReads, each batch of transactions comes out of the
+ * transaction budget, waited for no longer than `budgetLeft()`; when it would come later, or the
+ * pass budget is spent and a batch was read, the scan stops there (`partial`), the cursor at the
+ * last transaction read. A listing from an RPC behind the cursor (`MarketMarks.cursorSlot`) is not
+ * read at all: the cursor never moves back.
+ */
 async function indexMarket(
   deps: IndexerDeps,
+  pass: IndexPass<Connection>,
   m: MarketRow,
-): Promise<{ trades: number; claims: number }> {
+  budgetLeft: () => number = () => 0,
+): Promise<{ trades: number; claims: number; partial?: true }> {
   const stops = deps.stops ?? defaultStops
+  const marks = deps.reads?.marks
   const address = new PublicKey(m.pubkey)
   const sigs: string[] = []
+  /** Each listed signature's slot, for the slot of the signature the cursor is written to. */
+  const slots = new Map<string, number>()
   let newestFetched: string | undefined
   let before: string | undefined
-  // Newest first; page back until the cursor (the newest signature already indexed).
-  for (;;) {
-    const page = await deps.connection.getSignaturesForAddress(
-      address,
-      {
-        limit: 1000,
-        ...(before ? { before } : {}),
-        ...(m.indexCursor ? { until: m.indexCursor } : {}),
-      },
-      'confirmed',
-    )
-    newestFetched ??= page[0]?.signature
-    sigs.push(...page.filter((s) => s.err === null).map((s) => s.signature))
-    if (page.length < 1000) break
-    before = page.at(-1)?.signature
+  // Newest first; page back until the cursor (the newest signature already indexed). A read
+  // that stops the pass (every RPC paused, a rate limit without IndexReads) is not the market's;
+  // any other failure counts toward index-stuck.
+  try {
+    for (;;) {
+      const page = await pass.signatures((c) =>
+        c.getSignaturesForAddress(
+          address,
+          {
+            limit: 1000,
+            ...(before ? { before } : {}),
+            ...(m.indexCursor ? { until: m.indexCursor } : {}),
+          },
+          'confirmed',
+        ),
+      )
+      // An RPC that does not hold the cursor signature yet (a failover to one behind) answers
+      // `until` with older signatures: nothing is read, the cursor stays, the market is asked
+      // again next pass. Counted as a stop, so one that stays behind reaches index-stuck.
+      const known = m.indexCursor ? marks?.cursorSlot(m.pubkey) : undefined
+      const newest = page[0]?.slot
+      if (!before && known !== undefined && typeof newest === 'number' && newest < known) {
+        await noteStop(deps, m, RPC_BEHIND)
+        return { trades: 0, claims: 0 }
+      }
+      for (const s of page) if (typeof s.slot === 'number') slots.set(s.signature, s.slot)
+      newestFetched ??= page[0]?.signature
+      sigs.push(...page.filter((s) => s.err === null).map((s) => s.signature))
+      if (page.length < 1000) break
+      before = page.at(-1)?.signature
+    }
+  } catch (err) {
+    if (!stopsPass(err)) await noteStop(deps, m, SIGNATURE_LIST)
+    throw err
   }
-  // Nothing fetched: the market did not move past a signature, so a stall counter stays.
+  // Nothing fetched: the market did not move past a signature, so a stall counter stays; one
+  // for an unreadable signature list does not, the list was read.
   if (!newestFetched) {
+    const sig = stops.get(m.pubkey)?.sig
+    if (sig === SIGNATURE_LIST || sig === RPC_BEHIND) stops.delete(m.pubkey)
     return { trades: 0, claims: 0 }
   }
   const ordered = sigs.reverse()
@@ -483,15 +695,38 @@ async function indexMarket(
   let claims = 0
   let externalLp = false
   const skipped: Array<{ sig: string; ixIndex: number }> = []
-  scan: for (let i = 0; i < ordered.length; i += 50) {
-    const chunk = ordered.slice(i, i + 50)
+  let rateLimited: { error: unknown } | undefined
+  let partial = false
+  scan: for (let i = 0; i < ordered.length; i += TRANSACTION_CHUNK) {
+    // The pass budget is spent and this market has read a batch: it goes on next pass. The
+    // transaction budget alone does not bound it: a batch that takes 3.5 s or more to answer and
+    // write leaves the transaction clock free, and the market would read its whole backlog.
+    if (deps.reads && i > 0 && budgetLeft() <= 0) {
+      partial = true
+      break
+    }
+    const chunk = ordered.slice(i, i + TRANSACTION_CHUNK)
     let answer: Array<VersionedTransactionResponse | null>
     try {
-      answer = await deps.connection.getTransactions(chunk, {
-        maxSupportedTransactionVersion: 0,
-        commitment: 'confirmed',
-      })
+      const got = await pass.transactions(chunk.length, budgetLeft(), (c) =>
+        c.getTransactions(chunk, { maxSupportedTransactionVersion: 0, commitment: 'confirmed' }),
+      )
+      if (got === NOT_NOW) {
+        partial = true
+        break
+      }
+      answer = got
     } catch (err) {
+      if (err instanceof EveryEndpointDown) {
+        // Every RPC is paused: not this market's fault, so no index-stuck count. The cursor
+        // keeps what earlier chunks read, and the pass stops.
+        deps.log.warn(
+          { market: m.pubkey, sig: chunk[0], size: chunk.length, error: err.message },
+          'transaction batch read failed',
+        )
+        rateLimited = { error: err }
+        break
+      }
       // web3.js fails the whole batch on one error entry (a rate limit, a node hiccup). Read it
       // as nothing available: the scan stops at the chunk's first signature, the cursor keeps
       // what earlier chunks read, and a market that keeps failing reaches index-stuck.
@@ -499,6 +734,8 @@ async function indexMarket(
         { market: m.pubkey, sig: chunk[0], size: chunk.length, error: errorSummary(err).message },
         'transaction batch read failed',
       )
+      // A rate limit also stops the pass, once this market's progress is saved.
+      if (isRateLimited(err)) rateLimited = { error: err }
       answer = []
     }
     const txs = inRequestOrder(chunk, answer)
@@ -547,15 +784,17 @@ async function indexMarket(
     }
   }
   if (stoppedAt) await noteStop(deps, m, stoppedAt)
-  else stops.delete(m.pubkey)
+  else if (!partial && !rateLimited) stops.delete(m.pubkey)
   // Without a stop everything fetched is done, failed signatures included, so a market with
   // failing swaps does not page through the same failures every tick.
-  const cursor = stoppedAt ? processed : newestFetched
+  const cursor = stoppedAt || partial || rateLimited ? processed : newestFetched
   if (cursor) {
     await updateMarket(deps.db, m.pubkey, {
       indexCursor: cursor,
       ...(externalLp && !m.externalLp ? { externalLp: true } : {}),
     })
+    const slot = slots.get(cursor)
+    if (slot !== undefined) marks?.cursorAt(m.pubkey, slot)
   }
   if (externalLp && !m.externalLp) {
     await deps.alerts.send(
@@ -563,5 +802,6 @@ async function indexMarket(
       `External liquidity added to ${m.gameId}; the pool is no longer Horagon's alone`,
     )
   }
-  return { trades, claims }
+  if (rateLimited) throw new RateLimitedPass(rateLimited.error)
+  return { trades, claims, ...(partial ? { partial: true as const } : {}) }
 }
