@@ -2,8 +2,11 @@
 // replay of a recorded game both produce this shape.
 export type FeedStatus = 'scheduled' | 'live' | 'final' | 'postponed' | 'canceled'
 
+/** The leagues a feed reports: the NBA, and the Practice process's replays (R8). */
+export type League = 'NBA' | 'PRACTICE'
+
 export interface FeedGame {
-  league: 'NBA'
+  league: League
   /** The provider's event id (ESPN event id in Tier 1). */
   externalId: string
   /** The league's date for the game, US Eastern, YYYY-MM-DD. */
@@ -22,6 +25,11 @@ export interface FeedGame {
   periods: Array<[number, number]>
   /** NBA Cup game (featured first, spec 6.3). */
   cup: boolean
+  /**
+   * The public page of this game's data, when the feed has one per game (a Practice recording,
+   * R8): a draft cites it instead of the snapshot's URL.
+   */
+  sourceUrl?: string
 }
 
 export interface FeedSnapshot {
@@ -42,7 +50,7 @@ export interface Feed {
   fetchDay(gameDate: string): Promise<FeedSnapshot>
 }
 
-/** `nba-<externalId>`, the id used by the DB, API and evidence. */
+/** `nba-<externalId>` (or `practice-<externalId>`), the id used by the DB, API and evidence. */
 export const gameIdOf = (g: Pick<FeedGame, 'league' | 'externalId'>) =>
   `${g.league.toLowerCase()}-${g.externalId}`
 

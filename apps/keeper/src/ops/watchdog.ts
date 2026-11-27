@@ -45,6 +45,8 @@ export async function watchdogRun(
     const games = await listGames(db, {
       from: new Date((nowSecs - 5 * 3600) * 1000),
       to: new Date((nowSecs + 2 * 3600) * 1000),
+      // A game night is an NBA night: the Practice process has its own `practice-failing`.
+      leagues: ['NBA'],
     })
     tipoffs = games.map((g) => Math.floor(g.scheduledTipoff.getTime() / 1000))
     const paged = (await getHeartbeat(db, 'watchdog'))?.info.pagedAt

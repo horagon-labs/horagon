@@ -588,6 +588,7 @@ async function run(argv: string[]): Promise<void> {
         const games = await listGames(db, {
           from: new Date((now - DEPLOY_CHECK_BACK_SECS) * 1000),
           to: new Date((now + timings.createLeadSecs + 1) * 1000),
+          leagues: ['NBA'],
         })
         const blockers = deployBlockers(games, now, timings)
         for (const line of deployCheckLines(blockers, now)) console.log(line)

@@ -51,13 +51,17 @@ export interface TreasuryDeps {
   priorityMicroLamports: number
 }
 
-/** Games starting in the next 36 h that have no market yet, earliest first. */
+/**
+ * NBA games starting in the next 36 h that have no market yet, earliest first. A Practice run
+ * checks its own seed before it starts (R8).
+ */
 async function upcomingGames(deps: Pick<TreasuryDeps, 'db' | 'now'>) {
   const now = deps.now()
   const games = await listGames(deps.db, {
     from: new Date(now * 1000),
     to: new Date((now + 36 * 3600) * 1000),
     statuses: ['scheduled'],
+    leagues: ['NBA'],
   })
   return games.filter((g) => g.markets.length === 0)
 }

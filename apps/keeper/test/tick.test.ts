@@ -630,6 +630,56 @@ describe('the close at the final buzzer', () => {
   })
 })
 
+describe('the horn (R8)', () => {
+  it('halts once the horn frame has held 10 s with the same score, and restarts the hold on a change', async () => {
+    expect(types(await keeper.tick())).toEqual(['create'])
+    now = S + 9_600
+    const horn = {
+      status: 'live',
+      period: 4,
+      clockSecs: 0,
+      homeScore: 109,
+      awayScore: 106,
+    } as const
+    current = { ...current, ...horn }
+    expect(await keeper.tick()).toEqual([])
+    // A free throw at 0:00 changes the score: the hold starts again.
+    now += 8
+    current = { ...current, homeScore: 110 }
+    expect(await keeper.tick()).toEqual([])
+    now += 9
+    expect(await keeper.tick()).toEqual([])
+    now += 1
+    expect(types(await keeper.tick())).toEqual(['halt'])
+    expect(sends).toEqual(['create nba-401910007', 'halt nba-401910007 (horn)'])
+    expect(alerts.map(([k]) => k)).toContain('halt:nba-401910007')
+    expect((await getGame(h.db, 'nba-401910007'))?.markets[0]?.status).toBe('halted')
+    // Final follows: no second halt, then the draft.
+    now += 20
+    current = finalGame()
+    expect(await keeper.tick()).toEqual([])
+    now += 60
+    expect(types(await keeper.tick())).toEqual(['draft'])
+  })
+
+  it('never halts on a tied horn frame: overtime follows', async () => {
+    expect(types(await keeper.tick())).toEqual(['create'])
+    now = S + 9_600
+    current = {
+      ...current,
+      status: 'live',
+      period: 4,
+      clockSecs: 0,
+      homeScore: 106,
+      awayScore: 106,
+    }
+    expect(await keeper.tick()).toEqual([])
+    now += 60
+    expect(await keeper.tick()).toEqual([])
+    expect(sends).toEqual(['create nba-401910007'])
+  })
+})
+
 describe('isDone', () => {
   it('does not count a GameMarket the RPC cannot see as done', async () => {
     await keeper.tick() // create

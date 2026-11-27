@@ -7,6 +7,7 @@ import {
   DEFAULT_SEEDS,
   DEFAULT_TIMINGS,
   type GameState,
+  HORN_HOLD_SECS,
   type PlanInput,
   plan,
   priceBps,
@@ -273,6 +274,61 @@ describe('halt (spec 6.2)', () => {
     const other = state({ game: game({ id: 'nba-2' }) })
     const actions = run(S - 100, other, open({ feed: feed({ status: 'postponed' }) }))
     expect(types(actions)).toEqual(['halt', 'create'])
+  })
+})
+
+describe('the horn (R8)', () => {
+  const open = (patch: Partial<GameState>) =>
+    state({ market: market('open'), onchain: chain('open'), ...patch })
+  const horn = (patch: Partial<FeedGame> = {}) =>
+    feed({ status: 'live', period: 4, clockSecs: 0, homeScore: 111, awayScore: 106, ...patch })
+  const now = S + 9_000
+  const held = (secs: number, f: FeedGame = horn()) =>
+    run(now, open({ feed: f, feedSeenAt: now, hornSince: now - secs }))
+
+  it('halts on the horn frame of Q4 held for HORN_HOLD_SECS, not before', () => {
+    expect(HORN_HOLD_SECS).toBe(10)
+    expect(held(9)).toEqual([])
+    expect(held(10)).toEqual([
+      { type: 'halt', gameId: 'nba-401910007', marketId: 7n, rule: 'horn' },
+    ])
+  })
+
+  it('does not halt on a tie (overtime follows), at the end of Q3, or with time left', () => {
+    expect(held(60, horn({ homeScore: 106, awayScore: 106 }))).toEqual([])
+    expect(held(60, horn({ period: 3 }))).toEqual([])
+    expect(held(60, horn({ clockSecs: 1 }))).toEqual([])
+    // A frame not seen as the horn has no hornSince.
+    expect(run(now, open({ feed: horn(), feedSeenAt: now }))).toEqual([])
+  })
+
+  it('halts on the horn of an overtime', () => {
+    expect(types(held(10, horn({ period: 5, homeScore: 120, awayScore: 118 })))).toEqual(['halt'])
+  })
+
+  it('halts only an open market before end_ts', () => {
+    expect(run(END, open({ feed: horn(), feedSeenAt: END, hornSince: END - 30 }))).toEqual([])
+    const halted = state({
+      market: market('halted'),
+      onchain: chain('halted'),
+      feed: horn(),
+      feedSeenAt: now,
+      hornSince: now - 30,
+    })
+    expect(run(now, halted)).toEqual([])
+  })
+
+  it('sorts a horn halt before a create', () => {
+    const other = state({ game: game({ id: 'nba-2' }) })
+    const actions = run(
+      S - 100,
+      other,
+      open({ feed: horn(), feedSeenAt: S - 100, hornSince: S - 200 }),
+    )
+    expect(actions.map((a) => (a.type === 'halt' ? `halt ${a.rule}` : a.type))).toEqual([
+      'halt horn',
+      'create',
+    ])
   })
 })
 
@@ -672,6 +728,39 @@ describe('auto-propose (R6)', () => {
     // A corrected score is drafted again, not proposed.
     const corrected = ready({ feed: feed({ ...finalFeed, homeScore: 112 }), secondSource: match })
     expect(types(auto(now, 'on', corrected))).not.toContain('propose')
+  })
+
+  it('proposes a PRACTICE game only when the keeper is given that league (R8)', () => {
+    const practice = ready({
+      game: game({ id: 'practice-401910007p0', league: 'PRACTICE' }),
+      secondSource: off,
+    })
+    expect(types(auto(END, 'on', practice))).not.toContain('propose')
+    const asPractice = plan({
+      now: END,
+      states: [practice, ready({ secondSource: off })],
+      timings: DEFAULT_TIMINGS,
+      seeds: DEFAULT_SEEDS,
+      disputeWindowSecs: 900,
+      autoPropose: 'on',
+      autoProposeLeagues: ['PRACTICE'],
+    })
+    expect(asPractice.filter((a) => a.type === 'propose').map((a) => a.gameId)).toEqual([
+      'practice-401910007p0',
+    ])
+    // Its period sums are still checked.
+    const short = { ...practice, feed: feed({ ...finalFeed, periods: QUARTERS.slice(0, 3) }) }
+    expect(
+      plan({
+        now: END,
+        states: [short],
+        timings: DEFAULT_TIMINGS,
+        seeds: DEFAULT_SEEDS,
+        disputeWindowSecs: 900,
+        autoPropose: 'on',
+        autoProposeLeagues: ['PRACTICE'],
+      }).map((a) => a.type),
+    ).not.toContain('propose')
   })
 
   it('proposes on an open market too, and sorts the propose after recycle and before create', () => {
