@@ -52,6 +52,26 @@ describe('pageSponsorMarks', () => {
     expect(await getHeartbeat(h.db, 'sponsor-marks')).not.toBeNull()
   })
 
+  it('pages the first reserve-only refusal of a day, which can come before the 80% mark', async () => {
+    const day = new Date().toISOString().slice(0, 10)
+    await logOps(h.db, {
+      actor: 'api',
+      action: 'sponsor-reserve-only',
+      detail: {
+        day,
+        spentLamports: '1500000000',
+        capLamports: '2000000000',
+        reserveLamports: '500000000',
+      },
+    })
+    expect(await run()).toBe(1)
+    expect(sent.map(([k]) => k)).toEqual([`sponsor-reserve-only:${day}`])
+    expect(sent[0]?.[1]).toContain('new wallets')
+    expect(sent[0]?.[1]).toContain('1.5 of 2 SOL')
+    expect(sent[0]?.[1]).toContain('0.5 SOL')
+    expect(await run()).toBe(0)
+  })
+
   it('pages again on the next run when Telegram did not take it', async () => {
     await mark(80)
     delivered = false
