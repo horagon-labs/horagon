@@ -191,9 +191,15 @@ export function StoryCard({ story, now, variant = 'full', rows }: StoryCardProps
       </p>
       {full && s.readout && low && (
         <div className="hidden items-center gap-4 pt-1 sm:flex" data-readout>
-          {/* MiniDial is 48 px; its 96 px use here sizes the svg from the box. */}
+          {/* MiniDial is 48 px; its 96 px use here sizes the svg from the box. A model low gets
+              the model's ink ▲; a price low the price's needle, ash once trading stopped, so
+              each glyph keeps its one meaning and matches the legend (C11). */}
           <div className="size-24 shrink-0 [&>svg]:size-full">
-            <MiniDial price={null} model={low.prob} timeLeft={0} state="resolved" />
+            {low.from === 'price' ? (
+              <MiniDial price={low.prob} timeLeft={0} state="resolved" />
+            ) : (
+              <MiniDial price={null} model={low.prob} timeLeft={0} state="resolved" />
+            )}
           </div>
           <div>
             <p className="font-mono text-13 text-ink tabular-nums">{s.readout[0]}</p>

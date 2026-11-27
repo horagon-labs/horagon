@@ -10,8 +10,10 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import { BoardView, type BoardViewProps } from '../components/chrono/board-view'
 import { HowItWorks } from '../components/chrono/hero'
+import { rotateAbout } from '../components/chrono/needle'
 import { IdleFoot, SIGN_OFF, StoryCard } from '../components/story-card'
 import { at, game, market } from '../lib/chrono/fixtures'
+import { priceToAngle } from '../lib/chrono/geometry'
 import { screenState } from '../lib/server/first-screen'
 import {
   currentNight,
@@ -187,6 +189,8 @@ describe('the full story card on real ET 11-25 data (W2, C7-C12, G1)', () => {
       /<p [^>]*class="[^"]*font-mono[^"]*text-\[28px\][^"]*"[^>]*>MIN to win 7%<\/p>/,
     )
     expect(html).toContain('data-model')
+    // A model low: the ▲ alone, no price needle on the readout's dial.
+    expect(html).not.toContain('data-needle')
     expect(html).toMatch(
       /<div class="[^"]*size-24[^"]*\[&amp;&gt;svg\]:size-full[^"]*"><svg viewBox="0 0 100 100"/,
     )
@@ -230,6 +234,27 @@ describe('the full story card on the moved night (C8, C8t, C10)', () => {
     expect(t).toContain('14 calls · 2 by fans · 12 by the reference agent')
     expect(html).toMatch(/<a href="\/agent"[^>]*>reference agent<\/a>/)
     expect(html).not.toMatch(LIVE)
+  })
+
+  // C11: a low from prices reads "price", so its dial draws the price's needle, not the model's
+  // ▲ (one meaning per glyph: ▲ is the model, and the legend under it says so). Trading stopped,
+  // so the needle is ash, never Live blue.
+  it('rests the readout on the price low with an ash price needle and no model ▲ (C11)', () => {
+    const readout = html.match(
+      /<div [^>]*data-readout[^>]*>[\s\S]*?<\/svg>[\s\S]*?<\/div><\/div>/,
+    )?.[0]
+    expect(readout).toBeDefined()
+    const r = readout ?? ''
+    expect(text(r)).toContain('Q2 6:00 · 38–47')
+    expect(text(r)).toContain('NYK to win 35%')
+    expect(text(r)).toMatch(/price$/)
+    expect(r).not.toContain('data-model')
+    expect(r).toContain(
+      `<g transform="${rotateAbout(priceToAngle(0.35), 50)}" class="stroke-ash-400" data-needle="price">`,
+    )
+    expect(r).not.toMatch(LIVE)
+    // The whole card: no model ▲ drawn for a price low.
+    expect(html).not.toContain('data-model')
   })
 })
 
