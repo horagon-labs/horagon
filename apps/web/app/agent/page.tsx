@@ -3,6 +3,7 @@
 // (lib/agent.ts), the wallet from the SDK.
 import { REFERENCE_AGENT_WALLET } from '@horagon/sdk'
 import type { Metadata } from 'next'
+import Link from 'next/link'
 import type { ReactNode } from 'react'
 import { CARD_SIZE } from '../../components/share-card'
 import { BOT_RATE, AGENT_PARAMS as P } from '../../lib/agent'
@@ -175,6 +176,11 @@ export default function AgentPage() {
             <a href={`${REPO}/README.md#reference-agent`} className={LINK}>
               README: Reference agent
             </a>
+          </li>
+          <li>
+            <Link href="/study" className={LINK}>
+              How the model is checked
+            </Link>
           </li>
         </ul>
       </Section>
