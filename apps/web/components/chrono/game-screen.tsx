@@ -89,7 +89,7 @@ export function GameScreen(p: GameScreenProps) {
   const trading = canTrade(dial.state)
   const entry = entryMark(p.positions, game.id)
   // The Buzzer stop plays once, on a page that saw the market trade (lib/chrono/stop.ts).
-  const stop = useBuzzerStop(trading, atBuzzer(game, winner?.status), () => {
+  const stop = useBuzzerStop(trading, atBuzzer(game), () => {
     if (entry !== null) buzz(feel, STOP_BUZZ)
   })
   const stopped = isStoppedFace(dial.state)

@@ -26,12 +26,16 @@ export interface ClutchInput {
   enabled: boolean
 }
 
-/** Clutch time: live and trading, the price in doubt, the end of Q4 or overtime, switch on. */
+/**
+ * Clutch time: live and trading, the price in doubt, the end of Q4 or overtime, switch on. Never
+ * at 0:00 of Q4 or an overtime: the clock has stopped, at the horn or before an overtime.
+ */
 export function isClutch(i: ClutchInput): boolean {
   if (!i.enabled || i.game.status !== 'live') return false
   if (i.state !== 'live' && i.state !== 'closing') return false
   if (i.price === null || i.price < CLUTCH_LOW || i.price > CLUTCH_HIGH) return false
   const g = i.game
+  if (g.period >= 4 && g.clockSecs === 0) return false
   return g.period >= 5 || (g.period === 4 && g.clockSecs !== null && g.clockSecs <= CLUTCH_SECS)
 }
 

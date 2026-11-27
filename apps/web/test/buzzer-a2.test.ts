@@ -47,11 +47,12 @@ describe('the horn (stop.ts)', () => {
     expect(isHornFrame({ ...horn, status: 'final' })).toBe(false)
   })
 
-  it('reads the Final, or the horn with the market halted, as the buzzer', () => {
-    expect(atBuzzer({ ...horn, status: 'final', clockSecs: null }, 'open')).toBe(true)
-    expect(atBuzzer(horn, 'halted')).toBe(true)
-    expect(atBuzzer(horn, 'open')).toBe(false)
-    expect(atBuzzer({ ...horn, clockSecs: 40 }, 'halted')).toBe(false)
+  it('reads the Final, or the horn frame, halted or not yet, as the buzzer', () => {
+    expect(atBuzzer({ ...horn, status: 'final', clockSecs: null })).toBe(true)
+    // Halted or before the keeper's halt lands (it holds the frame 10 s first), as for the Final.
+    expect(atBuzzer(horn)).toBe(true)
+    expect(atBuzzer({ ...horn, clockSecs: 40 })).toBe(false)
+    expect(atBuzzer({ ...horn, awayScore: 107 })).toBe(false)
   })
 
   it('draws a horn-halted market closed, not "Trading halted"', () => {
@@ -60,6 +61,14 @@ describe('the horn (stop.ts)', () => {
     // A halt with time still on the clock stays the amber halt.
     expect(deriveDialState({ ...horn, clockSecs: 300 }, halted, NOW)).toBe('halted')
     expect(deriveDialState({ ...horn, awayScore: 107 }, halted, NOW)).toBe('halted')
+  })
+
+  it('draws the horn frame closed before the halt lands, as the Final (R5c)', () => {
+    const open = market({ status: 'open' })
+    expect(deriveDialState(horn, open, NOW)).toBe('closed')
+    // A tie at 0:00 goes to overtime: still trading.
+    expect(deriveDialState({ ...horn, awayScore: 107 }, open, NOW)).toBe('live')
+    expect(deriveDialState({ ...horn, clockSecs: 1 }, open, NOW)).toBe('live')
   })
 
   it('tells the trade form the buzzer closed it', () => {
@@ -76,6 +85,14 @@ describe('the horn (stop.ts)', () => {
     expect(checkTrade({ ...base, hornFrame: true }).reason).toBe(BUZZER_CLOSED)
     expect(checkTrade({ ...base, hornFrame: false }).reason).toBe('Trading is halted.')
     expect(checkTrade(base).reason).toBe('Trading is halted.')
+    // Before the halt lands, the horn frame closes the form too: no Buy on a decided game.
+    const open = { ...base, marketStatus: 'open' as const }
+    expect(checkTrade({ ...open, hornFrame: true })).toMatchObject({
+      ok: false,
+      quote: false,
+      reason: BUZZER_CLOSED,
+    })
+    expect(checkTrade({ ...open, hornFrame: false }).ok).toBe(true)
   })
 })
 
@@ -193,6 +210,13 @@ describe('clutch time (clutch.ts)', () => {
     expect(isClutch({ ...on, state: 'halted' })).toBe(false)
     expect(isClutch({ ...on, state: 'closed' })).toBe(false)
     expect(isClutch({ ...on, game: { ...q4, status: 'final' } })).toBe(false)
+  })
+
+  it('is never clutch at 0:00 of Q4 or an overtime: the clock has stopped', () => {
+    // Even with the face still trading (the halt not landed yet), the horn frame is no clutch.
+    expect(isClutch({ ...on, game: { ...q4, clockSecs: 0 } })).toBe(false)
+    expect(isClutch({ ...on, game: { ...q4, period: 5, clockSecs: 0 } })).toBe(false)
+    expect(isClutch({ ...on, game: { ...q4, clockSecs: 1 } })).toBe(true)
   })
 
   it('says string 12 and names its switch', () => {

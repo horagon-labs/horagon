@@ -31,9 +31,11 @@ type HornFields = Pick<Game, 'status' | 'period' | 'clockSecs' | 'homeScore' | '
 export const isHornFrame = (g: HornFields): boolean =>
   g.status === 'live' && g.period >= 4 && g.clockSecs === 0 && g.homeScore !== g.awayScore
 
-/** Trading stopped at the buzzer: the Final, or the horn frame with the market halted. */
-export const atBuzzer = (g: HornFields, marketStatus: string | undefined): boolean =>
-  g.status === 'final' || (marketStatus === 'halted' && isHornFrame(g))
+/**
+ * Trading stopped at the buzzer: the Final, or the horn frame, halted or not yet (the keeper
+ * holds it 10 s before its halt lands; the dial reads it closed already, as for the Final).
+ */
+export const atBuzzer = (g: HornFields): boolean => g.status === 'final' || isHornFrame(g)
 
 /**
  * The buzzer index's price (home side): the last history price at or before trading stopped,
