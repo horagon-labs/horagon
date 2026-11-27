@@ -31,6 +31,12 @@ const NARROW: Required<TapeBox> & { font: number } = {
   pad: { top: 16, right: 4, bottom: 16, left: 4 },
   font: 12,
 }
+/**
+ * A moved card's tape below sm: 12 px shorter, as the card carries more rows (the legend, the
+ * buzzer price, the tally), so the first board row stays above the 375 fold (§9). The plot loses
+ * the height; the label bands keep theirs, so "Final" still sits above a line ending at the top.
+ */
+const NARROW_MOVED: typeof NARROW = { ...NARROW, h: 84 }
 const WIDE: Required<TapeBox> & { font: number } = {
   w: 600,
   h: 132,
@@ -168,7 +174,8 @@ export function StoryCard({ story, now, variant = 'full', rows }: StoryCardProps
   const { night, game } = story
   const s = storyLines(game, now)
   const full = variant === 'full'
-  const narrow = full ? tapeModel(game, NARROW) : null
+  const nbox = game.moved ? NARROW_MOVED : NARROW
+  const narrow = full ? tapeModel(game, nbox) : null
   const wide = full ? tapeModel(game, WIDE) : null
   const low = game.low
   // Where the model climbs off the open, "opened 28%" sits under its dot.
@@ -185,8 +192,16 @@ export function StoryCard({ story, now, variant = 'full', rows }: StoryCardProps
       <h2 id="story-title" className="text-13 font-medium uppercase tracking-[0.2em] text-ink">
         {lastNightHeader(night, now)}
       </h2>
-      <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-15 font-medium text-ink">
-        <StoryPlate story={s.plate} />
+      {/* The plate flows with the words (no flex row): a long line 1 wraps beside the plate, not
+          under it, which keeps a moved card's first board row above the 375 fold (§9). */}
+      <p className="text-15 font-medium text-ink">
+        {s.plate && (
+          <>
+            <span className="mr-1">
+              <StoryPlate story={s.plate} />
+            </span>{' '}
+          </>
+        )}
         <span>{s.line1}</span>
       </p>
       {full && s.readout && low && (
@@ -210,19 +225,31 @@ export function StoryCard({ story, now, variant = 'full', rows }: StoryCardProps
       )}
       {narrow && wide && (
         <figure className="space-y-1" data-story-tape>
-          <figcaption className="flex flex-wrap justify-between gap-x-3 text-12 text-ink-muted">
+          {/* In the sans, 8 px apart: caption and legend share one row at 375 where both fit
+              ("MIN @ OKC · MIN to win · price and model" 232 px + 98 px), else the legend wraps. */}
+          <figcaption className="flex flex-wrap justify-between gap-x-2 text-12 text-ink-muted">
             <span>{narrow.caption}</span>
-            <span className="font-mono">{narrow.legend.join('  ')}</span>
+            <span>{narrow.legend.join('  ')}</span>
           </figcaption>
-          <TapeSvg tape={narrow} box={NARROW} openedBelow={openedBelow} className="sm:hidden" />
+          <TapeSvg tape={narrow} box={nbox} openedBelow={openedBelow} className="sm:hidden" />
           <TapeSvg tape={wide} box={WIDE} openedBelow={openedBelow} className="hidden sm:block" />
         </figure>
       )}
-      {full && s.line2 && <p className="text-13 text-ink-muted">{s.line2}</p>}
+      {full && s.line2 && (
+        <p className={s.tally ? 'mb-0 text-13 text-ink-muted' : 'text-13 text-ink-muted'}>
+          {s.line2}
+        </p>
+      )}
       {full && s.tally && (
-        <p className="font-mono text-12 text-ink-muted tabular-nums" data-tally>
+        // One row in the sans (263 px for "14 calls · 2 by fans · 12 by the reference agent"),
+        // flush between line 2 and the proof: its 44 px link is the row's height and its gap.
+        // The link is one atomic box, so "reference agent" never splits across a wrap (§9).
+        <p className="mb-0 text-12 text-ink-muted tabular-nums" data-tally>
           {`${s.tally.parts[0]} · ${s.tally.parts[1]} · ${s.tally.parts[2].slice(0, agentAt)}`}
-          <a href="/agent" className="text-ink underline underline-offset-4">
+          <a
+            href="/agent"
+            className="inline-flex min-h-11 items-center whitespace-nowrap text-ink underline underline-offset-4"
+          >
             reference agent
           </a>
         </p>

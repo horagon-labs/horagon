@@ -82,11 +82,31 @@ export function BoardView(p: BoardViewProps) {
       />
     </li>
   )
+  const count =
+    model.openNow > 0 ? (
+      <p className="text-13 text-ink sm:basis-full" data-count>
+        <span aria-hidden="true" className="text-live">
+          ●
+        </span>{' '}
+        {model.openNow} {model.openNow === 1 ? 'market' : 'markets'} open now ·{' '}
+        {/* min-h-11: a 44 px tap target inside the 13 px line. */}
+        <a
+          href="#first-open"
+          className="inline-flex min-h-11 items-center underline underline-offset-4"
+        >
+          Pick a game
+        </a>
+      </p>
+    ) : model.firstOpen ? (
+      <p className="text-13 text-ink tabular-nums sm:basis-full" data-count>
+        {model.firstOpen}
+      </p>
+    ) : null
   return (
     <div
       className={
         idle
-          ? 'flex flex-col gap-6 lg:grid lg:grid-cols-[34rem_minmax(0,1fr)] lg:grid-rows-[auto_1fr] lg:items-start lg:gap-x-8 lg:gap-y-6'
+          ? 'flex flex-col gap-4 sm:gap-6 lg:grid lg:grid-cols-[34rem_minmax(0,1fr)] lg:grid-rows-[auto_1fr] lg:items-start lg:gap-x-8 lg:gap-y-6'
           : 'flex flex-col gap-4 lg:grid lg:grid-cols-[minmax(0,26rem)_minmax(0,1fr)] lg:items-start lg:gap-8'
       }
     >
@@ -101,12 +121,22 @@ export function BoardView(p: BoardViewProps) {
         }
         data-board-list
       >
-        <div className="flex flex-wrap items-center justify-between gap-x-3">
-          <h2 className="text-13 font-medium uppercase tracking-[0.2em] text-brass-500">
+        {/* The count line sits in the heading's row, on a line of its own from sm. Below sm
+            "TONIGHT · FRI NOV 27 · 11 GAMES" leaves no room for Follow beside it, so Follow
+            joins the count line's row instead of a 44 px row of its own (§9: the first row stays
+            above the 375 fold). It moves only while the count line has no link, so focus order
+            still follows the eye when "Pick a game" is there. */}
+        <div className="flex flex-wrap items-center justify-between gap-x-3 sm:gap-y-3">
+          <h2
+            className={`text-13 font-medium uppercase tracking-[0.2em] text-brass-500${count ? ' max-sm:basis-full' : ''}`}
+          >
             {model.label}
           </h2>
           {chips.length > 0 && (
-            <details className="group open:basis-full" data-follow>
+            <details
+              className={`group open:basis-full${count && model.openNow === 0 ? ' max-sm:order-last' : ''}`}
+              data-follow
+            >
               <summary className="ml-auto flex min-h-11 w-fit cursor-pointer list-none items-center gap-1 text-13 text-ash-400 hover:text-ivory-100 [&::-webkit-details-marker]:hidden">
                 {followSummary(p.follows, p.showAll && p.follows.length > 0)}
                 <span aria-hidden="true" className="group-open:rotate-180">
@@ -129,28 +159,8 @@ export function BoardView(p: BoardViewProps) {
               </fieldset>
             </details>
           )}
+          {count}
         </div>
-        {model.openNow > 0 ? (
-          <p className="text-13 text-ink" data-count>
-            <span aria-hidden="true" className="text-live">
-              ●
-            </span>{' '}
-            {model.openNow} {model.openNow === 1 ? 'market' : 'markets'} open now ·{' '}
-            {/* min-h-11: a 44 px tap target inside the 13 px line. */}
-            <a
-              href="#first-open"
-              className="inline-flex min-h-11 items-center underline underline-offset-4"
-            >
-              Pick a game
-            </a>
-          </p>
-        ) : (
-          model.firstOpen && (
-            <p className="text-13 text-ink tabular-nums" data-count>
-              {model.firstOpen}
-            </p>
-          )
-        )}
         {model.note && (
           <p className="text-12 text-ink-muted" data-board-note>
             {BOARD_NOTE}

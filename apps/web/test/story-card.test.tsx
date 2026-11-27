@@ -204,6 +204,15 @@ describe('the full story card on real ET 11-25 data (W2, C7-C12, G1)', () => {
     )
   })
 
+  // §9 at 375: the plate flows with line 1's words (no flex row), so a long line wraps beside the
+  // plate ("[COMEBACK] NYK won 121–102 after the / model had them at 8% in Q2", 2 lines, not 3).
+  it('flows the plate with the words of line 1, a space apart, no flex row', () => {
+    const p = html.match(/<p class="([^"]*)"><span class="[^"]*"><span [^>]*data-story="Upset"/)
+    expect(p).not.toBeNull()
+    expect((p?.[1] ?? '').split(' ')).not.toContain('flex')
+    expect(text(html)).toContain('Upset MIN won 113–106 from 28% before tip-off')
+  })
+
   it('says nothing about a price: no "closed", no tally, no buzzer line', () => {
     expect(t).not.toContain('closed')
     expect(t).not.toContain('calls')
@@ -234,6 +243,51 @@ describe('the full story card on the moved night (C8, C8t, C10)', () => {
     expect(t).toContain('14 calls · 2 by fans · 12 by the reference agent')
     expect(html).toMatch(/<a href="\/agent"[^>]*>reference agent<\/a>/)
     expect(html).not.toMatch(LIVE)
+  })
+
+  // §9 at 375: every tap target is at least 44 px. The tally's link is one atomic 44 px box, so
+  // "reference agent" never splits across the wrap; the tally is set in the sans, so "14 calls ·
+  // 2 by fans · 12 by the reference agent" (263 px; 281 px with 3-digit counts) fits one line of
+  // the 343 px column.
+  it("makes the tally's reference agent one 44 px link that never splits (§9)", () => {
+    const link = html.match(/<a href="\/agent" class="([^"]*)"[^>]*>reference agent<\/a>/)
+    expect(link).not.toBeNull()
+    const cls = (link?.[1] ?? '').split(' ')
+    for (const c of ['inline-flex', 'min-h-11', 'items-center', 'whitespace-nowrap'])
+      expect(cls).toContain(c)
+    const tally = html.match(/<p class="([^"]*)" data-tally="true">/)?.[1] ?? ''
+    expect(tally).not.toBe('')
+    expect(tally.split(' ')).not.toContain('font-mono')
+  })
+
+  // A moved card carries more rows than a flat one (the legend, line 2's buzzer price, the tally),
+  // so its 375 tape is 12 px shorter (340×84); from sm it keeps 600×132.
+  it('draws the 375 tape 340×84 on a moved card, 600×132 from sm (§9)', () => {
+    expect(html.match(/viewBox="0 0 340 84"/g)).toHaveLength(1)
+    expect(html.match(/viewBox="0 0 600 132"/g)).toHaveLength(1)
+    expect(html).not.toContain('viewBox="0 0 340 96"')
+    // The top band stays 16 units, so "Final 110–100" still sits above a line that ends near the
+    // top, clear of the price line under it.
+    const narrow = html.match(/<svg viewBox="0 0 340 84"[\s\S]*?<\/svg>/)?.[0] ?? ''
+    const final = narrow.match(/<text x="[\d.]+" y="([\d.]+)"[^>]*>Final 110–100<\/text>/)
+    expect(final).not.toBeNull()
+    expect(Number(final?.[1])).toBeLessThan(16)
+  })
+
+  // §9 at 375: the first board row stays above the fold on a moved night. Line 2, the tally's
+  // 44 px row and the 44 px proof sit flush (the tally row's own height is the gap), and the
+  // legend shares the caption's row where both fit (in the sans, 8 px apart).
+  it('stacks line 2, the tally and the proof flush, the legend beside the caption (§9)', () => {
+    expect(html).toMatch(
+      /<p class="[^"]*\bmb-0\b[^"]*">At the buzzer the price had NYK at 81%\.<\/p>/,
+    )
+    expect(html).toMatch(/<p class="[^"]*\bmb-0\b[^"]*" data-tally="true">/)
+    const caption = html.match(
+      /<figcaption class="([^"]*)"><span>[^<]*<\/span><span( class="([^"]*)")?>/,
+    )
+    expect(caption).not.toBeNull()
+    expect((caption?.[1] ?? '').split(' ')).toContain('gap-x-2')
+    expect(caption?.[3] ?? '').not.toContain('font-mono')
   })
 
   // C11: a low from prices reads "price", so its dial draws the price's needle, not the model's
@@ -400,6 +454,30 @@ describe('the idle face takes the dial slot while no market is open (W5)', () =>
     expect(html).toMatch(/class="[^"]*lg:col-start-1[^"]*lg:row-start-2[^"]*" data-idle-foot/)
   })
 
+  // §9 at 375: "TONIGHT · FRI NOV 27 · 11 GAMES" leaves no room for "☆ Follow teams" beside it,
+  // so below sm Follow shares the count line's row instead of a 44 px row of its own (32 px back
+  // for the first board row). From sm the count keeps its own line under the heading row, as before.
+  it('S2: below sm, Follow shares the count row; from sm the count has its own line', () => {
+    const html = board()
+    const row = html.match(
+      /<div class="([^"]*)"><h2 class="([^"]*)">[^<]*<\/h2><details class="([^"]*)" data-follow="true">[\s\S]*?<\/details><p class="([^"]*)" data-count="true">First market opens in [^<]*<\/p><\/div>/,
+    )
+    expect(row).not.toBeNull()
+    const [, wrap, h2, follow, count] = (row ?? []).map((c) => (c ?? '').split(' '))
+    expect(wrap).toEqual(expect.arrayContaining(['flex', 'flex-wrap', 'sm:gap-y-3']))
+    expect(h2).toContain('max-sm:basis-full')
+    expect(follow).toContain('max-sm:order-last')
+    expect(count).toContain('sm:basis-full')
+    // Below sm the face, the list and the foot stand 16 px apart (24 px from sm).
+    expect(html).toMatch(/^<div class="flex flex-col gap-4 sm:gap-6 lg:grid lg:grid-cols-\[34rem/)
+  })
+
+  it('S1: with no count line the heading row is as before', () => {
+    const html = board({ games: [], now: at('2026-11-26T09:00:00Z') })
+    expect(html).not.toContain('max-sm:basis-full')
+    expect(html).not.toContain('max-sm:order-last')
+  })
+
   it('S3: once a market is open the Night dial takes the slot back and the face goes', () => {
     const now = at('2026-11-27T23:30:00Z')
     const games = friday().map((g, i) =>
@@ -421,6 +499,9 @@ describe('the idle face takes the dial slot while no market is open (W5)', () =>
     expect(html).not.toContain('data-test-face')
     expect(html).not.toContain('data-test-foot')
     expect(html).toContain('role="listbox"')
+    // The count line holds "Pick a game": Follow keeps its DOM place, so focus follows the eye.
+    expect(html).toContain('max-sm:basis-full')
+    expect(html).not.toContain('max-sm:order-last')
   })
 
   it('without an idle face the board keeps its dial, as before', () => {
