@@ -725,8 +725,11 @@ only, so neither ever touches the other's markets. The main keeper's indexer ind
   `practice-sol-authority`), and the treasury plus the keeper wallet holding the next 36 h of NBA
   seeds plus 300 mUSDC (`seed-short`). A failed guard skips that slot and logs why; the next slot
   tries again.
-- **Heartbeat.** Row `practice`: its round, `nextAt` (the next tip-off no NBA window blocks;
-  null with the flag off), the last skip reason (`skipped`) and its failure count.
+- **Heartbeat.** Row `practice`: its round, `nextAt`, the last skip reason (`skipped`) and its
+  failure count. `nextAt` is the next tip-off the guards will not skip: null with the flag off,
+  while a balance guard fails (`sol-floor`, `sol-authority`, `seed-short`, rechecked every
+  minute, so a top-up shows within one), and while a run is challenged or still unsettled 90 min
+  after its start. `/` and `/practice` show it, so neither promises a run that cannot start.
 - **Turn off.** `horagon-ops flag off FLAG_PRACTICE` starts no new run; a run in flight still
   halts, proposes and finalizes. To stop the process: `systemctl --user stop horagon-practice`
   (a run in flight then waits; the main keeper never settles it, so start it again later or

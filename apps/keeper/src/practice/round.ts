@@ -178,6 +178,41 @@ export function practiceSkip(i: SkipInput): SkipReason | null {
   return null
 }
 
+/** The skips a balance causes: until it is topped up, every slot would skip the same way. */
+const FUNDS_SKIPS: ReadonlySet<SkipReason> = new Set(['sol-floor', 'sol-authority', 'seed-short'])
+
+/** When a run started: its tip-off is PRACTICE_LEAD_SECS later. */
+const startOf = (g: GameWithMarkets) =>
+  Math.floor(g.scheduledTipoff.getTime() / 1000) - PRACTICE_LEAD_SECS
+
+export interface NextInput {
+  now: number
+  /** The coming slot starts, earliest first. */
+  slots: readonly number[]
+  /** NBA games near those slots. */
+  nba: readonly GameWithMarkets[]
+  /** Practice games of the last days. */
+  practice: readonly GameWithMarkets[]
+}
+
+/**
+ * The first slot the run guards will not skip, as far as the games tell (the balances are the
+ * caller's), else null. A challenged run holds back every later run until a guardian proposes it
+ * again, and so does a run still unsettled past its footprint: no slot is promised while either
+ * waits. A run in flight holds back the slots inside its footprint only. Pure.
+ */
+export function nextFreeSlot(i: NextInput): number | null {
+  const runs = i.practice.filter((g) => unsettled(g, i.now))
+  const stuck = runs.some(
+    (g) =>
+      g.markets.some((m) => m.kind === 0 && m.status === 'challenged') ||
+      startOf(g) + PRACTICE_FOOTPRINT_SECS <= i.now,
+  )
+  if (stuck) return null
+  const settledBy = Math.max(0, ...runs.map((g) => startOf(g) + PRACTICE_FOOTPRINT_SECS))
+  return i.slots.find((s) => s >= settledBy && !nbaBlocks(i.nba, s)) ?? null
+}
+
 const SKIP_TEXT: Readonly<Record<SkipReason, string>> = {
   'flag-off': 'FLAG_PRACTICE is off',
   'run-unsettled': 'another Practice run is not settled',
@@ -223,6 +258,19 @@ export interface PracticeRound {
   nextAt: number | null
 }
 
+/**
+ * How often the next tip-off rechecks the balances between slots: a top-up shows within a
+ * minute, at four balance reads a minute.
+ */
+export const FUNDS_RECHECK_SECS = 60
+
+interface Funds {
+  reason: SkipReason | null
+  attestorLamports: bigint | null
+  authorityLamports: bigint | null
+  authorityReserveLamports: bigint
+}
+
 const read = async <T>(fn: () => Promise<T>): Promise<T | null> => {
   try {
     return await fn()
@@ -236,6 +284,8 @@ export class PracticeArena {
   private readonly tried = new Set<number>()
   /** The last skip, kept for the heartbeat until a run starts. */
   private lastSkip: SkipReason | null = null
+  /** The balance guards' last answer (a skip reason or null) and when it was read. */
+  private funds: { at: number; reason: SkipReason | null } | null = null
 
   constructor(private readonly d: PracticeArenaDeps) {}
 
@@ -297,7 +347,7 @@ export class PracticeArena {
       actions,
       started,
       skipped: started ? null : this.lastSkip,
-      nextAt: await this.nextAt(now),
+      nextAt: await this.nextAt(now, practice),
     }
   }
 
@@ -332,6 +382,25 @@ export class PracticeArena {
       nbaSeeds: [],
     })
     if (early !== 'balance-unread') return early
+    const f = await this.readFunds(now)
+    const sol = (l: bigint | null) => Number(l ?? 0n) / 1e9
+    if (f.reason === 'sol-floor') {
+      await this.d.alerts.send(
+        'practice-sol-floor',
+        `Practice paused: the attestor holds ${sol(f.attestorLamports)} SOL, under the floor of ${sol(this.d.solFloorLamports)}. NBA nights keep the SOL for their fees; top up from the devnet faucet for more Practice runs.`,
+      )
+    }
+    if (f.reason === 'sol-authority') {
+      await this.d.alerts.send(
+        'practice-sol-authority',
+        `Practice paused: the Authority holds ${sol(f.authorityLamports)} SOL, under 2 NBA nights of markets plus one Practice market (${sol(f.authorityReserveLamports + LAMPORTS_PER_MARKET)}). It pays every market's rent: horagon-ops fund-authority`,
+      )
+    }
+    return f.reason
+  }
+
+  /** The balance guards (`balance-unread`, `sol-floor`, `sol-authority`, `seed-short`), read now. */
+  private async readFunds(now: number): Promise<Funds> {
     const [attestorLamports, authorityLamports, seedFunds, nbaGames] = await Promise.all([
       read(() => this.d.balances.attestorLamports()),
       read(() => this.d.balances.authorityLamports()),
@@ -342,9 +411,9 @@ export class PracticeArena {
     const nbaSeeds = nbaGames.map((g) => (g.featured ? featured : regular))
     const authorityReserveLamports = authorityReserve(nbaGames)
     const reason = practiceSkip({
-      start: slot,
+      start: now,
       now,
-      flagOn,
+      flagOn: true,
       nba: [],
       practice: [],
       attestorLamports,
@@ -354,31 +423,30 @@ export class PracticeArena {
       seedFunds,
       nbaSeeds,
     })
-    if (reason === 'sol-floor') {
-      await this.d.alerts.send(
-        'practice-sol-floor',
-        `Practice paused: the attestor holds ${Number(attestorLamports) / 1e9} SOL, under the floor of ${Number(this.d.solFloorLamports) / 1e9}. NBA nights keep their SOL; top up from the devnet faucet for more Practice runs.`,
-      )
-    }
-    if (reason === 'sol-authority') {
-      const sol = (l: bigint | null) => Number(l ?? 0n) / 1e9
-      await this.d.alerts.send(
-        'practice-sol-authority',
-        `Practice paused: the Authority holds ${sol(authorityLamports)} SOL, under 2 NBA nights of markets plus one Practice market (${sol(authorityReserveLamports + LAMPORTS_PER_MARKET)}). It pays every market's rent: horagon-ops fund-authority`,
-      )
-    }
-    return reason
+    // An unread balance is no answer: the last answer stands.
+    if (reason !== 'balance-unread' || this.funds === null) this.funds = { at: now, reason }
+    else this.funds = { ...this.funds, at: now }
+    return { reason, attestorLamports, authorityLamports, authorityReserveLamports }
   }
 
-  /** The tip-off of the next slot no NBA window blocks, within 3 days; null with the flag off. */
-  private async nextAt(now: number): Promise<number | null> {
+  /**
+   * The tip-off of the next run that can start, within 3 days; null with the flag off, while a
+   * balance guard would skip every slot (`sol-floor`, `sol-authority`, `seed-short`, rechecked
+   * every FUNDS_RECHECK_SECS), and while a run waits for a guardian (`nextFreeSlot`). The page
+   * never promises a tip-off the guards will skip.
+   */
+  private async nextAt(now: number, practice: readonly GameWithMarkets[]): Promise<number | null> {
     if (!(await readFlags(this.d.db)).FLAG_PRACTICE) return null
     const slots = nextSlots(now, 18)
     const first = slots[0]
     const last = slots.at(-1)
     if (first === undefined || last === undefined) return null
     const nba = await this.nbaNear(first, last + PRACTICE_FOOTPRINT_SECS)
-    const free = slots.find((s) => !nbaBlocks(nba, s))
-    return free === undefined ? null : free + PRACTICE_LEAD_SECS
+    const free = nextFreeSlot({ now, slots, nba, practice })
+    if (free === null) return null
+    if (this.funds === null || now - this.funds.at >= FUNDS_RECHECK_SECS) await this.readFunds(now)
+    const reason = this.funds?.reason ?? null
+    if (reason !== null && FUNDS_SKIPS.has(reason)) return null
+    return free + PRACTICE_LEAD_SECS
   }
 }

@@ -18,6 +18,8 @@ import type { Ratings } from '../src/elo'
 import { loadReplayDir } from '../src/feeds/replay'
 import { DEFAULT_SEEDS } from '../src/planner'
 import {
+  FUNDS_RECHECK_SECS,
+  nextFreeSlot,
   PracticeArena,
   type PracticeArenaDeps,
   practiceKeeper,
@@ -252,8 +254,52 @@ describe('a Practice round', () => {
     chain.patch(ID, { status: STATUS.challenged, challenges: 1 })
     await roundsTo(TIP + 1_810)
     expect(alerts.map(([k]) => k)).toContain(`practice-challenged:${ID}`)
+    // No next tip-off is promised while it waits: every slot would skip.
+    expect((await arena.round()).nextAt).toBeNull()
     now = SLOT + 7_200
-    expect(await arena.round()).toMatchObject({ started: null, skipped: 'run-unsettled' })
+    expect(await arena.round()).toMatchObject({
+      started: null,
+      skipped: 'run-unsettled',
+      nextAt: null,
+    })
+  })
+
+  it('promises no next tip-off while a balance would skip it, and promises again after a top-up', async () => {
+    expect(FUNDS_RECHECK_SECS).toBe(60)
+    authority = 0n
+    expect(await arena.round()).toMatchObject({ skipped: 'sol-authority', nextAt: null })
+    // Between slots the balances are read again once a minute.
+    authority = SOL
+    now += 30
+    expect((await arena.round()).nextAt).toBeNull()
+    now += 30
+    expect((await arena.round()).nextAt).toBe(SLOT + 7_200 + 600)
+    // A balance that cannot be read changes nothing.
+    arena = arenaOf({
+      balances: {
+        attestorLamports: async () => lamports,
+        authorityLamports: async () => {
+          throw new Error('rpc down')
+        },
+        seedFunds: async () => funds,
+      },
+    })
+    now = SLOT + 1_800
+    expect((await arena.round()).nextAt).toBe(SLOT + 7_200 + 600)
+  })
+
+  it('promises no next tip-off with too little mUSDC, or under the SOL floor', async () => {
+    // Between slots: no slot is due, only the promise is checked.
+    now = SLOT + 1_800
+    funds = 0n
+    expect(await arena.round()).toMatchObject({ skipped: null, nextAt: null })
+    funds = 5_000_000_000n
+    lamports = 0n
+    arena = arenaOf()
+    expect((await arena.round()).nextAt).toBeNull()
+    lamports = 2n * SOL
+    now += FUNDS_RECHECK_SECS
+    expect((await arena.round()).nextAt).toBe(SLOT + 7_200 + 600)
   })
 
   it('announces the next tip-off: the next slot no NBA window blocks', async () => {
@@ -375,6 +421,32 @@ describe('practiceSkip, the guards', () => {
     expect(practiceSkip({ ...ok, seedFunds: 600_000_000n })).toBeNull()
     expect(practiceSkip({ ...ok, attestorLamports: null })).toBe('balance-unread')
     expect(practiceSkip({ ...ok, seedFunds: null })).toBe('balance-unread')
+  })
+
+  it('promises no slot while a run waits for a guardian or is overdue, none inside a run in flight', () => {
+    const slots = [SLOT + 7_200, SLOT + 14_400]
+    const run = (status: string, start: number) =>
+      game({
+        id: 'practice-x',
+        league: 'PRACTICE',
+        scheduledTipoff: new Date((start + 600) * 1000),
+        markets: [{ kind: 0, status }] as GameWithMarkets['markets'],
+      })
+    const at = (now: number, practice: GameWithMarkets[]) =>
+      nextFreeSlot({ now, slots, nba: [], practice })
+    expect(at(SLOT, [])).toBe(SLOT + 7_200)
+    // A run in flight since SLOT settles within its 90 min, before the next slot.
+    expect(at(SLOT + 600, [run('open', SLOT)])).toBe(SLOT + 7_200)
+    // A run whose 90 min run past a slot holds that slot back.
+    expect(at(SLOT + 600, [run('open', SLOT + 1_801)])).toBe(SLOT + 14_400)
+    // Challenged: it waits for a guardian, so no slot is promised.
+    expect(at(SLOT + 3_000, [run('challenged', SLOT)])).toBeNull()
+    // Still unsettled 90 min after its start: stuck, no slot is promised.
+    expect(at(SLOT + 5_400, [run('halted', SLOT)])).toBeNull()
+    expect(at(SLOT + 5_400, [run('recycled', SLOT)])).toBe(SLOT + 7_200)
+    // An NBA window still blocks a slot: tip-off 13:00 holds [12:00, 16:00].
+    const nba = [game({ scheduledTipoff: tip('2026-12-06T13:00:00Z') })]
+    expect(nextFreeSlot({ now: SLOT, slots, nba, practice: [] })).toBe(SLOT + 14_400)
   })
 
   it("skips when the Authority's SOL would not cover the NBA reserve after the run's market", () => {
