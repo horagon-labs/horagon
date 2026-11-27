@@ -171,6 +171,22 @@ describe('depsFromEnv', () => {
     expect(deps.sponsor?.atasPerDay).toEqual({ wallet: 0, ip: 0 })
   })
 
+  it('defaults the reserve to a quarter of a cap under 2 SOL, so a small cap still boots', () => {
+    const reserveFor = (cap: string) =>
+      depsFromEnv(
+        {
+          ...base,
+          SPONSOR_SECRET_KEY: bs58.encode(Keypair.generate().secretKey),
+          SPONSOR_DAILY_CAP_SOL: cap,
+        },
+        db,
+      ).sponsor?.reserveLamports
+    expect(reserveFor('0.3')).toBe(75_000_000n)
+    expect(reserveFor('1')).toBe(250_000_000n)
+    expect(reserveFor('2')).toBe(500_000_000n)
+    expect(reserveFor('10')).toBe(500_000_000n)
+  })
+
   const perHour = 'SPONSOR_TX_PER_HOUR must be a whole number of 1 or more'
   const sol = 'SPONSOR_DAILY_CAP_SOL must be an amount of SOL above 0'
   it.each([
@@ -190,11 +206,9 @@ describe('depsFromEnv', () => {
     ['SPONSOR_DAILY_CAP_SOL', '-2', sol],
     ['SPONSOR_DAILY_CAP_SOL', 'lots', sol],
     ['SPONSOR_RESERVE_SOL', '-1', 'SPONSOR_RESERVE_SOL must be an amount of SOL of 0 or more'],
-    [
-      'SPONSOR_RESERVE_SOL',
-      '2.5',
-      'SPONSOR_RESERVE_SOL must not be more than SPONSOR_DAILY_CAP_SOL',
-    ],
+    // Cap 2 SOL: a reserve of the whole cap would leave new wallets nothing at all.
+    ['SPONSOR_RESERVE_SOL', '2.5', 'SPONSOR_RESERVE_SOL must be less than SPONSOR_DAILY_CAP_SOL'],
+    ['SPONSOR_RESERVE_SOL', '2', 'SPONSOR_RESERVE_SOL must be less than SPONSOR_DAILY_CAP_SOL'],
   ])('refuses %s=%s with a fixed message that names the variable', (name, value, message) => {
     const key = bs58.encode(Keypair.generate().secretKey)
     const err = thrown({ ...base, SPONSOR_SECRET_KEY: key, [name]: value })

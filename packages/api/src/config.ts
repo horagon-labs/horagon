@@ -89,16 +89,26 @@ function solAmount(
   return BigInt(lamports)
 }
 
-/** The sponsor's reserve (`SPONSOR_RESERVE_SOL`, default 0.5 SOL): 0 or more, at most the cap. */
+/** The default reserve: 0.5 SOL, or a quarter of a smaller cap. */
+const DEFAULT_RESERVE_LAMPORTS = 500_000_000n
+
+/**
+ * The sponsor's reserve (`SPONSOR_RESERVE_SOL`): 0 (off), or more than 0 and less than the cap,
+ * so new wallets always keep a part of the day. Unset: min(0.5 SOL, cap / 4), which every cap
+ * accepts, so a deploy that does not set it boots whatever the cap is.
+ */
 function reserveAmount(env: Record<string, string | undefined>, cap: bigint): bigint {
   const raw = env.SPONSOR_RESERVE_SOL
-  const sol = raw === undefined || raw.trim() === '' ? 0.5 : Number(raw)
+  if (raw === undefined || raw.trim() === '') {
+    return cap / 4n < DEFAULT_RESERVE_LAMPORTS ? cap / 4n : DEFAULT_RESERVE_LAMPORTS
+  }
+  const sol = Number(raw)
   const lamports = Math.round(sol * 1e9)
   if (!Number.isFinite(sol) || !Number.isSafeInteger(lamports) || lamports < 0) {
     throw new Error('SPONSOR_RESERVE_SOL must be an amount of SOL of 0 or more')
   }
-  if (BigInt(lamports) > cap) {
-    throw new Error('SPONSOR_RESERVE_SOL must not be more than SPONSOR_DAILY_CAP_SOL')
+  if (lamports > 0 && BigInt(lamports) >= cap) {
+    throw new Error('SPONSOR_RESERVE_SOL must be less than SPONSOR_DAILY_CAP_SOL')
   }
   return BigInt(lamports)
 }
