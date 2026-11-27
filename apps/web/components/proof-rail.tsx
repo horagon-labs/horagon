@@ -3,7 +3,6 @@
 // counts from GET /record. A server component: no hooks and no client module, so the program ids
 // and the words ship in the HTML only. No Live blue here: nothing on the rail is an open market.
 import { HORAGON_PROGRAM_ID, PM_AMM_PROGRAM_ID, type RecordResponse } from '@horagon/sdk'
-import Link from 'next/link'
 import { Fragment, type ReactNode } from 'react'
 import { explorerAddress, shortKey } from '../lib/format'
 
@@ -63,9 +62,10 @@ export function ProofRail({
       : []),
     [
       'study',
-      <Link key="study" href="/study" className={LINK}>
+      // A plain <a>: next/link from a server component adds its own client chunk to / (3.2 KiB).
+      <a key="study" href="/study" className={LINK}>
         How the model is checked
-      </Link>,
+      </a>,
     ],
   ]
   const narrowLabel = counts

@@ -254,4 +254,8 @@ describe('/ wires the rail (§7 W6)', () => {
       expect(src(f), f).not.toMatch(/^['"]use client['"]/m)
     }
   })
+
+  it('links with plain <a> only: next/link here added a 3.2 KiB client chunk to /', () => {
+    expect(src('components/proof-rail.tsx')).not.toMatch(/from 'next\/link'/)
+  })
 })
