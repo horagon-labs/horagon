@@ -211,6 +211,13 @@ The Practice process (R8, `horagon-practice`) runs beside the keeper on the VPS 
 6. Watch the first run end to end (`horagon-ops status`, the `practice` heartbeat, the game
    page): create, live, the halt at the buzzer, the propose about 40 min after the start, the
    finalize 15 min later.
+   When the first run is meant to prove a new create path (a release that changes how a market
+   id is chosen, say) before an NBA night, it has to start before that night's first NBA create,
+   which comes at tip-off - 60 min. A slot is skipped when an NBA window opens within 90 min of
+   it, so on a day with afternoon games even the 20:00 UTC slot can be skipped: turn the flag on
+   in time for a slot that ends before the first create, or skip the proof and check the first
+   NBA create live instead (its `market_id_reservations` row, and no `market id taken` warning
+   in the keeper journal).
 7. Keep SOL in both wallets a run uses. The Authority PDA pays each run's market rent (about
    0.036 SOL, up to 6 runs a day): no run starts unless it still holds 2 NBA nights of markets
    after the run's own, so top it up with `horagon-ops fund-authority <sol>` if more runs are
