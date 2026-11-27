@@ -112,7 +112,8 @@ the alert table; the key itself is in the keeper's `alert` log line (the last co
 - `curl -s "$HORAGON_PUBLIC_URL/api/v1/health"` answers `"ok":true`, with
   `keeper.heartbeatAgeSecs` at a few seconds (one round is 5 s; `ok` turns false above 120 s).
   The ops numbers beside them never change `ok`: `ops.sponsor.lamports`,
-  `ops.treasury.musdc` and `ops.backlog` (markets past `end_ts` with no proposal:
+  `ops.treasury.musdc` and `ops.backlog` (markets past `end_ts` with no proposal, Practice
+  markets included, since the Practice process owes their proposal:
   `ops.backlog.count`, `ops.backlog.oldestAgeSecs`) as read at `ops.asOf` (kept up to 45 s),
   and `ops.index.lagSecs` (seconds since the index loop last ended a round). A number it could
   not read is null, with the reason beside it.

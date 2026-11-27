@@ -445,6 +445,24 @@ describe('unresolvedBacklog', () => {
       oldestEndTs: at('2026-11-20T20:00:00Z'),
     })
   })
+
+  it('counts a Practice market past end_ts too: the Practice process owes its proposal', async () => {
+    const now = new Date('2026-11-21T00:00:00Z')
+    await upsertScheduledGames(h.db, [
+      game('practice-401910007p0', { league: 'PRACTICE', externalId: '401910007p0' }),
+    ])
+    await upsertMarket(
+      h.db,
+      market('P1', 'practice-401910007p0', {
+        endTs: new Date('2026-11-20T23:00:00Z'),
+        status: 'halted',
+      }),
+    )
+    expect(await unresolvedBacklog(h.db, now)).toEqual({
+      count: 1,
+      oldestEndTs: new Date('2026-11-20T23:00:00Z'),
+    })
+  })
 })
 
 describe('market id reservations', () => {

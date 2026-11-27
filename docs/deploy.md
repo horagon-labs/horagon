@@ -154,12 +154,18 @@ pnpm check
 HORAGON_VPS=<your SSH host alias> bash ops/deploy-keeper.sh
 ```
 
+Migrate before the keeper whenever the release adds a migration: `pnpm --filter @horagon/db
+db:migrate` (additive, safe at any time, a game window included). A keeper that creates markets
+under random ids stores each id in `market_id_reservations` (migration 0004) before it sends the
+create, so a database without that table stops every create, the Practice process's included.
+
 The script moves to the repo root, refuses a dirty tree, and ships `HEAD` as a tarball over
 ssh to `~/horagon` (it never copies keys or `.env.keeper`). Then, in a login shell on the VPS,
 it writes `~/horagon/REVISION`, runs `corepack pnpm install --frozen-lockfile` for the keeper
-and its dependencies, builds the SDK, copies the four units of `ops/systemd` to
+and its dependencies, builds the SDK, copies the five units of `ops/systemd` to
 `~/.config/systemd/user`, enables and starts `horagon-watchdog.timer`, enables
-`horagon-keeper` and restarts it, then prints its status. It never enables, starts or restarts
+`horagon-keeper` and restarts it, restarts `horagon-practice` only if it was enabled by hand
+("Practice" below), then prints its status. It never enables, starts or restarts
 `horagon-agent`. A running agent keeps the previous revision, and the script says so: restart it
 by hand (`systemctl --user restart horagon-agent`, procedure J of `docs/runbook.md`) to run the
 new one, which also clears the markets its anomaly check stopped. A stopped agent stays stopped.
@@ -191,6 +197,8 @@ The Practice process (R8, `horagon-practice`) runs beside the keeper on the VPS 
 
 1. Deploy the keeper between nights (the league split and the horn halt ship with it):
    `bash ops/deploy-keeper.sh`. It installs `horagon-practice.service` but does not enable it.
+   A Practice market takes a random id stored before its create, like an NBA one (migration
+   0004, above).
 2. Add one line to `~/horagon/.env.keeper` on the VPS: `PRACTICE_SOURCE_URL=` and the public
    https URL of the repo's `tests/fixtures/replay` folder on main. The repo's address stays out
    of the code. `HORAGON_PUBLIC_URL` must be set too (auto-propose already needs it).
