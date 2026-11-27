@@ -102,7 +102,12 @@ export function buildEvidence(p: EvidenceInput): ResolutionEvidence {
     rule: postponed ? POSTPONED_RULE : EVIDENCE_RULES[p.kind],
     outcome: postponed ? 'no' : outcomeFor(p.kind, p.draft.homeScore, p.draft.awayScore, periods),
     sources: [
-      { name: 'espn', url: p.draft.sourceUrl, fetchedAt: isoSeconds(p.draft.fetchedAt) },
+      {
+        // A Practice draft comes from the replayed recording, not from ESPN (R8).
+        name: p.game.league === 'PRACTICE' ? 'replay' : 'espn',
+        url: p.draft.sourceUrl,
+        fetchedAt: isoSeconds(p.draft.fetchedAt),
+      },
       ...(p.confirmUrl === undefined
         ? []
         : [

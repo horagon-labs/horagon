@@ -229,8 +229,9 @@ describe('one league per keeper (R8)', () => {
       seedAmount: 300_000_000n,
       status: 'open',
     })
-    const games = [(await getGame(h.db, 'practice-401910007p0'))!]
-    expect(deployBlockers(games, S + 60)).toEqual([])
-    expect(deployBlockers([{ ...games[0]!, league: 'NBA' }], S + 60)).toHaveLength(1)
+    const g = await getGame(h.db, 'practice-401910007p0')
+    if (!g) throw new Error('no Practice game')
+    expect(deployBlockers([g], S + 60)).toEqual([])
+    expect(deployBlockers([{ ...g, league: 'NBA' }], S + 60)).toHaveLength(1)
   })
 })
