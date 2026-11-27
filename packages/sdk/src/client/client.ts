@@ -32,6 +32,8 @@ import {
   type Position,
   type PositionsResponse,
   PositionsResponseSchema,
+  type PracticeResponse,
+  PracticeResponseSchema,
   ProblemSchema,
   type Quote,
   type QuoteRequest,
@@ -236,6 +238,11 @@ export class HoragonClient {
       { teams: teams.length > 0 ? teams.join(',') : undefined },
       MeResponseSchema,
     )
+  }
+
+  /** The Practice run in flight and the next one (R8). NOT_FOUND while FLAG_PRACTICE is off. */
+  practice(): Promise<PracticeResponse> {
+    return this.get('/practice', {}, PracticeResponseSchema)
   }
 
   faucet(wallet: string): Promise<FaucetResponse> {
