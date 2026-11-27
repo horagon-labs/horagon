@@ -44,8 +44,8 @@ export function loadPracticeConfig(env: NodeJS.ProcessEnv = process.env): Practi
   return { ...settings, keeper: loadConfig(env) }
 }
 
-/** The SOL floor pages once a day; every other key keeps the keeper's windows. */
+/** The SOL pages (the attestor's floor, the Authority) once a day; every other key keeps the keeper's. */
 export function practiceAlertWindow(key: string): number | undefined {
-  if (key === 'practice-sol-floor') return 86_400
+  if (key === 'practice-sol-floor' || key === 'practice-sol-authority') return 86_400
   return personAlertWindow(key)
 }

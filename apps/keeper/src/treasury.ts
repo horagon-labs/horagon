@@ -1,7 +1,7 @@
 // Treasury upkeep (spec 6.3): claim the pm-AMM faucet into the keeper wallet every hour, move
 // mUSDC into the treasury (the Authority's ATA) up to next night's seeds + 20%, and alert when
 // the treasury or the SOL that pays for markets runs low.
-import { type Db, listGames, logOps } from '@horagon/db'
+import { type Db, type GameWithMarkets, listGames, logOps } from '@horagon/db'
 import { errorSummary, type HoragonProgram } from '@horagon/sdk'
 import {
   createAssociatedTokenAccountIdempotentInstruction,
@@ -53,9 +53,9 @@ export interface TreasuryDeps {
 
 /**
  * NBA games starting in the next 36 h that have no market yet, earliest first. A Practice run
- * checks its own seed before it starts (R8).
+ * checks its own seed and the Authority's SOL against them before it starts (R8).
  */
-async function upcomingGames(deps: Pick<TreasuryDeps, 'db' | 'now'>) {
+export async function upcomingGames(deps: Pick<TreasuryDeps, 'db' | 'now'>) {
   const now = deps.now()
   const games = await listGames(deps.db, {
     from: new Date(now * 1000),
@@ -64,6 +64,18 @@ async function upcomingGames(deps: Pick<TreasuryDeps, 'db' | 'now'>) {
     leagues: ['NBA'],
   })
   return games.filter((g) => g.markets.length === 0)
+}
+
+/**
+ * Spec 6.3: the SOL the Authority keeps for 2 nights of markets. A night is the next game date's
+ * games (US Eastern), not the whole 36 h window, and 4 at least. `games` come earliest first.
+ */
+export function authorityReserve(
+  games: readonly Pick<GameWithMarkets, 'scheduledTipoff'>[],
+): bigint {
+  const nextDate = games[0] ? easternDate(games[0].scheduledTipoff) : undefined
+  const tonight = games.filter((g) => easternDate(g.scheduledTipoff) === nextDate).length
+  return 2n * BigInt(Math.max(tonight, 4)) * LAMPORTS_PER_MARKET
 }
 
 /** Seeds of the games starting in the next 36 h that have no market yet. */
@@ -103,12 +115,8 @@ export async function treasuryTick(deps: TreasuryDeps): Promise<{ moved: bigint;
   try {
     if (authorityRead.status === 'rejected') throw authorityRead.reason
     const authoritySol = BigInt(authorityRead.value)
-    // Spec 6.3: alert when the Authority's SOL covers fewer than 2 nights of markets. A night is
-    // the next game date (US Eastern), not the whole 36 h window.
-    const nextDate = games[0] ? easternDate(games[0].scheduledTipoff) : undefined
-    const tonight = games.filter((g) => easternDate(g.scheduledTipoff) === nextDate).length
-    const perNight = BigInt(Math.max(tonight, 4))
-    if (authoritySol < 2n * perNight * LAMPORTS_PER_MARKET) {
+    // Spec 6.3: alert when the Authority's SOL covers fewer than 2 nights of markets.
+    if (authoritySol < authorityReserve(games)) {
       await deps.alerts.send(
         'sol-authority',
         `Authority holds ${Number(authoritySol) / 1e9} SOL, under 2 nights of markets: horagon-ops fund-authority`,

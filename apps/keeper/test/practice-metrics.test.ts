@@ -86,6 +86,7 @@ describe('a Practice market and the frozen counting rules', () => {
       solFloorLamports: 1_000_000_000n,
       balances: {
         attestorLamports: async () => 2_000_000_000n,
+        authorityLamports: async () => 1_000_000_000n,
         seedFunds: async () => 5_000_000_000n,
       },
     })

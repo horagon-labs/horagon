@@ -203,5 +203,8 @@ The Practice process (R8, `horagon-practice`) runs beside the keeper on the VPS 
 6. Watch the first run end to end (`horagon-ops status`, the `practice` heartbeat, the game
    page): create, live, the halt at the buzzer, the propose about 40 min after the start, the
    finalize 15 min later.
-7. Top up the attestor's SOL from the devnet faucet if more runs are wanted: each run locks
-   about 0.036 SOL of rent, and no run starts under PRACTICE_SOL_FLOOR (1.0 SOL).
+7. Keep SOL in both wallets a run uses. The Authority PDA pays each run's market rent (about
+   0.036 SOL, up to 6 runs a day): no run starts unless it still holds 2 NBA nights of markets
+   after the run's own, so top it up with `horagon-ops fund-authority <sol>` if more runs are
+   wanted. The attestor pays the fees: no run starts under PRACTICE_SOL_FLOOR (1.0 SOL); top it
+   up from the devnet faucet.

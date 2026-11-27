@@ -48,6 +48,7 @@ describe('practiceSettings', () => {
 describe('practiceAlertWindow', () => {
   it('pages the SOL floor once a day, and a failing or challenged run every 3 h', () => {
     expect(practiceAlertWindow('practice-sol-floor')).toBe(86_400)
+    expect(practiceAlertWindow('practice-sol-authority')).toBe(86_400)
     expect(practiceAlertWindow('practice-failing')).toBe(PERSON_ALERT_SECS)
     expect(practiceAlertWindow('practice-challenged:practice-401910007p0')).toBe(PERSON_ALERT_SECS)
     expect(practiceAlertWindow('stuck:practice-401910007p0')).toBe(PERSON_ALERT_SECS)

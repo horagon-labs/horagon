@@ -19,7 +19,7 @@ import type { TxSender } from '../executor'
 import type { Feed } from '../feeds/types'
 import { DEFAULT_TIMINGS, type SeedPolicy } from '../planner'
 import { Keeper, type KeeperDeps } from '../tick'
-import { upcomingSeeds } from '../treasury'
+import { authorityReserve, LAMPORTS_PER_MARKET, upcomingGames } from '../treasury'
 import {
   PRACTICE_LEAD_SECS,
   PRACTICE_SEED,
@@ -105,6 +105,7 @@ export type SkipReason =
   | 'nba-window'
   | 'balance-unread'
   | 'sol-floor'
+  | 'sol-authority'
   | 'seed-short'
 
 export interface SkipInput {
@@ -119,6 +120,10 @@ export interface SkipInput {
   /** The attestor's SOL, or null when it could not be read. */
   attestorLamports: bigint | null
   solFloorLamports: bigint
+  /** The Authority PDA's SOL, which pays every market's rent; null when it could not be read. */
+  authorityLamports: bigint | null
+  /** What the Authority keeps for 2 NBA nights of markets (`authorityReserve`). */
+  authorityReserveLamports: bigint
   /** mUSDC that can seed markets (treasury + keeper wallet), or null when unread. */
   seedFunds: bigint | null
   /** The seeds of the NBA games of the next 36 h with no market yet. */
@@ -163,8 +168,11 @@ export function practiceSkip(i: SkipInput): SkipReason | null {
   if (!i.flagOn) return 'flag-off'
   if (i.practice.some((g) => unsettled(g, i.now))) return 'run-unsettled'
   if (nbaBlocks(i.nba, i.start)) return 'nba-window'
-  if (i.attestorLamports === null || i.seedFunds === null) return 'balance-unread'
+  if (i.attestorLamports === null || i.authorityLamports === null || i.seedFunds === null)
+    return 'balance-unread'
   if (i.attestorLamports < i.solFloorLamports) return 'sol-floor'
+  // The Authority pays the run's market rent too: after it, 2 NBA nights must still be covered.
+  if (i.authorityLamports < i.authorityReserveLamports + LAMPORTS_PER_MARKET) return 'sol-authority'
   const need = i.nbaSeeds.reduce((a, b) => a + b, 0n) + PRACTICE_SEED
   if (i.seedFunds < need) return 'seed-short'
   return null
@@ -176,12 +184,15 @@ const SKIP_TEXT: Readonly<Record<SkipReason, string>> = {
   'nba-window': 'an NBA market is open or opens within 90 min',
   'balance-unread': 'a balance could not be read',
   'sol-floor': 'the attestor holds less SOL than PRACTICE_SOL_FLOOR',
+  'sol-authority': 'the Authority holds less SOL than 2 NBA nights of markets plus one',
   'seed-short': 'mUSDC is short of the next NBA seeds plus 300',
 }
 
 export interface PracticeBalances {
-  /** The attestor's SOL, in lamports. */
+  /** The attestor's SOL, in lamports: it pays the fees. */
   attestorLamports(): Promise<bigint>
+  /** The Authority PDA's SOL, in lamports: it pays each market's rent (about 0.036 SOL). */
+  authorityLamports(): Promise<bigint>
   /** mUSDC that can seed markets: the treasury plus the keeper wallet. */
   seedFunds(): Promise<bigint>
 }
@@ -315,15 +326,21 @@ export class PracticeArena {
       practice,
       attestorLamports: 0n,
       solFloorLamports: 0n,
+      authorityLamports: 0n,
+      authorityReserveLamports: 0n,
       seedFunds: null,
       nbaSeeds: [],
     })
     if (early !== 'balance-unread') return early
-    const [attestorLamports, seedFunds, nbaSeeds] = await Promise.all([
+    const [attestorLamports, authorityLamports, seedFunds, nbaGames] = await Promise.all([
       read(() => this.d.balances.attestorLamports()),
+      read(() => this.d.balances.authorityLamports()),
       read(() => this.d.balances.seedFunds()),
-      upcomingSeeds({ db: this.d.db, seeds: this.d.nbaSeeds, now: this.d.now }),
+      upcomingGames({ db: this.d.db, now: this.d.now }),
     ])
+    const { featured, regular } = this.d.nbaSeeds
+    const nbaSeeds = nbaGames.map((g) => (g.featured ? featured : regular))
+    const authorityReserveLamports = authorityReserve(nbaGames)
     const reason = practiceSkip({
       start: slot,
       now,
@@ -332,6 +349,8 @@ export class PracticeArena {
       practice: [],
       attestorLamports,
       solFloorLamports: this.d.solFloorLamports,
+      authorityLamports,
+      authorityReserveLamports,
       seedFunds,
       nbaSeeds,
     })
@@ -339,6 +358,13 @@ export class PracticeArena {
       await this.d.alerts.send(
         'practice-sol-floor',
         `Practice paused: the attestor holds ${Number(attestorLamports) / 1e9} SOL, under the floor of ${Number(this.d.solFloorLamports) / 1e9}. NBA nights keep their SOL; top up from the devnet faucet for more Practice runs.`,
+      )
+    }
+    if (reason === 'sol-authority') {
+      const sol = (l: bigint | null) => Number(l ?? 0n) / 1e9
+      await this.d.alerts.send(
+        'practice-sol-authority',
+        `Practice paused: the Authority holds ${sol(authorityLamports)} SOL, under 2 NBA nights of markets plus one Practice market (${sol(authorityReserveLamports + LAMPORTS_PER_MARKET)}). It pays every market's rent: horagon-ops fund-authority`,
       )
     }
     return reason

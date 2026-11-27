@@ -25,6 +25,7 @@ import {
   type SkipInput,
 } from '../src/practice/round'
 import { PRACTICE_FIXTURES_DIR, PracticeFeed } from '../src/practice/runs'
+import { LAMPORTS_PER_MARKET } from '../src/treasury'
 import { PracticeChain, program, STATUS } from './practice-chain'
 
 const silent = pino({ level: 'silent' })
@@ -67,6 +68,7 @@ let chain: PracticeChain
 let alerts: Array<[string, string]>
 const alerter: Alerter = { send: async (k, t) => void alerts.push([k, t]) }
 let lamports: bigint
+let authority: bigint
 let funds: bigint
 let arena: PracticeArena
 
@@ -103,6 +105,7 @@ function arenaOf(over: Partial<PracticeArenaDeps> = {}): PracticeArena {
     solFloorLamports: SOL,
     balances: {
       attestorLamports: async () => lamports,
+      authorityLamports: async () => authority,
       seedFunds: async () => funds,
     },
     ...over,
@@ -115,6 +118,7 @@ beforeEach(async () => {
   chain = new PracticeChain(h.db, now, 1_800)
   alerts = []
   lamports = 2n * SOL
+  authority = SOL
   funds = 5_000_000_000n
   await setFlag(h.db, 'FLAG_PRACTICE', true, 'test')
   arena = arenaOf()
@@ -226,6 +230,21 @@ describe('a Practice round', () => {
     expect(await getGame(h.db, ID)).toBeNull()
   })
 
+  it("skips while the Authority's SOL is short of 2 NBA nights of markets plus its own", async () => {
+    // No NBA game ahead: 4 markets a night, 2 nights, and the run's own market.
+    authority = 9n * LAMPORTS_PER_MARKET - 1n
+    expect(await arena.round()).toMatchObject({ started: null, skipped: 'sol-authority' })
+    expect(alerts.map(([k]) => k)).toEqual(['practice-sol-authority'])
+    expect(alerts[0]?.[1]).toContain('horagon-ops fund-authority')
+    expect(await getGame(h.db, ID)).toBeNull()
+  })
+
+  it('starts with the Authority holding exactly 2 NBA nights of markets plus its own', async () => {
+    authority = 9n * LAMPORTS_PER_MARKET
+    expect(await arena.round()).toMatchObject({ started: ID, skipped: null })
+    expect(alerts).toEqual([])
+  })
+
   it('pages a challenged Practice market, and starts no run while it waits', async () => {
     await arena.round()
     await roundsTo(TIP + 1_500, 60)
@@ -291,6 +310,8 @@ describe('practiceSkip, the guards', () => {
     practice: [],
     attestorLamports: 2n * SOL,
     solFloorLamports: SOL,
+    authorityLamports: SOL,
+    authorityReserveLamports: 8n * LAMPORTS_PER_MARKET,
     seedFunds: 1_000_000_000n,
     nbaSeeds: [300_000_000n],
   }
@@ -354,5 +375,15 @@ describe('practiceSkip, the guards', () => {
     expect(practiceSkip({ ...ok, seedFunds: 600_000_000n })).toBeNull()
     expect(practiceSkip({ ...ok, attestorLamports: null })).toBe('balance-unread')
     expect(practiceSkip({ ...ok, seedFunds: null })).toBe('balance-unread')
+  })
+
+  it("skips when the Authority's SOL would not cover the NBA reserve after the run's market", () => {
+    const reserve = 8n * LAMPORTS_PER_MARKET
+    const edge = reserve + LAMPORTS_PER_MARKET
+    expect(practiceSkip({ ...ok, authorityLamports: edge - 1n })).toBe('sol-authority')
+    expect(practiceSkip({ ...ok, authorityLamports: edge })).toBeNull()
+    expect(practiceSkip({ ...ok, authorityLamports: null })).toBe('balance-unread')
+    // The attestor's floor is checked first.
+    expect(practiceSkip({ ...ok, attestorLamports: 0n, authorityLamports: 0n })).toBe('sol-floor')
   })
 })

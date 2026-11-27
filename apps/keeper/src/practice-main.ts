@@ -93,6 +93,7 @@ async function main(): Promise<void> {
     balances: {
       attestorLamports: async () =>
         BigInt(await conn.getBalance(k.attestor.publicKey, 'confirmed')),
+      authorityLamports: async () => BigInt(await conn.getBalance(program.authority, 'confirmed')),
       seedFunds: async () => {
         const [treasury, wallet] = await Promise.all([
           balanceOf(program.treasury),
