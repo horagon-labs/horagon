@@ -1,8 +1,10 @@
 // Index reads over an ordered list of RPC endpoints, each with its own pace: a read goes to the
 // first endpoint not paused, and a rate limit, an auth refusal, a 5xx, a timeout or an unusable
 // answer pauses that endpoint and sends the same read to the next one. Fakes on a fake clock.
+import { Keypair } from '@solana/web3.js'
 import type { Logger } from 'pino'
 import { describe, expect, it } from 'vitest'
+import { makeConnection } from '../src/config'
 import { IndexPace, RATE_LIMIT_PAGE_AFTER_MS } from '../src/index-pace'
 import { EveryEndpointDown, IndexReads, NOT_NOW, readFailure } from '../src/index-reads'
 
@@ -62,6 +64,61 @@ describe('readFailure', () => {
     expect(readFailure(new Error('slot 14290 skipped'))).toBeNull()
     expect(readFailure(new Error('duplicate key value violates unique constraint'))).toBeNull()
     expect(readFailure(null)).toBeNull()
+  })
+})
+
+describe('readFailure on the errors web3.js throws', () => {
+  const key = Keypair.generate().publicKey
+  /** A Connection whose RPC answers `answer(body)`; the keeper's own options. */
+  const conn = (
+    answer: (body: unknown, signal?: AbortSignal | null) => Response | Promise<Response>,
+    timeoutMs?: number,
+  ) =>
+    makeConnection('https://rpc.devnet.example', undefined, {
+      fetchImpl: (async (_url: string, init?: RequestInit) =>
+        answer(JSON.parse(String(init?.body)), init?.signal)) as unknown as typeof fetch,
+      ...(timeoutMs ? { timeoutMs } : {}),
+    })
+  const http = (status: number, statusText: string) => () =>
+    new Response('{"error":"no"}', { status, statusText })
+  const rpcError = (code: number, message: string) => (body: unknown) =>
+    new Response(
+      JSON.stringify({ jsonrpc: '2.0', id: (body as { id: string }).id, error: { code, message } }),
+    )
+  const failureOf = async (p: Promise<unknown>) => {
+    try {
+      await p
+      return 'answered'
+    } catch (err) {
+      return readFailure(err)
+    }
+  }
+  const sigs = (c: ReturnType<typeof conn>) => c.getSignaturesForAddress(key)
+
+  it('classes HTTP statuses, JSON-RPC codes, timeouts and a batch answered with one object', async () => {
+    expect(await failureOf(sigs(conn(http(429, 'Too Many Requests'))))).toBe('rate-limit')
+    expect(await failureOf(sigs(conn(http(401, 'Unauthorized'))))).toBe('auth')
+    expect(await failureOf(sigs(conn(http(403, 'Forbidden'))))).toBe('auth')
+    expect(await failureOf(sigs(conn(http(503, 'Service Unavailable'))))).toBe('server')
+    expect(await failureOf(sigs(conn(http(400, 'Bad Request'))))).toBe('refused')
+    expect(
+      await failureOf(sigs(conn(rpcError(-16401, 'not available for anonymous access')))),
+    ).toBe('auth')
+    expect(await failureOf(sigs(conn(rpcError(-32005, 'Node is behind'))))).toBe('rate-limit')
+    expect(await failureOf(sigs(conn(rpcError(-32601, 'Method not found'))))).toBe('refused')
+    expect(await failureOf(sigs(conn(rpcError(-32009, 'Slot 1 was skipped'))))).toBeNull()
+    const hang = (_body: unknown, signal?: AbortSignal | null) =>
+      new Promise<Response>((_resolve, reject) => {
+        signal?.addEventListener('abort', () => reject(signal.reason))
+      })
+    expect(await failureOf(sigs(conn(hang, 20)))).toBe('timeout')
+    const single = () =>
+      new Response(
+        JSON.stringify({ jsonrpc: '2.0', id: null, error: { code: -32600, message: 'no batch' } }),
+      )
+    expect(
+      await failureOf(conn(single).getTransactions(['1'], { maxSupportedTransactionVersion: 0 })),
+    ).toBe('bad-answer')
   })
 })
 

@@ -12,7 +12,7 @@ import {
   ClusterMismatch,
   createLogger,
   DEVNET_GENESIS_HASH,
-  indexReadConnection,
+  indexEndpoints,
   isClusterRefusal,
   loadConfig,
   loadKeypair,
@@ -537,33 +537,89 @@ describe('loadConfig', () => {
   })
 })
 
-describe('HORAGON_INDEX_RPC_URL', () => {
-  const KEYED = 'https://index.devnet.example/rpc/v1?api-key=SECRET'
+describe('index RPC endpoints', () => {
+  const HELIUS = 'https://index.devnet.example/?api-key=SECRET1'
+  const ANKR = 'https://second.devnet.example/solana_devnet/SECRET2'
+  const TATUM = 'https://fallback.devnet.example'
 
-  it('is optional: unset or blank uses the main RPC', () => {
-    expect(loadConfig(env()).indexRpcUrl).toBeNull()
-    expect(loadConfig(env({ HORAGON_INDEX_RPC_URL: '' })).indexRpcUrl).toBeNull()
-    expect(loadConfig(env({ HORAGON_INDEX_RPC_URL: KEYED })).indexRpcUrl).toBe(KEYED)
+  it('are optional: unset or blank leaves only the main RPC', () => {
+    expect(loadConfig(env()).indexRpcs).toEqual([])
+    expect(
+      loadConfig(
+        env({
+          HORAGON_INDEX_RPC_URL: '',
+          HORAGON_INDEX_RPC_URL_2: '',
+          HORAGON_INDEX_FALLBACK_RPC_URL: '',
+          HORAGON_INDEX_FALLBACK_RPC_KEY: '',
+        }),
+      ).indexRpcs,
+    ).toEqual([])
   })
 
-  it('takes https only and never mainnet, without quoting the URL', () => {
-    const http = () =>
-      loadConfig(env({ HORAGON_INDEX_RPC_URL: 'http://index.devnet.example?k=SECRET' }))
-    expect(http).toThrow('HORAGON_INDEX_RPC_URL')
-    try {
-      http()
-    } catch (err) {
-      expect((err as Error).message).not.toContain('SECRET')
-    }
-    expect(() =>
-      loadConfig(env({ HORAGON_INDEX_RPC_URL: 'https://api.mainnet-beta.solana.com' })),
-    ).toThrow('devnet only')
+  it('come in order: index, index 2, the fallback with its key as a header; unset ones skipped', () => {
+    const all = loadConfig(
+      env({
+        HORAGON_INDEX_RPC_URL: HELIUS,
+        HORAGON_INDEX_RPC_URL_2: ANKR,
+        HORAGON_INDEX_FALLBACK_RPC_URL: TATUM,
+        HORAGON_INDEX_FALLBACK_RPC_KEY: 'SECRET3',
+      }),
+    ).indexRpcs
+    expect(all).toEqual([
+      { name: 'HORAGON_INDEX_RPC_URL', url: HELIUS },
+      { name: 'HORAGON_INDEX_RPC_URL_2', url: ANKR },
+      {
+        name: 'HORAGON_INDEX_FALLBACK_RPC_URL',
+        url: TATUM,
+        headers: { 'x-api-key': 'SECRET3' },
+      },
+    ])
+    const some = loadConfig(
+      env({ HORAGON_INDEX_RPC_URL_2: ANKR, HORAGON_INDEX_FALLBACK_RPC_URL: TATUM }),
+    ).indexRpcs
+    expect(some.map((r) => r.name)).toEqual([
+      'HORAGON_INDEX_RPC_URL_2',
+      'HORAGON_INDEX_FALLBACK_RPC_URL',
+    ])
+    expect(some[1]?.headers).toBeUndefined()
+  })
+
+  it('never stop the start: a non-https, unparsable or mainnet URL is marked refused, unquoted', () => {
+    const cfg = loadConfig(
+      env({
+        HORAGON_INDEX_RPC_URL: 'http://index.devnet.example?k=SECRET1',
+        HORAGON_INDEX_RPC_URL_2: 'not a url SECRET2',
+        HORAGON_INDEX_FALLBACK_RPC_URL: 'https://api.mainnet-beta.solana.com/SECRET3',
+      }),
+    )
+    expect(cfg.indexRpcs.map((r) => [r.name, r.refused])).toEqual([
+      ['HORAGON_INDEX_RPC_URL', 'not an https URL'],
+      ['HORAGON_INDEX_RPC_URL_2', 'not an https URL'],
+      ['HORAGON_INDEX_FALLBACK_RPC_URL', 'a mainnet URL'],
+    ])
+    expect(JSON.stringify(cfg.indexRpcs.map((r) => r.refused))).not.toMatch(/SECRET/)
   })
 
   it('names the host only', () => {
-    expect(rpcHost(KEYED)).toBe('index.devnet.example')
+    expect(rpcHost(HELIUS)).toBe('index.devnet.example')
+    expect(rpcHost(ANKR)).toBe('second.devnet.example')
     expect(rpcHost('https://user:pw@rpc.example:8899/x?y=z')).toBe('rpc.example')
     expect(rpcHost('not a url')).toBe('(invalid URL)')
+  })
+
+  it('sends the fallback key as an x-api-key header on every request', async () => {
+    const seen: Array<string | null> = []
+    const fetchImpl = (async (_url: string, init?: RequestInit) => {
+      seen.push(new Headers(init?.headers).get('x-api-key'))
+      const { id } = JSON.parse(String(init?.body)) as { id: string }
+      return new Response(JSON.stringify({ jsonrpc: '2.0', id, result: DEVNET_GENESIS_HASH }))
+    }) as unknown as typeof fetch
+    const conn = makeConnection(TATUM, undefined, {
+      fetchImpl,
+      httpHeaders: { 'x-api-key': 'SECRET3' },
+    })
+    expect(await conn.getGenesisHash()).toBe(DEVNET_GENESIS_HASH)
+    expect(seen).toEqual(['SECRET3'])
   })
 
   const fakeConn = (genesis: string | Error) =>
@@ -578,88 +634,80 @@ describe('HORAGON_INDEX_RPC_URL', () => {
     const log = pino({ level: 'info' }, { write: (l: string) => void lines.push(JSON.parse(l)) })
     return { lines, log }
   }
+  const main = { name: 'HORAGON_RPC_URL', host: 'api.devnet.solana.com' }
 
-  it('unset: index reads follow the main connection, whichever is active', async () => {
-    let active = fakeConn(DEVNET_GENESIS_HASH)
+  it('cluster-checks every endpoint and keeps the verified ones in order, the main RPC last', async () => {
+    const mainConn = fakeConn(DEVNET_GENESIS_HASH)
     const made: string[] = []
-    const get = await indexReadConnection({
-      url: null,
-      fallback: () => active,
+    const { lines, log } = capture()
+    const list = await indexEndpoints({
+      specs: [
+        { name: 'HORAGON_INDEX_RPC_URL', url: HELIUS },
+        { name: 'HORAGON_INDEX_RPC_URL_2', url: ANKR },
+        { name: 'HORAGON_INDEX_FALLBACK_RPC_URL', url: TATUM, headers: { 'x-api-key': 'SECRET3' } },
+      ],
+      main: [{ ...main, connection: () => mainConn }],
       cluster: 'devnet',
-      log: silent,
-      make: (u) => {
-        made.push(u)
+      log,
+      sleep: async () => {},
+      make: (spec) => {
+        made.push(spec.name)
         return fakeConn(DEVNET_GENESIS_HASH)
       },
     })
-    expect(get()).toBe(active)
-    active = fakeConn(DEVNET_GENESIS_HASH)
-    expect(get()).toBe(active)
-    expect(made).toEqual([])
+    expect(list.map((e) => [e.name, e.host])).toEqual([
+      ['HORAGON_INDEX_RPC_URL', 'index.devnet.example'],
+      ['HORAGON_INDEX_RPC_URL_2', 'second.devnet.example'],
+      ['HORAGON_INDEX_FALLBACK_RPC_URL', 'fallback.devnet.example'],
+      ['HORAGON_RPC_URL', 'api.devnet.solana.com'],
+    ])
+    expect(list.at(-1)?.connection()).toBe(mainConn)
+    expect(made.sort()).toEqual([
+      'HORAGON_INDEX_FALLBACK_RPC_URL',
+      'HORAGON_INDEX_RPC_URL',
+      'HORAGON_INDEX_RPC_URL_2',
+    ])
+    const text = JSON.stringify(lines)
+    expect(text).toContain('second.devnet.example')
+    expect(text).not.toMatch(/SECRET|solana_devnet|api-key/)
   })
 
-  it('set: a separate, verified Connection on that URL, logged by host only', async () => {
-    const main = fakeConn(DEVNET_GENESIS_HASH)
-    const own = fakeConn(DEVNET_GENESIS_HASH)
-    const made: string[] = []
+  it('drops a refused, mainnet or silent endpoint with a page, and never fails the start', async () => {
     const { lines, log } = capture()
-    const get = await indexReadConnection({
-      url: KEYED,
-      fallback: () => main,
+    const dropped: Array<{ name: string; host: string; reason: string }> = []
+    const mainConn = fakeConn(DEVNET_GENESIS_HASH)
+    const genesis: Record<string, string | Error> = {
+      HORAGON_INDEX_RPC_URL: MAINNET_GENESIS_HASH,
+      HORAGON_INDEX_RPC_URL_2: '4uhcVJyU9pJkvQyS88uRDiswHXSCkY3zQawwpjk2NsNY',
+      HORAGON_INDEX_FALLBACK_RPC_URL: new Error(`connect ECONNREFUSED ${TATUM}/SECRET3`),
+    }
+    const list = await indexEndpoints({
+      specs: [
+        { name: 'HORAGON_INDEX_RPC_URL', url: HELIUS },
+        { name: 'HORAGON_INDEX_RPC_URL_2', url: ANKR },
+        { name: 'HORAGON_INDEX_FALLBACK_RPC_URL', url: TATUM },
+        { name: 'HORAGON_INDEX_RPC_URL_X', url: 'http://x', refused: 'not an https URL' },
+      ],
+      main: [{ ...main, connection: () => mainConn }],
       cluster: 'devnet',
       log,
-      make: (u) => {
-        made.push(u)
-        return own
-      },
+      sleep: async () => {},
+      make: (spec) => fakeConn(genesis[spec.name] ?? DEVNET_GENESIS_HASH),
+      onDropped: async (name, host, reason) => void dropped.push({ name, host, reason }),
     })
-    expect(made).toEqual([KEYED])
-    expect(get()).toBe(own)
-    expect(get()).not.toBe(main)
-    expect(lines.at(-1)).toMatchObject({ indexRpcHost: 'index.devnet.example' })
-    expect(JSON.stringify(lines)).not.toContain('SECRET')
-    expect(JSON.stringify(lines)).not.toContain('/rpc/v1')
-  })
-
-  it('refuses a mainnet or wrong-cluster index RPC, and falls back from one that does not answer', async () => {
-    const main = fakeConn(DEVNET_GENESIS_HASH)
-    const sleep = async () => {}
-    await expect(
-      indexReadConnection({
-        url: KEYED,
-        fallback: () => main,
-        cluster: 'devnet',
-        log: silent,
-        sleep,
-        make: () => fakeConn(MAINNET_GENESIS_HASH),
-      }),
-    ).rejects.toThrow(HoragonError)
-    await expect(
-      indexReadConnection({
-        url: KEYED,
-        fallback: () => main,
-        cluster: 'devnet',
-        log: silent,
-        sleep,
-        make: () => fakeConn('4uhcVJyU9pJkvQyS88uRDiswHXSCkY3zQawwpjk2NsNY'),
-      }),
-    ).rejects.toThrow(ClusterMismatch)
-
-    const { lines, log } = capture()
-    const down: string[] = []
-    const get = await indexReadConnection({
-      url: KEYED,
-      fallback: () => main,
-      cluster: 'devnet',
-      log,
-      sleep,
-      make: () => fakeConn(new Error(`connect ECONNREFUSED ${KEYED}`)),
-      onDown: async (error) => void down.push(error),
-    })
-    expect(get()).toBe(main)
-    expect(down).toHaveLength(1)
-    expect(lines.at(-1)).toMatchObject({ level: 40, indexRpcHost: 'index.devnet.example' })
-    expect(JSON.stringify([lines, down])).not.toContain('SECRET')
+    expect(list.map((e) => e.name)).toEqual(['HORAGON_RPC_URL'])
+    expect(dropped.map((d) => d.name).sort()).toEqual([
+      'HORAGON_INDEX_FALLBACK_RPC_URL',
+      'HORAGON_INDEX_RPC_URL',
+      'HORAGON_INDEX_RPC_URL_2',
+      'HORAGON_INDEX_RPC_URL_X',
+    ])
+    const why = Object.fromEntries(dropped.map((d) => [d.name, d.reason]))
+    expect(why.HORAGON_INDEX_RPC_URL).toMatch(/mainnet/i)
+    expect(why.HORAGON_INDEX_RPC_URL_2).toMatch(/genesis/i)
+    expect(why.HORAGON_INDEX_FALLBACK_RPC_URL).toMatch(/did not answer/)
+    expect(why.HORAGON_INDEX_RPC_URL_X).toBe('not an https URL')
+    expect(JSON.stringify([lines, dropped])).not.toMatch(/SECRET|solana_devnet|api-key/)
   })
 })
 

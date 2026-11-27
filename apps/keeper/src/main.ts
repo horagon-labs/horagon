@@ -16,7 +16,7 @@ import { watchSponsoredAtas } from './ata-watch'
 import {
   BACKUP_RPC_TRIES,
   createLogger,
-  indexReadConnection,
+  indexEndpoints,
   loadConfig,
   makeConnection,
   rpcHost,
@@ -77,36 +77,40 @@ async function main(): Promise<void> {
 
   const { db, close } = connectKeeperDb(cfg.databaseUrl)
   const sender = new TxSender({ connections, payer: cfg.attestor, log, alerts })
-  // Index reads: their own RPC when set (verified like a backup), else the active main one.
-  const indexConnection = await indexReadConnection({
-    url: cfg.indexRpcUrl,
-    fallback: () => sender.connection,
+  // Index reads (indexer and ATA watch): the index RPCs that pass the cluster check, in order,
+  // then HORAGON_RPC_URL (and its backup when it was verified), each on a Connection of its own
+  // with its own pace; a failed read moves to the next one (index-reads.ts).
+  const mainIndex = cfg.rpcs.slice(0, connections.length).map((r, i) => {
+    const conn = makeConnection(r.url, undefined, { onActivity: () => guard.touch() })
+    return {
+      name: i === 0 ? 'HORAGON_RPC_URL' : 'HORAGON_RPC_BACKUP_URL',
+      host: rpcHost(r.url),
+      connection: () => conn,
+    }
+  })
+  const indexList = await indexEndpoints({
+    specs: cfg.indexRpcs,
+    main: mainIndex,
     cluster: cfg.cluster,
     log,
-    make: (url) => makeConnection(url, undefined, { onActivity: () => guard.touch() }),
-    onDown: async (error) => {
+    make: (spec) =>
+      makeConnection(spec.url, undefined, {
+        onActivity: () => guard.touch(),
+        ...(spec.headers ? { httpHeaders: spec.headers } : {}),
+      }),
+    onDropped: async (name, host, reason) => {
       await alerts.send(
-        'rpc-index-down',
-        `Index RPC ${cfg.indexRpcUrl ? rpcHost(cfg.indexRpcUrl) : ''} failed the cluster check ${BACKUP_RPC_TRIES} times (${error}); index reads use the main RPC until the keeper restarts.`,
+        `rpc-index-down:${name}`,
+        `Index RPC ${name} (${host}) left out: ${reason}. Index reads use the other RPCs until the keeper restarts.`,
       )
     },
   })
-  // One endpoint for now: the index RPC when it was verified, else the main one.
-  const indexEndpoint = {
-    name: cfg.indexRpcUrl ? 'HORAGON_INDEX_RPC_URL' : 'HORAGON_RPC_URL',
-    host: rpcHost(cfg.indexRpcUrl ?? cfg.rpcs[0]?.url ?? ''),
-  }
   const reads = new IndexReads({
-    endpoints: [
-      {
-        ...indexEndpoint,
-        connection: indexConnection,
-        pace: new IndexPace({ log }),
-      },
-    ],
+    endpoints: indexList.map((e) => ({ ...e, pace: new IndexPace({ log }) })),
     log,
     alerts,
   })
+  log.info({ indexRpcs: reads.describe() }, 'index reads use these RPCs, in order')
   const program = new HoragonProgram({ collateralMint: cfg.collateralMint })
   const ratings = await loadRatings(cfg.eloFile)
   const now = () => Math.floor(Date.now() / 1000)
