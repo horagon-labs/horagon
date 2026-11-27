@@ -90,9 +90,15 @@ describe('roundSteps', () => {
 })
 
 describe('indexSteps', () => {
-  it('runs the indexer, then the ATA watch when it is due', () => {
+  it('runs the indexer, then the ATA watch and the sponsor marks when each is due', () => {
     expect(indexSteps({ ataWatch: false })).toEqual(['index'])
     expect(indexSteps({ ataWatch: true })).toEqual(['index', 'ata-watch'])
+    expect(indexSteps({ ataWatch: false, sponsorMarks: true })).toEqual(['index', 'sponsor-marks'])
+    expect(indexSteps({ ataWatch: true, sponsorMarks: true })).toEqual([
+      'index',
+      'ata-watch',
+      'sponsor-marks',
+    ])
   })
 })
 
@@ -172,6 +178,27 @@ describe('PeriodicLoop', () => {
     expect(gaps[2]).toBe(10)
     expect(loop.rounds).toBe(starts.length)
     expect(loop.busyMs()).toBeNull()
+  })
+
+  it('keeps the clock time the last round ended, null before the first', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(1_000_000)
+    let stopping = false
+    const loop = new PeriodicLoop({
+      periodMs: 10,
+      stopping: () => stopping,
+      round: async () => {
+        await sleep(3)
+      },
+    })
+    expect(loop.lastRoundAt).toBeNull()
+    const done = loop.run()
+    await vi.advanceTimersByTimeAsync(5)
+    expect(loop.lastRoundAt).toBe(1_000_003)
+    stopping = true
+    loop.wake()
+    await vi.advanceTimersByTimeAsync(20)
+    await done
   })
 
   it('ends after the round in progress once stopping, and a wake cuts the wait short', async () => {

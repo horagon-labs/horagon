@@ -3,7 +3,7 @@
 // finalizes), then hourly, behind one gate, the schedule, the treasury and the ESPN archive
 // retention, then the heartbeat, which goes out every round regardless. The index loop
 // (`indexSteps`): an indexer pass, then every 10 min the sponsored-ATA watch (with
-// SPONSOR_PUBKEY); it starts once its RPCs are cluster-checked, and nothing in it ever holds a
+// SPONSOR_PUBKEY) and every minute the sponsor budget marks the API logged; it starts once its RPCs are cluster-checked, and nothing in it ever holds a
 // tick. Each step fails on its own, logs, and is retried on its next turn. SIGTERM ends each loop
 // after the step in progress. Every main RPC's cluster is verified before anything else runs; a
 // backup RPC that does not answer is left out. Index reads go through IndexReads: the index RPCs
@@ -47,6 +47,7 @@ import {
 import { evidenceUri } from './propose'
 import { scheduleTick } from './schedule'
 import { Balldontlie } from './second-source/balldontlie'
+import { pageSponsorMarks } from './sponsor-marks'
 import { StallGuard, watchStall } from './stall'
 import { type AutoProposeDeps, autoProposeNotices, Keeper } from './tick'
 import { treasuryTick } from './treasury'
@@ -55,6 +56,8 @@ const TICK_MS = 5_000
 const INDEX_MS = 5_000
 const HOURLY_SECS = 3_600
 const ATA_WATCH_SECS = 600
+/** The sponsor budget marks the API logs are paged within about this long. */
+const SPONSOR_MARKS_SECS = 60
 /**
  * An index round that has gone this long without an RPC read answering or failing is stuck (a
  * lost database response: the driver has no query timeout), and the process exits so systemd
@@ -168,6 +171,7 @@ async function main(): Promise<void> {
 
   const hourlyDue = dueEvery(HOURLY_SECS)
   const ataWatchDue = dueEvery(ATA_WATCH_SECS)
+  const sponsorMarksDue = dueEvery(SPONSOR_MARKS_SECS)
   const tickStreak = new FailureStreak('tick')
   const indexStreak = new FailureStreak('index')
   const step = <T>(name: string, fn: () => Promise<T>) => runStep(log, name, fn, guard)
@@ -264,6 +268,11 @@ async function main(): Promise<void> {
           index: {
             rounds: indexLoop?.rounds ?? 0,
             busySecs: busy === null || busy === undefined ? null : Math.floor(busy / 1000),
+            // Unix seconds the last index round ended (the API's health shows the lag from it).
+            lastRoundAt:
+              indexLoop?.lastRoundAt === null || indexLoop?.lastRoundAt === undefined
+                ? null
+                : Math.floor(indexLoop.lastRoundAt / 1000),
           },
         }),
       )
@@ -314,9 +323,16 @@ async function main(): Promise<void> {
               watchSponsoredAtas({ db, reads, sponsor, alerts, log: indexLog, now }),
             )
           },
+          'sponsor-marks': async () =>
+            void (await indexStep('sponsor-marks', () =>
+              pageSponsorMarks({ db, alerts, log: indexLog, now }),
+            )),
         }
         await runRound(
-          indexSteps({ ataWatch: sponsor !== null && ataWatchDue(t) }),
+          indexSteps({
+            ataWatch: sponsor !== null && ataWatchDue(t),
+            sponsorMarks: sponsorMarksDue(t),
+          }),
           (s) => run[s](),
           () => stopping,
         )
