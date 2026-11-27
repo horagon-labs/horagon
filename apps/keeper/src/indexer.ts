@@ -626,8 +626,9 @@ async function noteStop(deps: IndexerDeps, m: MarketRow, sig: string): Promise<v
 
 /**
  * One market from its cursor. With IndexReads, each batch of transactions comes out of the
- * transaction budget, waited for no longer than `budgetLeft()`; when it would come later the scan
- * stops there (`partial`), the cursor at the last transaction read. A listing from an RPC behind the cursor (`MarketMarks.cursorSlot`) is not
+ * transaction budget, waited for no longer than `budgetLeft()`; when it would come later, or the
+ * pass budget is spent and a batch was read, the scan stops there (`partial`), the cursor at the
+ * last transaction read. A listing from an RPC behind the cursor (`MarketMarks.cursorSlot`) is not
  * read at all: the cursor never moves back.
  */
 async function indexMarket(
@@ -697,6 +698,13 @@ async function indexMarket(
   let rateLimited: { error: unknown } | undefined
   let partial = false
   scan: for (let i = 0; i < ordered.length; i += TRANSACTION_CHUNK) {
+    // The pass budget is spent and this market has read a batch: it goes on next pass. The
+    // transaction budget alone does not bound it: a batch that takes 3.5 s or more to answer and
+    // write leaves the transaction clock free, and the market would read its whole backlog.
+    if (deps.reads && i > 0 && budgetLeft() <= 0) {
+      partial = true
+      break
+    }
     const chunk = ordered.slice(i, i + TRANSACTION_CHUNK)
     let answer: Array<VersionedTransactionResponse | null>
     try {

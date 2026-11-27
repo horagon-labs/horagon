@@ -677,4 +677,27 @@ describe('indexOnce with an IndexPace', () => {
     expect(txBatches.map((b) => b.n)).toEqual([1])
     expect(stops.has(m)).toBe(false)
   })
+
+  it('ends a market partial once the pass budget is spent, even when each batch takes 4 s', async () => {
+    const m = await addMarket('open', 0)
+    const list = Array.from({ length: 200 }, (_, i) => `s${String(i).padStart(3, '0')}`)
+    sigAnswer = (_market, o) => history(list)(o)
+    // Each batch answers 4 s later: the transaction clock (10 x 350 ms) is free by the next one.
+    txAnswer = (sigs) => {
+      t += 4_000
+      return sigs.map(readable)
+    }
+    const started = t
+    await indexOnce(deps())
+    expect(txBatches).toHaveLength(1)
+    expect(await cursorOf(m)).toBe('s009')
+    expect(t - started).toBeLessThan(8_000)
+    // It goes on next pass, first, from where it stopped; no stop is counted.
+    t += 5_000
+    await indexOnce(deps())
+    expect(txBatches).toHaveLength(2)
+    expect(await cursorOf(m)).toBe('s019')
+    expect(warns.filter((w) => w.msg.includes('not readable'))).toEqual([])
+    expect(sent).toEqual([])
+  })
 })

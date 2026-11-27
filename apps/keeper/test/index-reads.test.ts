@@ -123,7 +123,7 @@ describe('readFailure on the errors web3.js throws', () => {
 })
 
 /** Endpoints on one fake clock, each with its own pace; `fail` makes one throw. */
-function fakeReads(names = ['a', 'b', 'c']) {
+function fakeReads(names = ['a', 'b', 'c'], onRead?: () => void) {
   let t = 1_000_000
   const infos: Array<{ obj: Record<string, unknown>; msg: string }> = []
   const warns: Array<{ obj: Record<string, unknown>; msg: string }> = []
@@ -157,7 +157,7 @@ function fakeReads(names = ['a', 'b', 'c']) {
     }),
     pace: new IndexPace({ log, clock, random: () => 0, sleep }),
   }))
-  const reads = new IndexReads({ endpoints, log, alerts, clock })
+  const reads = new IndexReads({ endpoints, log, alerts, clock, ...(onRead ? { onRead } : {}) })
   return {
     reads,
     endpoints,
@@ -337,5 +337,22 @@ describe('IndexReads', () => {
     f.fail.set('a', RATE_LIMIT)
     f.advance(3_500)
     expect(await pass.transactions(10, 0, (c) => c.read('tx3'))).toBe('b:tx3')
+  })
+
+  it('reports every read that answered or failed, for the index loop liveness', async () => {
+    let n = 0
+    const f = fakeReads(['a', 'b'], () => n++)
+    const pass = await f.reads.begin('index')
+    if (!pass) throw new Error('paused')
+    await pass.accounts((c) => c.read('accounts'))
+    expect(n).toBe(1)
+    // A failure on a, then the answer on b.
+    f.fail.set('a', RATE_LIMIT)
+    await pass.signatures((c) => c.read('sigs'))
+    expect(n).toBe(3)
+    // Nothing read: not progress.
+    expect(await pass.transactions(10, 0, (c) => c.read('tx1'))).toBe('b:tx1')
+    expect(await pass.transactions(10, 0, (c) => c.read('tx2'))).toBe(NOT_NOW)
+    expect(n).toBe(4)
   })
 })

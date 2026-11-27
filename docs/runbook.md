@@ -278,7 +278,7 @@ ssh "$HORAGON_VPS" systemctl --user restart horagon-keeper
 
 - The keeper exits by itself when nothing has happened in its tick loop for `KEEPER_STALL_SECS`
   (default 120 s; no step, heartbeat, log line or RPC answer of the tick loop, as when a database
-  response is lost; the index loop has its own limit of 300 s, L; the check runs
+  response is lost; the index loop has its own limit, 300 s without an index read, L; the check runs
   every 15 s, so it fires 120 to 135 s after the last sign of life), logging
   `keeper stalled: exiting so the service restarts` at fatal; systemd restarts it after 5 s. ESPN
   fetches do not count as activity and the schedule step can be silent for about 70 s in the
@@ -534,9 +534,10 @@ The indexer (every 5 s) and the ATA watch (every 10 min) run on a loop of their 
 tick loop: a slow or hung read there never delays a tick (halts, proposals, finalizes). The
 keeper heartbeat is still the tick loop's, written every tick round; it also carries
 `index.rounds` (index rounds finished) and `index.busySecs` (how long the index round in progress
-has run, null between rounds). An index round still running after 300 s means a lost database
-response: the keeper logs `keeper stalled: exiting so the service restarts` with step
-`index loop` and exits, and systemd restarts it (G).
+has run, null between rounds). An index round in which no RPC read has answered or failed for
+300 s means a lost database response: the keeper logs `keeper stalled: exiting so the service
+restarts` with step `index loop` and exits, and systemd restarts it (G). A long round that keeps
+reading is not stalled.
 
 **The RPCs, in order.** Index reads try `HORAGON_INDEX_RPC_URL`, then `HORAGON_INDEX_RPC_URL_2`,
 then `HORAGON_INDEX_FALLBACK_RPC_URL` (sent with `HORAGON_INDEX_FALLBACK_RPC_KEY` as its x-api-key
@@ -554,10 +555,12 @@ its header.
 signature reads 350 ms apart (at most 29 in any 10 s, under the public devnet limit of 40 calls
 of one method per 10 s); transaction reads in batches of at most 10, each entry counted, at most
 30 entries in any 10 s and 350 ms of the RPC's transaction clock per entry; one account read per
-pass (100 accounts each). A pass starts no market after 3 s, and a market whose next batch would
-wait longer than that stops there with its cursor at the last transaction read and goes on next
-pass, after the markets that waited longer (a backlog after a pause drains at about 3
-transactions a second, and every market gets its turn).
+pass (100 accounts each). A pass starts no market after 3 s. A market stops with its cursor at
+the last transaction read, and goes on next pass after the markets that waited longer, when its
+next batch would wait past those 3 s, or when the 3 s are spent and it has read a batch (however
+slowly the RPC answers, a pass reads one batch past its budget at most). A backlog after a pause
+drains at about 2 transactions a second per RPC (one batch of 10 per 5 s pass), and every market
+gets its turn.
 
 **Failover.** A read the RPC in use fails with a rate limit (HTTP 429, JSON-RPC -32005 or 429,
 "Too many requests"), an auth refusal (HTTP 401 or 403, JSON-RPC -16401, "Unauthorized"), another

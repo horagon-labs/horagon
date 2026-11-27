@@ -210,4 +210,30 @@ describe('PeriodicLoop', () => {
     await idleDone
     expect(idle.rounds).toBe(1)
   })
+
+  it('counts a stall from the last progress of the round in progress, not from its start', async () => {
+    vi.useFakeTimers()
+    let stopping = false
+    let release: () => void = () => {}
+    const loop = new PeriodicLoop({
+      periodMs: 60_000,
+      stopping: () => stopping,
+      round: () => new Promise<void>((r) => (release = r)),
+    })
+    // Progress before any round does not count for the next one.
+    loop.progress()
+    await vi.advanceTimersByTimeAsync(5)
+    expect(loop.stalledMs()).toBeNull()
+    const done = loop.run()
+    await vi.advanceTimersByTimeAsync(100)
+    expect(loop.stalledMs()).toBe(100)
+    loop.progress()
+    await vi.advanceTimersByTimeAsync(30)
+    expect(loop.stalledMs()).toBe(30)
+    expect(loop.busyMs()).toBe(130)
+    stopping = true
+    release()
+    await done
+    expect(loop.stalledMs()).toBeNull()
+  })
 })

@@ -61,6 +61,8 @@ export class PeriodicLoop {
   /** Rounds finished. */
   rounds = 0
   private startedAt: number | null = null
+  /** When (ms) the round in progress last made progress (`progress()`). */
+  private progressAt = Number.NEGATIVE_INFINITY
   private wakeUp: (() => void) | undefined
 
   constructor(
@@ -109,6 +111,21 @@ export class PeriodicLoop {
   /** How long (ms) the round in progress has run; null between rounds. */
   busyMs(): number | null {
     return this.startedAt === null ? null : (this.opts.clock ?? Date.now)() - this.startedAt
+  }
+
+  /** The round in progress did something (an RPC read answered or failed). */
+  progress(): void {
+    this.progressAt = (this.opts.clock ?? Date.now)()
+  }
+
+  /**
+   * How long (ms) the round in progress has gone without progress: since it started or since its
+   * last `progress()`, whichever is later; null between rounds. A long round that keeps reading
+   * is not stalled; one waiting on a lost database response is.
+   */
+  stalledMs(): number | null {
+    if (this.startedAt === null) return null
+    return (this.opts.clock ?? Date.now)() - Math.max(this.startedAt, this.progressAt)
   }
 }
 

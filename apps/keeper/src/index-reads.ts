@@ -165,6 +165,8 @@ export interface IndexReadsOptions<C> {
   alerts: Alerter
   /** Wall clock in ms; defaults to Date.now. */
   clock?: () => number
+  /** Each read that answered or failed (the index loop's liveness). */
+  onRead?: () => void
 }
 
 export class IndexReads<C = Connection> {
@@ -252,6 +254,8 @@ export class IndexReads<C = Connection> {
         last = err
         this.lastFailure = { name: e.name, failure }
         e.pace.down(source, err, failure, { name: e.name, host: e.host })
+      } finally {
+        this.opts.onRead?.()
       }
     }
   }

@@ -56,9 +56,10 @@ const INDEX_MS = 5_000
 const HOURLY_SECS = 3_600
 const ATA_WATCH_SECS = 600
 /**
- * An index round still running after this long is stuck (a lost database response: the driver
- * has no query timeout), and the process exits so systemd restarts it, as the tick's stall guard
- * does. Its RPC calls are bounded (15 s each, every RPC in the list in turn) well under it.
+ * An index round that has gone this long without an RPC read answering or failing is stuck (a
+ * lost database response: the driver has no query timeout), and the process exits so systemd
+ * restarts it, as the tick's stall guard does. It measures progress, not how long the round has
+ * run: each RPC call is bounded (15 s), and a market's scan ends once the pass budget is spent.
  */
 const INDEX_STALL_SECS = 300
 
@@ -172,15 +173,15 @@ async function main(): Promise<void> {
   const step = <T>(name: string, fn: () => Promise<T>) => runStep(log, name, fn, guard)
 
   // The index loop's lines do not feed the tick's stall guard; its own liveness is
-  // INDEX_STALL_SECS.
+  // INDEX_STALL_SECS without a read answering or failing (IndexReads `onRead`).
   const indexLog = log.child({ loop: 'index' })
   const indexStep = <T>(name: string, fn: () => Promise<T>) => runStep(indexLog, name, fn)
   watchStall(
     {
       check: () => {
-        const busy = indexLoop?.busyMs()
-        if (busy === null || busy === undefined || busy < INDEX_STALL_SECS * 1000) return null
-        return { stalledSecs: Math.floor(busy / 1000), step: 'index loop' }
+        const quiet = indexLoop?.stalledMs()
+        if (quiet === null || quiet === undefined || quiet < INDEX_STALL_SECS * 1000) return null
+        return { stalledSecs: Math.floor(quiet / 1000), step: 'index loop' }
       },
     },
     log,
@@ -268,7 +269,7 @@ async function main(): Promise<void> {
     },
   })
 
-  // The index loop: its RPCs are cluster-checked first (up to about 30 s for one that does not
+  // The index loop: its RPCs are cluster-checked first (up to about 60 s for one that does not
   // answer), then a round every 5 s. The tick loop does not wait for any of it.
   const indexing = (async () => {
     let reads: IndexReads<Connection>
@@ -358,6 +359,7 @@ async function main(): Promise<void> {
       endpoints: indexList.map((e) => ({ ...e, pace: new IndexPace({ log: indexLog }) })),
       log: indexLog,
       alerts,
+      onRead: () => indexLoop?.progress(),
     })
     indexLog.info({ indexRpcs: reads.describe() }, 'index reads use these RPCs, in order')
     return reads
