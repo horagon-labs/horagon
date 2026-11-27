@@ -18,6 +18,16 @@ export const STATUS_BY_CODE: Readonly<Record<HoragonErrorCode, number>> = {
   NETWORK: 502,
 }
 
+/**
+ * The base of every problem `type` (RFC 9457): the site's own origin. It redirects `/docs/errors`
+ * to the README's API errors table (apps/web/next.config.ts); the fragment names the code.
+ */
+export const PROBLEM_TYPE_BASE = 'https://www.horagon.xyz/docs/errors'
+
+/** `https://www.horagon.xyz/docs/errors#not_found` for NOT_FOUND. */
+export const problemType = (code: HoragonErrorCode): string =>
+  `${PROBLEM_TYPE_BASE}#${code.toLowerCase()}`
+
 /** The hint of an unexpected server fault: nothing the client can fix on its side. */
 export const SERVER_FAULT_HINT =
   'Something failed on the server. Retry in a few seconds; if it persists, report the request id.'
@@ -61,7 +71,7 @@ export function problemBody(err: unknown, requestId?: string): ProblemBody {
   if (err instanceof ApiError) {
     const status = err.extra.status ?? STATUS_BY_CODE[err.code]
     return {
-      type: `https://horagon.com/docs/errors#${err.code.toLowerCase()}`,
+      type: problemType(err.code),
       title: err.code,
       status,
       detail: err.message,
@@ -77,7 +87,7 @@ export function problemBody(err: unknown, requestId?: string): ProblemBody {
   // one built from an RPC failure can still quote a URL: redact it.
   if (isHoragonError(err)) {
     return {
-      type: `https://horagon.com/docs/errors#${err.code.toLowerCase()}`,
+      type: problemType(err.code),
       title: err.code,
       status: STATUS_BY_CODE[err.code],
       detail: redactUrls(err.message),
@@ -88,7 +98,7 @@ export function problemBody(err: unknown, requestId?: string): ProblemBody {
     }
   }
   return {
-    type: 'https://horagon.com/docs/errors#network',
+    type: problemType('NETWORK'),
     title: 'NETWORK',
     status: 500,
     detail: 'Internal error. Retry; if it persists, report the request id.',

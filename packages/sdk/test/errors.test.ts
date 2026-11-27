@@ -16,7 +16,9 @@ describe('HoragonError', () => {
     expect(e).toBeInstanceOf(Error)
     expect(e.name).toBe('HoragonError')
     expect(e.code).toBe('INSUFFICIENT_FUNDS')
-    expect(e.hint).toBe('Run `horagon wallet fund` to get devnet mUSDC and SOL.')
+    expect(e.hint).toBe(
+      'Get devnet mUSDC from the faucet, then retry; a sponsored trade needs no SOL.',
+    )
     expect(e.cause).toBe(cause)
     expect(isHoragonError(e)).toBe(true)
     expect(isHoragonError(cause)).toBe(false)
@@ -34,6 +36,21 @@ describe('HoragonError', () => {
 
   it('has a non-empty default hint for every code', () => {
     for (const code of HORAGON_ERROR_CODES) expect(DEFAULT_HINTS[code].length).toBeGreaterThan(10)
+  })
+
+  // Horagon ships no player CLI (README, Status: "Not planned"), and its only domain is
+  // horagon.xyz: a hint names the site, an API v1 route or an SDK method, nothing else.
+  it('names no command line tool and no other domain in any default hint', () => {
+    for (const code of HORAGON_ERROR_CODES) {
+      const hint = DEFAULT_HINTS[code]
+      expect(hint, code).not.toMatch(/\bhoragon (games|wallet|debug)\b|\bhg\.|horagon\.com|`/)
+    }
+    expect(DEFAULT_HINTS.NOT_FOUND).toBe(
+      'Check the id or the path. Game ids are listed by GET /api/v1/games.',
+    )
+    expect(DEFAULT_HINTS.PROGRAM_ERROR).toBe(
+      'Look the transaction up with GET /api/v1/tx/<signature>, or on Solana Explorer (devnet).',
+    )
   })
 
   it('exposes the code union as a type', () => {

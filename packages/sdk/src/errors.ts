@@ -16,20 +16,27 @@ export const HORAGON_ERROR_CODES = [
 
 export type HoragonErrorCode = (typeof HORAGON_ERROR_CODES)[number]
 
-/** Default `hint` per code: always something the user can do right now. */
+/**
+ * Default `hint` per code: always something the user can do right now, with what exists today:
+ * the site, API v1 routes and SDK methods. Horagon has no CLI for players.
+ */
 export const DEFAULT_HINTS: Readonly<Record<HoragonErrorCode, string>> = {
-  MARKET_CLOSED: 'This market no longer accepts trades. Pick an open market with `horagon games`.',
+  MARKET_CLOSED:
+    'This market no longer accepts trades. Pick an open game on the board, or from GET /api/v1/games.',
   MARKET_HALTED: 'Trading on this market is halted. Wait for the result, then claim.',
   SLIPPAGE_EXCEEDED: 'The price moved. Request a new quote and retry.',
   MISSING_TOKEN_ACCOUNT:
-    'Rebuild the transaction with `hg.trade.build`; it creates the YES and NO token accounts first.',
-  INSUFFICIENT_FUNDS: 'Run `horagon wallet fund` to get devnet mUSDC and SOL.',
+    'Rebuild the transaction with POST /api/v1/tx/trade (trade.build in the SDK); it creates the YES and NO token accounts first.',
+  INSUFFICIENT_FUNDS:
+    'Get devnet mUSDC from the faucet, then retry; a sponsored trade needs no SOL.',
   RATE_LIMITED: 'Wait a few seconds and retry.',
-  SPONSOR_REJECTED: 'Build the transaction with `hg.trade.build` so it passes the sponsor rules.',
+  SPONSOR_REJECTED:
+    'Build the transaction with POST /api/v1/tx/trade (trade.build in the SDK) so it passes the sponsor rules.',
   MAINNET_DISABLED: "Horagon runs on devnet only. Use cluster 'devnet' or 'localnet'.",
-  NOT_FOUND: 'Check the id. List valid ids with `horagon games`.',
+  NOT_FOUND: 'Check the id or the path. Game ids are listed by GET /api/v1/games.',
   NETWORK: 'Check your connection and RPC URL, then retry.',
-  PROGRAM_ERROR: 'Inspect the transaction with `horagon debug tx <signature>`.',
+  PROGRAM_ERROR:
+    'Look the transaction up with GET /api/v1/tx/<signature>, or on Solana Explorer (devnet).',
   INVALID_INPUT: 'Fix the argument named in the message and retry.',
 }
 
