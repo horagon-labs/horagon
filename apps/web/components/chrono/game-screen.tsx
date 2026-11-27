@@ -95,13 +95,15 @@ export function GameScreen(p: GameScreenProps) {
   // The run flash only for a run that moved the price 2 points or more; else the words only.
   const flashKey =
     latest && !runFlashes(latest.priceFrom, latest.priceTo) ? null : runKeyOf(p.history, latest)
-  const line =
-    stop > 0 && stopped
-      ? stopLine(game)
-      : clutch
-        ? clutchLine(game)
-        : stateLine(dial.state, game, dial.secsLeft, p.now)
-  const mine = stop > 0 && stopped ? holderLine(game, p.positions, atStop) : null
+  // Strings 14 and 15 after a Buzzer stop, while the market waits for its result; a proposed,
+  // challenged or final result says its own words.
+  const justStopped = stop > 0 && dial.state === 'closed'
+  const line = justStopped
+    ? stopLine(game)
+    : clutch
+      ? clutchLine(game)
+      : stateLine(dial.state, game, dial.secsLeft, p.now)
+  const mine = justStopped ? holderLine(game, p.positions, atStop) : null
   return (
     <div
       className="space-y-6"
