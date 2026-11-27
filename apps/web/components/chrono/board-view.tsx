@@ -11,7 +11,7 @@
 // slot: first below lg, the list after it and the idle foot after the list; from lg the face and
 // its foot share the left column and the list runs down the right one. When the first market
 // opens under the poll, the Night dial, the count line and the open foot (the compact story)
-// take over with no reload (G4).
+// take over with no reload (G4), and TonightBoard hands no idle face again until a reload.
 import type { Game, PositionsResponse } from '@horagon/sdk'
 import type { ReactNode } from 'react'
 import {

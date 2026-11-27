@@ -11,7 +11,9 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
 import { BoardView, type BoardViewProps } from '../components/chrono/board-view'
 import { StoryCard } from '../components/story-card'
+import { marketOpen, swapHeld } from '../lib/chrono/board'
 import { at, game, market } from '../lib/chrono/fixtures'
+import { screenState } from '../lib/server/first-screen'
 
 const WEB = join(import.meta.dirname, '..')
 const read = (...p: string[]) => readFileSync(join(WEB, ...p), 'utf8')
@@ -293,6 +295,85 @@ describe('a market opening under the poll swaps the idle face, no reload (G4, C1
     const without = board({ games: opened(1), now: OPEN_NOW, openFoot: undefined })
     expect(without).not.toContain('data-open-foot')
     expect(without.startsWith('<div class="flex flex-col gap-4 lg:grid')).toBe(true)
+  })
+
+  // Refix 1: the swap holds until a reload. The idle face is the server's, for the state it saw (a
+  // page loaded in S2 holds the story of the night before). When the night's last market stops
+  // and no market is open, bringing that face back would retell the old night under the board's
+  // "All stopped." (S5 tells the night that just ended, which only the server knows), and its
+  // tape would draw again. Once the poll has seen a market open, the page stays as one loaded in
+  // S3/S4.
+  // 10:40 PM ET: both games final, NYK's draft proposed; the ET night is over.
+  const NIGHT_OVER = at('2026-11-28T03:40:00Z')
+  const stopped = (): Game[] =>
+    opened(1).map((g) => ({
+      ...g,
+      status: 'final',
+      homeScore: 108,
+      awayScore: 101,
+      period: 4,
+      clockSecs: null,
+      markets: g.markets.map((m) => ({
+        ...m,
+        status: 'proposed',
+        outcome: 'yes',
+        price: 0.97,
+        priceTs: NIGHT_OVER - 600,
+      })),
+    }))
+
+  it('holds the swap: once the poll has seen a market open, the face stays gone', () => {
+    // The same rule the server picks S3/S4 by: a listed winner market trades now.
+    expect(marketOpen(friday(), at('2026-11-27T22:58:00Z'))).toBe(false)
+    expect(marketOpen(opened(1), OPEN_NOW)).toBe(true)
+    expect(marketOpen(stopped(), NIGHT_OVER)).toBe(false)
+    expect(marketOpen(undefined, OPEN_NOW)).toBe(false)
+    // S2, then NYK opens, then the night ends: held from the first open on.
+    let held = false
+    held = swapHeld(held, friday(), at('2026-11-27T22:58:00Z'))
+    expect(held).toBe(false)
+    held = swapHeld(held, opened(1), OPEN_NOW)
+    expect(held).toBe(true)
+    held = swapHeld(held, stopped(), NIGHT_OVER)
+    expect(held).toBe(true)
+    // A page that never saw a market open keeps its face (S1, S2, S5 from the first frame).
+    expect(swapHeld(false, stopped(), NIGHT_OVER)).toBe(false)
+  })
+
+  it('counts every listed market, whatever the follow filter shows, as the server does', () => {
+    // Following DET only: the filtered board counts no open market, but NYK's is open, so a
+    // reload would lay out S3 (no face). The poll's swap follows the server, not the filter.
+    const filtered = board({ games: opened(1), now: OPEN_NOW, follows: ['DET'] })
+    expect(filtered).not.toContain(' open now ·')
+    expect(marketOpen(opened(1), OPEN_NOW)).toBe(true)
+    expect(screenState(opened(1), OPEN_NOW)).toBe('preopen')
+  })
+
+  it('the held page at the night\'s end: the dial and "All stopped.", the compact story, no face', () => {
+    // TonightBoard hands no face once the swap is held.
+    const html = board({
+      games: stopped(),
+      now: NIGHT_OVER,
+      idleFace: undefined,
+      idleFoot: undefined,
+    })
+    expect(html).not.toContain('data-test-face')
+    expect(html).not.toContain('data-test-foot')
+    expect(html).toContain('role="listbox"')
+    expect(html).toMatch(/<p [^>]*data-stopped[^>]*>All stopped\.<\/p>/)
+    expect(html).toMatch(/<div data-open-foot="true"><p data-test-open="true">COMPACT<\/p><\/div>$/)
+    // The count line has nothing open to count, so no Live-blue dot.
+    expect(html).not.toContain('data-count')
+  })
+
+  it("TonightBoard holds the swap with the server's rule and hands no face once held", () => {
+    const src = read('components', 'tonight-board.tsx')
+    expect(src).toMatch(/const \[held, setHeld\] = useState\(false\)/)
+    expect(src).toMatch(/swapHeld\(held, shown, now\)/)
+    expect(src).toContain('idleFace={swap ? undefined : idleFace}')
+    expect(src).toContain('idleFoot={swap ? undefined : idleFoot}')
+    // One rule for S3/S4 on the server and the swap in the browser.
+    expect(read('lib', 'server', 'first-screen.ts')).toContain('marketOpen(games, now)')
   })
 })
 

@@ -197,6 +197,23 @@ export function rowWords(i: BoardItem, now: number): RowWords {
 export const openNow = (i: BoardItem): boolean => i.market !== undefined && isTrading(i.state)
 
 /**
+ * Some listed winner market trades now, whatever the follow filter shows (first-screen §3 `open`):
+ * how the server picks S3/S4 (lib/server/first-screen.ts), and how the board's poll sees the first
+ * open that swaps the idle face for the Night dial (G4).
+ */
+export const marketOpen = (games: readonly Game[] | undefined, now: number): boolean =>
+  (games ?? []).some((g) => isTonight(g, now * 1000) && openNow(boardItem(g, undefined, now)))
+
+/**
+ * The swap at the first open holds until a reload (G4). The idle face is the server's, for the
+ * state it saw: a page loaded in S2 holds the night before. Brought back when the markets stop, it
+ * would retell that night under "All stopped." (S5 tells the night that just ended, which only the
+ * server knows), so once the poll has seen a market open the page stays as one loaded in S3/S4.
+ */
+export const swapHeld = (held: boolean, games: readonly Game[] | undefined, now: number): boolean =>
+  held || marketOpen(games, now)
+
+/**
  * The H1 may say "Prices move with every run." (first-screen C2b) only when a moved market is on
  * screen. While a listed winner market trades (S3, S4): some listed winner market moved from its
  * open. Otherwise (S1, S2, S5): only the story card's market, `storyMoved`.

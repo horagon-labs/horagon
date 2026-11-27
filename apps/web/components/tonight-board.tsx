@@ -3,9 +3,11 @@
 // that light arcs and rows are the wallet's own portfolio poll, so the board adds no request.
 // The server's first frame (R5, lib/server/initial.ts) fills the board until the first poll
 // answers, so the page never opens on "Setting the dial…" while the API is up. While no market is
-// open, the server's idle face (the story card) takes the dial's slot.
+// open, the server's idle face (the story card) takes the dial's slot; once the poll has seen a
+// market open, the Night dial keeps it until a reload.
 import { type ReactNode, useEffect, useState } from 'react'
 import { boardApi } from '../lib/api'
+import { swapHeld } from '../lib/chrono/board'
 import { pollHealth } from '../lib/chrono/health'
 import { useNow } from '../lib/chrono/now'
 import { loadFollows, toggleFollow } from '../lib/follows'
@@ -24,8 +26,9 @@ const storage = () => {
 
 /**
  * `idleFace` and `idleFoot`: the server-rendered story card and what follows it (first-screen W5),
- * shown in the dial's slot until the first market opens. `openFoot`: the compact story and the
- * Practice line, shown under the board once a market is open, so the poll swaps them in (G4).
+ * shown in the dial's slot until the poll first sees a market open, and not again on this page.
+ * `openFoot`: the compact story and the Practice line, shown under the board once a market is
+ * open, so the poll swaps them in (G4).
  */
 export function TonightBoard({
   initial,
@@ -49,10 +52,16 @@ export function TonightBoard({
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [hoverId, setHoverId] = useState<string | null>(null)
   useEffect(() => setFollows(loadFollows(storage())), [])
+  const shown = games.data ?? initial.games
+  // The swap holds until a reload (lib/chrono/board.ts swapHeld): when the night's markets stop,
+  // the page keeps the dial and its "All stopped." line, never the night it was loaded with.
+  const [held, setHeld] = useState(false)
+  const swap = swapHeld(held, shown, now)
+  if (swap && !held) setHeld(true)
 
   return (
     <BoardView
-      games={games.data ?? initial.games}
+      games={shown}
       upcoming={initial.upcoming}
       portfolio={portfolio?.wallet === address ? portfolio : undefined}
       now={now}
@@ -68,8 +77,8 @@ export function TonightBoard({
       onSelect={setSelectedId}
       hoverId={hoverId}
       onHover={setHoverId}
-      idleFace={idleFace}
-      idleFoot={idleFoot}
+      idleFace={swap ? undefined : idleFace}
+      idleFoot={swap ? undefined : idleFoot}
       openFoot={openFoot}
     />
   )
