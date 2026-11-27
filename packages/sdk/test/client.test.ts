@@ -185,3 +185,25 @@ describe('HoragonClient.me (R7)', () => {
     await expect(c.portfolio(WALLET)).resolves.toMatchObject({ nights: 2 })
   })
 })
+
+describe('HoragonClient.record (first-screen proof rail)', () => {
+  it('asks /record and parses the two counts', async () => {
+    const s = scripted([json({ markets: 12, final: 12 })])
+    const c = new HoragonClient({ baseUrl: 'https://h.test/api/v1', fetch: s.fetchImpl })
+    await expect(c.record()).resolves.toEqual({ markets: 12, final: 12 })
+    expect(s.calls).toEqual([{ url: 'https://h.test/api/v1/record', method: 'GET' }])
+  })
+
+  it('refuses a count that is not a whole number at or above 0, or more final than created', async () => {
+    for (const bad of [
+      { markets: -1, final: 0 },
+      { markets: 1.5, final: 0 },
+      { markets: 2, final: 3 },
+      { markets: 2 },
+    ]) {
+      const s = scripted([json(bad)])
+      const c = new HoragonClient({ baseUrl: 'https://h.test', fetch: s.fetchImpl, retries: 0 })
+      await expect(c.record(), JSON.stringify(bad)).rejects.toMatchObject({ code: 'NETWORK' })
+    }
+  })
+})

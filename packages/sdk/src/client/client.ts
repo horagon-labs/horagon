@@ -38,6 +38,8 @@ import {
   type Quote,
   type QuoteRequest,
   QuoteSchema,
+  type RecordResponse,
+  RecordSchema,
   SignatureSchema,
   SubmitResponseSchema,
   type TradeBuildRequest,
@@ -243,6 +245,11 @@ export class HoragonClient {
   /** The Practice run in flight and the next one (R8). NOT_FOUND while FLAG_PRACTICE is off. */
   practice(): Promise<PracticeResponse> {
     return this.get('/practice', {}, PracticeResponseSchema)
+  }
+
+  /** The NBA winner markets created on chain and the results final on chain (proof rail). */
+  record(): Promise<RecordResponse> {
+    return this.get('/record', {}, RecordSchema)
   }
 
   faucet(wallet: string): Promise<FaucetResponse> {

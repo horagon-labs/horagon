@@ -4,6 +4,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import {
   atasClosedAway,
   countGames,
+  countMarkets,
   type Db,
   type DbHandle,
   gamesByIds,
@@ -462,6 +463,38 @@ describe('unresolvedBacklog', () => {
       count: 1,
       oldestEndTs: new Date('2026-11-20T23:00:00Z'),
     })
+  })
+})
+
+describe('countMarkets (first-screen /record)', () => {
+  it('counts the winner markets of one league created on chain, and those with a final result', async () => {
+    expect(await countMarkets(h.db, 'NBA')).toEqual({ markets: 0, final: 0 })
+    await seedGames('nba-1', 'nba-2', 'nba-3', 'nba-4')
+    await upsertScheduledGames(h.db, [
+      game('practice-401910007p0', { league: 'PRACTICE', externalId: '401910007p0' }),
+    ])
+    // Created and final.
+    await upsertMarket(h.db, { ...market('M1', 'nba-1'), createSig: 'c1', finalizeSig: 'f1' })
+    await upsertMarket(h.db, { ...market('M2', 'nba-2'), createSig: 'c2', finalizeSig: 'f2' })
+    // Created, result not final yet.
+    await upsertMarket(h.db, { ...market('M3', 'nba-3', { status: 'proposed' }), createSig: 'c3' })
+    // Recorded but no create signature: not counted.
+    await upsertMarket(h.db, market('M4', 'nba-4'))
+    // A second-half market is not a winner market.
+    await upsertMarket(h.db, {
+      ...baseMarket('H1', 'nba-1', 1),
+      createSig: 'c5',
+      finalizeSig: 'f5',
+    })
+    // Practice never counts as NBA.
+    await upsertMarket(h.db, {
+      ...market('P1', 'practice-401910007p0'),
+      createSig: 'c6',
+      finalizeSig: 'f6',
+    })
+    expect(await countMarkets(h.db, 'NBA')).toEqual({ markets: 3, final: 2 })
+    expect(await countMarkets(h.db, 'PRACTICE')).toEqual({ markets: 1, final: 1 })
+    expect(await countMarkets(h.db, 'WNBA')).toEqual({ markets: 0, final: 0 })
   })
 })
 

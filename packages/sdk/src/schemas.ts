@@ -455,6 +455,17 @@ export const PracticeResponseSchema = z.object({
   counterparty: z.enum(['agent', 'none']),
 })
 
+/**
+ * `GET /api/v1/record` (first-screen proof rail): the NBA winner markets created on chain, and
+ * those whose result is final on chain. Practice markets never count.
+ */
+export const RecordSchema = z
+  .object({
+    markets: z.number().int().min(0),
+    final: z.number().int().min(0),
+  })
+  .refine((r) => r.final <= r.markets, { message: 'more final results than markets' })
+
 export type GameStatus = z.infer<typeof GameStatusSchema>
 export type MarketKind = z.infer<typeof MarketKindSchema>
 export type MarketStatus = z.infer<typeof MarketStatusSchema>
@@ -488,6 +499,7 @@ export type Health = z.infer<typeof HealthSchema>
 export type Problem = z.infer<typeof ProblemSchema>
 export type FlagsResponse = z.infer<typeof FlagsResponseSchema>
 export type PracticeResponse = z.infer<typeof PracticeResponseSchema>
+export type RecordResponse = z.infer<typeof RecordSchema>
 
 /** On-chain `GameMarket.kind` <-> API name. */
 export const MARKET_KIND_CODE: Readonly<Record<MarketKind, 0 | 1>> = { winner: 0, 'second-half': 1 }

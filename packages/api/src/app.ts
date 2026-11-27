@@ -1,6 +1,7 @@
 // API v1 (spec 19.3), Tier 1 routes. Mounted by Next.js at /api/v1 and by `horagon dev`.
 import { createRoute, OpenAPIHono, z } from '@hono/zod-openapi'
 import {
+  countMarkets,
   getEvidence,
   getGame,
   getHeartbeat,
@@ -39,6 +40,7 @@ import {
   PubkeySchema,
   QuoteRequestSchema,
   QuoteSchema,
+  RecordSchema,
   SignatureSchema,
   SubmitRequestSchema,
   SubmitResponseSchema,
@@ -506,6 +508,21 @@ export function createApp(deps: ApiDeps) {
     async (c) => {
       c.header('cache-control', cacheShort)
       return c.json(await practiceFor(deps.db, deps.now()), 200)
+    },
+  )
+
+  app.openapi(
+    createRoute({
+      method: 'get',
+      path: '/record',
+      responses: {
+        200: json(RecordSchema, 'NBA winner markets created on chain, and results final on chain'),
+      },
+    }),
+    async (c) => {
+      // The first screen's proof rail: a count that moves a few times a night.
+      c.header('cache-control', 's-maxage=60, stale-while-revalidate=60')
+      return c.json(await countMarkets(deps.db, 'NBA'), 200)
     },
   )
 

@@ -7,6 +7,7 @@ import {
   eq,
   gte,
   inArray,
+  isNotNull,
   isNull,
   lt,
   max,
@@ -15,7 +16,7 @@ import {
   or,
 } from 'drizzle-orm'
 import type { Db } from './client'
-import { marketIdReservations, markets, pricePoints, redeemsClaims, trades } from './schema'
+import { games, marketIdReservations, markets, pricePoints, redeemsClaims, trades } from './schema'
 
 export type NewMarket = typeof markets.$inferInsert
 export type TradeRow = typeof trades.$inferSelect
@@ -283,4 +284,22 @@ export async function unresolvedBacklog(
     .where(and(inArray(markets.status, UNPROPOSED), lt(markets.endTs, now)))
   const row = rows[0]
   return { count: Number(row?.n ?? 0), oldestEndTs: row?.oldest ?? null }
+}
+
+/**
+ * One league's record on chain (first-screen proof rail, GET /record): its winner markets the
+ * keeper created on chain (a `create_sig`), and those whose result is final (a `finalize_sig`).
+ * Per league, so Practice (league PRACTICE) never counts as an NBA market.
+ */
+export async function countMarkets(
+  db: Db,
+  league: string,
+): Promise<{ markets: number; final: number }> {
+  const rows = await db
+    .select({ markets: count(), final: count(markets.finalizeSig) })
+    .from(markets)
+    .innerJoin(games, eq(games.id, markets.gameId))
+    .where(and(eq(games.league, league), eq(markets.kind, 0), isNotNull(markets.createSig)))
+  const row = rows[0]
+  return { markets: Number(row?.markets ?? 0), final: Number(row?.final ?? 0) }
 }
