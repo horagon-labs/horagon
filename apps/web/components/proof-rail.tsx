@@ -14,7 +14,7 @@ const POOLS = PM_AMM_PROGRAM_ID.toBase58()
 const RESULTS = HORAGON_PROGRAM_ID.toBase58()
 
 // Ink among muted words is under 3:1 against them, so links are underlined too (review §3.3).
-const LINK = 'inline-flex min-h-11 items-center text-ink underline underline-offset-4'
+const LINK = 'inline-flex min-h-11 items-center gap-1 text-ink underline underline-offset-4'
 
 const Arrow = () => <span aria-hidden="true">↗</span>
 

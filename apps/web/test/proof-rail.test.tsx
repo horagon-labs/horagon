@@ -84,6 +84,8 @@ describe('the proof rail (C5, C6, C6m)', () => {
     const links = html.match(/<a [^>]*>/g) ?? []
     expect(links).toHaveLength(4)
     for (const a of links) expect(a).toMatch(/\bmin-h-11\b/)
+    // A flex link drops the space before its arrow: the gap keeps "N16y ↗" apart (slice 2 shots).
+    for (const a of links) expect(a).toMatch(/\binline-flex\b[^"]*\bgap-1\b/)
     expect(html).toContain('data-proof-rail')
     expect(part(html, 'data-rail-wide')).toMatch(
       /\bfont-mono\b[^"]*\btext-12\b|\btext-12\b[^"]*\bfont-mono\b/,
