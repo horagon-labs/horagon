@@ -231,12 +231,17 @@ describe('the strip markup (R10)', () => {
     expect(read('components', 'last-night.tsx')).not.toContain("'use client'")
   })
 
-  it('renders on / under the board and above the agent note, from the server', () => {
+  it('renders on / from the server: the idle face without a story, else under the board', () => {
+    // First-screen slice 4: the story card is the idle face and its A4 rows come from /nights;
+    // the strip stands in as the face when the story is missing, and follows the board in S3/S4.
     const page = read('app', 'page.tsx')
     const board = page.indexOf('<TonightBoard')
-    const strip = page.indexOf('<LastNightStrip')
-    expect(strip).toBeGreaterThan(board)
-    expect(page.indexOf('<AgentNote />')).toBeGreaterThan(strip)
+    const face = page.indexOf('<LastNightStrip')
+    const under = page.indexOf('<LastNightStrip', board)
+    expect(face).toBeGreaterThan(0)
+    expect(face).toBeLessThan(board)
+    expect(under).toBeGreaterThan(board)
+    expect(page.indexOf('<AgentNote />')).toBeGreaterThan(under)
     expect(read('lib', 'server', 'api.ts')).toMatch(/export function initialLastNight\(\)/)
   })
 })

@@ -243,10 +243,11 @@ describe('/ wires the rail (§7 W6)', () => {
   it('loads the counts beside the board, renders the rail under the hero, and passes `moved`', () => {
     const page = src('app/page.tsx')
     expect(page).toMatch(/Promise\.all\(\[[^\]]*initialRecord\(\)[^\]]*\]\)/)
-    expect(page).toContain('moved={heroMoved(initial.games, initial.now)}')
+    // Slice 4: the story's own move and market (C2b, C6m), the night's lead game without one.
     expect(page).toContain(
-      '<ProofRail record={record} proofMarket={lastNight?.rows[0]?.market ?? null} />',
+      'moved={heroMoved(initial.games, initial.now, story?.game.moved ?? false)}',
     )
+    expect(page).toContain('proofMarket={story?.game.market ?? night?.rows[0]?.market ?? null}')
     expect(page.indexOf('<Hero')).toBeLessThan(page.indexOf('<ProofRail'))
     expect(page.indexOf('<ProofRail')).toBeLessThan(page.indexOf('<TonightBoard'))
   })

@@ -3,9 +3,10 @@
 // opening price is the model's pre-game % written on chain; the closing price is the last indexed
 // price, which stops at the halt, and is printed only when it moved (first-screen spec C14). Pure
 // selection plus a loader; best effort, like the first frame.
-import type { Game } from '@horagon/sdk'
+import type { Game, Night, NightGame } from '@horagon/sdk'
 import { etNight } from '@horagon/sdk'
 import { isUpset, winnerOpened } from '@horagon/sdk/study'
+import { etDay } from '../chrono/time'
 import { percent } from '../format'
 import { type BoardClient, INITIAL_TIMEOUT_MS } from './initial'
 
@@ -80,6 +81,49 @@ export function nightRows(games: readonly Game[]): { rows: LastNightRow[]; upset
   return { rows: all.slice(0, LAST_NIGHT_ROWS), upsets: all.filter((r) => r.upset).length }
 }
 
+/** One game of GET /nights as an A4 row: /nights already tells it from the winner's side. */
+const rowOfNight = (g: NightGame): LastNightRow => ({
+  id: g.id,
+  market: g.market,
+  winner: g.winner,
+  loser: g.loser,
+  winScore: Math.max(g.homeScore, g.awayScore),
+  loseScore: Math.min(g.homeScore, g.awayScore),
+  openedBps: g.openedBps,
+  closed: g.closed,
+  moved: g.moved,
+  upset: g.upset,
+  overtime: g.overtime,
+  tipoff: g.scheduledTipoff,
+})
+
+/**
+ * The A4 rows under the story card (first-screen W3): the story night's other games, from the
+ * same GET /nights answer, so a row says "closed" by the same rule the story says "moved" (calls
+ * and half a point). R10 story order; the story's own game dropped; LAST_NIGHT_ROWS games in all.
+ */
+export function rowsOfNight(night: Night, storyId: string): LastNightRow[] {
+  return night.games
+    .filter((g) => g.id !== storyId)
+    .map(rowOfNight)
+    .sort(storyOrder)
+    .slice(0, LAST_NIGHT_ROWS - 1)
+}
+
+/**
+ * The night that just ended (first-screen S5): once every game of the ET night stopped, before the
+ * 06:00 ET rollover, the story tells tonight's games, from the board's own list. Null when none of
+ * them is a final NBA game with a winner market.
+ */
+export function currentNight(games: readonly Game[], nowSecs: number): LastNight | null {
+  const date = etNight(nowSecs)
+  const tonight = games.filter(
+    (g) => etDay(Math.floor(Date.parse(g.scheduledTipoff) / 1000)) === date,
+  )
+  const { rows, upsets } = nightRows(tonight)
+  return rows.length === 0 ? null : { date, rows, upsets }
+}
+
 const etPrevDay = (date: string) =>
   new Date(Date.parse(`${date}T12:00:00Z`) - 86_400_000).toISOString().slice(0, 10)
 
@@ -129,6 +173,10 @@ const dayLabel = new Intl.DateTimeFormat('en-US', {
   timeZone: 'UTC',
 })
 
+/** "Wed, Nov 25" for an ET date (YYYY-MM-DD). */
+export const nightDayLabel = (date: string): string =>
+  dayLabel.format(new Date(`${date}T12:00:00Z`))
+
 /** The ET calendar date of unix second `ts` (no 06:00 rollover, unlike etNight). */
 const etCalendarDate = (ts: number) =>
   new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' }).format(new Date(ts * 1000))
@@ -139,8 +187,11 @@ const etCalendarDate = (ts: number) =>
  * still the ET night (before the 06:00 ET rollover); otherwise the date leads, "Wed, Nov 25 on the
  * dial · 2 upsets", so a night two days back is never called last night.
  */
-export function lastNightHeader(night: LastNight, nowSecs: number): string {
-  const day = dayLabel.format(new Date(`${night.date}T12:00:00Z`))
+export function lastNightHeader(
+  night: Pick<LastNight, 'date' | 'upsets'>,
+  nowSecs: number,
+): string {
+  const day = nightDayLabel(night.date)
   const upsets =
     night.upsets === 0 ? 'no upsets' : `${night.upsets} upset${night.upsets === 1 ? '' : 's'}`
   if (night.date === etNight(nowSecs)) return `Tonight on the dial · ${day} · ${upsets}`

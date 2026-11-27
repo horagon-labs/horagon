@@ -7,8 +7,11 @@
 // and hovering an arc lights its row. Under the heading (first-screen spec C17, C18): the count
 // line, "● 4 markets open now · Pick a game" (the dot Live blue, as only an open market is) or
 // "First market opens in 14 h 44 min", then how a market opens; the calendar button sits under
-// the list (C23).
+// the list (C23). While no market is open, an idle face (the story card, W5) takes the dial's
+// slot: first below lg, the list after it and the idle foot after the list; from lg the face and
+// its foot share the left column and the list runs down the right one.
 import type { Game, PositionsResponse } from '@horagon/sdk'
+import type { ReactNode } from 'react'
 import {
   type BoardItem,
   boardModel,
@@ -40,6 +43,10 @@ export interface BoardViewProps {
   onSelect: (id: string) => void
   hoverId: string | null
   onHover: (id: string | null) => void
+  /** The idle face (first-screen W5): shown in the dial's slot while no market is open. */
+  idleFace?: ReactNode
+  /** What follows the idle face: under the list below lg, under the face from lg. */
+  idleFoot?: ReactNode
 }
 
 /** C18, word for word. */
@@ -52,6 +59,16 @@ export function BoardView(p: BoardViewProps) {
   // Three failures before any data: the error text replaces the loading line.
   const empty = p.games === undefined && p.health.error ? '' : (model.empty ?? '')
   const chips = p.games === undefined ? [] : followChips(model.teams, p.follows)
+  // The idle face takes the dial's slot until a market opens; the poll swaps it, no reload.
+  const idle = p.idleFace != null && model.openNow === 0
+  // On the idle face's rest card (S1): "The dial rests until Sat, Dec 5." then the count, muted.
+  const cut = model.rest?.indexOf('. ') ?? -1
+  const restLines =
+    model.rest === null
+      ? []
+      : cut < 0
+        ? [model.rest]
+        : [model.rest.slice(0, cut + 1), model.rest.slice(cut + 2)]
   // The first trading row in the order shown: the target of "Pick a game".
   const firstOpen = [...model.list, ...model.later.flatMap((n) => n.items)].find(openNow)?.id
   const row = (i: BoardItem) => (
@@ -66,8 +83,24 @@ export function BoardView(p: BoardViewProps) {
     </li>
   )
   return (
-    <div className="flex flex-col gap-4 lg:grid lg:grid-cols-[minmax(0,26rem)_minmax(0,1fr)] lg:items-start lg:gap-8">
-      <div className="space-y-3" data-board-list>
+    <div
+      className={
+        idle
+          ? 'flex flex-col gap-6 lg:grid lg:grid-cols-[34rem_minmax(0,1fr)] lg:grid-rows-[auto_1fr] lg:items-start lg:gap-x-8 lg:gap-y-6'
+          : 'flex flex-col gap-4 lg:grid lg:grid-cols-[minmax(0,26rem)_minmax(0,1fr)] lg:items-start lg:gap-8'
+      }
+    >
+      {idle && (
+        <div className="min-w-0 lg:col-start-1 lg:row-start-1" data-idle-face>
+          {p.idleFace}
+        </div>
+      )}
+      <div
+        className={
+          idle ? 'min-w-0 space-y-3 lg:col-start-2 lg:row-span-2 lg:row-start-1' : 'space-y-3'
+        }
+        data-board-list
+      >
         <div className="flex flex-wrap items-center justify-between gap-x-3">
           <h2 className="text-13 font-medium uppercase tracking-[0.2em] text-brass-500">
             {model.label}
@@ -124,12 +157,27 @@ export function BoardView(p: BoardViewProps) {
           </p>
         )}
         <ErrorText error={p.health.error} />
+        {/* Under the dial otherwise; the idle face has no dial to sit under. */}
+        {idle && p.health.stale && (
+          <p role="status" className="font-mono text-12 text-red-400">
+            Reconnecting…
+          </p>
+        )}
         {model.stopped && (
           <p className="text-13 text-ink" data-stopped>
             {model.stopped}
           </p>
         )}
-        {model.next && (
+        {idle && restLines.length > 0 && (
+          <div className="space-y-1" data-rest-card>
+            {restLines.map((line, i) => (
+              <p key={line} className={i === 0 ? 'text-13 text-ink' : 'text-13 text-ink-muted'}>
+                {line}
+              </p>
+            ))}
+          </div>
+        )}
+        {model.next && !(idle && restLines.length > 0) && (
           <p className="text-13 text-ivory-100" data-next>
             {model.next}
           </p>
@@ -170,24 +218,32 @@ export function BoardView(p: BoardViewProps) {
           </a>
         )}
       </div>
-      <div className="mx-auto w-full max-w-sm lg:sticky lg:top-20 lg:order-first lg:max-w-none">
-        <NightDial
-          items={model.dial}
-          now={model.chainNow}
-          selectedId={p.selectedId}
-          onSelect={p.onSelect}
-          hoverId={p.hoverId}
-          onHover={p.onHover}
-          emptyText={model.rest ?? model.stopped ?? empty}
-          rest={model.rest !== null}
-          stale={p.health.stale}
-        />
-        {p.health.stale && (
-          <p role="status" className="mt-2 text-center font-mono text-12 text-red-400">
-            Reconnecting…
-          </p>
-        )}
-      </div>
+      {idle ? (
+        p.idleFoot != null && (
+          <div className="min-w-0 lg:col-start-1 lg:row-start-2" data-idle-foot>
+            {p.idleFoot}
+          </div>
+        )
+      ) : (
+        <div className="mx-auto w-full max-w-sm lg:sticky lg:top-20 lg:order-first lg:max-w-none">
+          <NightDial
+            items={model.dial}
+            now={model.chainNow}
+            selectedId={p.selectedId}
+            onSelect={p.onSelect}
+            hoverId={p.hoverId}
+            onHover={p.onHover}
+            emptyText={model.rest ?? model.stopped ?? empty}
+            rest={model.rest !== null}
+            stale={p.health.stale}
+          />
+          {p.health.stale && (
+            <p role="status" className="mt-2 text-center font-mono text-12 text-red-400">
+              Reconnecting…
+            </p>
+          )}
+        </div>
+      )}
     </div>
   )
 }
