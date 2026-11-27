@@ -103,6 +103,8 @@ describe('the shared relative times (W4: inMinutes moves to time.ts)', () => {
     expect(roughIn(14 * 3600 + 44 * 60)).toBe('in 15 h')
     expect(roughIn(2 * 3600)).toBe('in 2 h')
     expect(roughIn(2 * 3600 - 60)).toBe('in 119 min')
+    // Seconds short of 2 h never read "120 min".
+    expect(roughIn(2 * 3600 - 1)).toBe('in 2 h')
     expect(roughIn(42 * 60)).toBe('in 42 min')
     expect(roughIn(10)).toBe('in 1 min')
   })

@@ -61,6 +61,7 @@ export function inMinutes(secs: number): string {
 
 /** "in 15 h" in whole hours from 2 h up, "in 42 min" below (first-screen spec C19). */
 export function roughIn(secs: number): string {
-  if (secs >= 7_200) return `in ${Math.round(secs / 3_600)} h`
-  return `in ${Math.max(1, Math.ceil(secs / 60))} min`
+  const m = Math.max(1, Math.ceil(secs / 60))
+  // Seconds short of 2 h count as 2 h, never "120 min".
+  return m >= 120 ? `in ${Math.round(secs / 3_600)} h` : `in ${m} min`
 }
