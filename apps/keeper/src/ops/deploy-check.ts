@@ -31,7 +31,7 @@ export function deployBlockers(
   const out: DeployBlocker[] = []
   for (const g of games) {
     // The main keeper runs NBA games only (R8): a Practice run never blocks its deploy.
-    if (g.league !== 'NBA') continue
+    if (g.league === 'PRACTICE') continue
     const tip = Math.floor(g.scheduledTipoff.getTime() / 1000)
     if (now < tip - t.createLeadSecs) continue
     const m = g.markets.find((x) => x.kind === 0) ?? null
