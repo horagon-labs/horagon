@@ -119,6 +119,16 @@ describe('GameScreen (spec 4.2)', () => {
     expect([...order].sort((a, b) => a - b)).toEqual(order)
   })
 
+  it('reads the dial legend once, beside the agent line (culture review string 23)', () => {
+    const html = screen()
+    const legend = '● Needle: the market price · ▲ Model: win chance from score and clock'
+    expect(html.split(legend)).toHaveLength(2)
+    const at = html.indexOf(legend)
+    expect(at).toBeGreaterThan(html.indexOf('role="img"'))
+    expect(html.indexOf('data-agent-line')).toBeLessThan(at)
+    expect(html).not.toContain('data-model-hint')
+  })
+
   it('says who traded right under the dial, before the Tape, and links /agent (R2b)', () => {
     const traded = activity({
       agent: { swaps: 12, wallets: 1, volumeUsdc: '840', wallet: activity().agent.wallet },
@@ -213,7 +223,7 @@ describe('GameLoading and NoGame (spec 4.4)', () => {
     const html = renderToStaticMarkup(<GameLoading stale={false} />)
     expect(needle(html)).toBeUndefined()
     expect(html).toContain('data-skeleton')
-    expect(html).toContain('aria-label="Loading game"')
+    expect(html).toContain('aria-label="Setting the dial…"')
     expect(html).not.toContain(' to win')
   })
 
@@ -240,14 +250,14 @@ describe('MarketBlock (spec 3.2, 4.2)', () => {
         />
       </WalletProvider>,
     )
-    const buy = html.indexOf('>Buy CLE 77¢</button>')
+    const buy = html.indexOf('>Back CLE · 77%</button>')
     const sheet = html.indexOf('<dialog')
     const card = html.indexOf('Your position')
     expect(html).not.toContain('Get 1,000 play mUSDC</button>')
     expect(buy).toBeGreaterThanOrEqual(0)
     expect(sheet).toBeGreaterThan(buy)
     expect(card).toBeGreaterThan(sheet)
-    expect(html).toContain('aria-label="Buy CLE"')
+    expect(html).toContain('aria-label="Back CLE"')
     expect(html).toContain('No positions yet.')
     // The server render knows nothing of the wallet yet: no 18+ box and no set-up call to action
     // that a returning visitor would see flash (R5 review finding 1).
@@ -262,7 +272,7 @@ describe('dev gallery (spec 6.2)', () => {
     const html = renderToStaticMarkup(<Gallery />)
     expect(html).toContain('data-column="right"')
     expect(html).toContain('Reconnecting…')
-    expect(html).toContain('aria-label="Loading game"')
+    expect(html).toContain('aria-label="Setting the dial…"')
     expect(html).toContain('No game here')
     expect(html).not.toContain('NaN')
   })
@@ -272,13 +282,13 @@ describe('dev gallery (spec 6.2)', () => {
     expect(html).toContain('role="slider"')
     expect(html).toContain('Open the crown sheet')
     expect(html).toContain('Demo sends: 0')
-    expect(html).toContain('>Buy CLE 77¢</button>')
+    expect(html).toContain('>Back CLE · 77%</button>')
     expect(html).toContain('closes in 4:12')
     expect(html).toContain('Get 1,000 play mUSDC')
     expect(html).toContain(
       'Trading closed. The result goes on-chain automatically 3 h after tip-off, then a guardian has 15 minutes to challenge it.',
     )
-    expect(html).toContain('<dialog aria-label="Buy CLE"')
+    expect(html).toContain('<dialog aria-label="Back CLE"')
   })
 })
 

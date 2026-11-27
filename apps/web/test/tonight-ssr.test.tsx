@@ -30,12 +30,12 @@ describe('the first frame of / (R5)', () => {
     expect(html.match(/<li /g)).toHaveLength(3)
   })
 
-  it('renders the rows from the server data, never "Loading games…"', () => {
+  it('renders the rows from the server data, never "Setting the dial…"', () => {
     const html = page({ games: evening(), upcoming: null, now: NOW })
     expect(html).toContain('data-hero')
     expect(html.match(/href="\/game\//g)).toHaveLength(5)
     expect(html).toContain('MIL to win')
-    expect(html).not.toContain('Loading games…')
+    expect(html).not.toContain('Setting the dial…')
     // The hero comes before the first row in the HTML.
     expect(html.indexOf('data-hero')).toBeLessThan(html.indexOf('href="/game/'))
   })
@@ -64,6 +64,6 @@ describe('the first frame of / (R5)', () => {
 
   it('falls back to the browser poll when the server had no data', () => {
     const html = page({ games: undefined, upcoming: null, now: NOW })
-    expect(html).toContain('Loading games…')
+    expect(html).toContain('Setting the dial…')
   })
 })

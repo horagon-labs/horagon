@@ -181,18 +181,18 @@ describe('runLine (spec 3.2)', () => {
   }
 
   it('says the team, the run and the price move', () => {
-    expect(runLine(run, TEAMS)).toBe('CLE on an 8–0 run · price 74% → 77% in 2 min')
+    expect(runLine(run, TEAMS)).toBe('CLE on an 8–0 run · CLE to win 74% → 77% in 2 min')
   })
 
   it('says the price held when nobody moved it, never "62 → 62" (R5)', () => {
     expect(runLine({ ...run, priceFrom: 0.62, priceTo: 0.62 }, TEAMS)).toBe(
-      'CLE on an 8–0 run · price held at 62%',
+      'CLE on an 8–0 run · the price held at 62%',
     )
   })
 
   it('reads an away run on the away side’s price', () => {
     const away: Run = { ...run, team: 'away', to: 50, priceFrom: 0.6, priceTo: 0.5 }
-    expect(runLine(away, TEAMS)).toBe('MEM on an 8–0 run · price 40% → 50% in 1 min')
+    expect(runLine(away, TEAMS)).toBe('MEM on an 8–0 run · MEM to win 40% → 50% in 1 min')
   })
 
   it('picks the article and drops the price without one', () => {
@@ -202,9 +202,9 @@ describe('runLine (spec 3.2)', () => {
 
   it('prints the edges as <1 and >99 instead of certainty', () => {
     const edge: Run = { ...run, priceFrom: 0.004, priceTo: 0.996 }
-    expect(runLine(edge, TEAMS)).toBe('CLE on an 8–0 run · price <1% → >99% in 2 min')
+    expect(runLine(edge, TEAMS)).toBe('CLE on an 8–0 run · CLE to win <1% → >99% in 2 min')
     expect(runLine({ ...edge, team: 'away' }, TEAMS)).toBe(
-      'MEM on an 8–0 run · price >99% → <1% in 2 min',
+      'MEM on an 8–0 run · MEM to win >99% → <1% in 2 min',
     )
   })
 

@@ -4,7 +4,7 @@
 // success line gives the quote's number as "about", never as a fact.
 import type { PositionsResponse, Side, TradeAction } from '@horagon/sdk'
 import { formatAmount, parseAmount } from '@horagon/sdk/amount'
-import { usdc } from './format'
+import { percent, usdc } from './format'
 
 /** One signer's holding in one market side, in raw units (6 decimals). */
 export interface Holding {
@@ -63,12 +63,39 @@ export function exactFill(i: FillInput): bigint | null {
   return delta > 0n && delta >= i.minOut && delta <= hi ? delta : null
 }
 
-/** "Bought 37.01 MEM shares." once the fill is known; "about" the quote's number before. */
+/** A buy's call as the quote saw it, on the side bought: the price before and after. */
+export interface CallMove {
+  /** Raw mUSDC spent. */
+  spent: bigint
+  /** The quote's mUSDC per share, the fee included. */
+  avgPrice: number
+  /** The side's price before the trade and after it. */
+  from: number
+  to: number
+}
+
+/**
+ * A buy: "You backed MEM at 27% · your call moved the price about 26% → 28%" (culture review
+ * string 8), "at about 27%" until the fill is known; the move is the quote's, so always "about",
+ * and left out when it does not change the whole percent. A sell: "Sold for 12.48 mUSDC.".
+ */
 export function fillLine(
   action: TradeAction,
   team: string,
   n: { quoted: string | undefined; exact: bigint | null },
+  call?: CallMove,
 ): string {
+  if (action === 'buy') {
+    if (!call) return `You backed ${team}.`
+    const at =
+      n.exact !== null && n.exact > 0n
+        ? percent(Number(call.spent) / Number(n.exact))
+        : `about ${percent(call.avgPrice)}`
+    const from = percent(call.from)
+    const to = percent(call.to)
+    const move = from === to ? '' : ` · your call moved the price about ${from} → ${to}`
+    return `You backed ${team} at ${at}${move}`
+  }
   const amount =
     n.exact !== null
       ? usdc(formatAmount(n.exact))
@@ -76,7 +103,7 @@ export function fillLine(
         ? ''
         : `about ${usdc(n.quoted)}`
   const mid = amount === '' ? '' : ` ${amount}`
-  return action === 'buy' ? `Bought${mid} ${team} shares.` : `Sold for${mid} mUSDC.`
+  return `Sold for${mid} mUSDC.`
 }
 
 /**

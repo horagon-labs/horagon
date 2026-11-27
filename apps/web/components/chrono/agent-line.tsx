@@ -5,6 +5,7 @@
 import type { GameActivity } from '@horagon/sdk'
 import Link from 'next/link'
 import { AGENT_DISCLOSURE, activityLine } from '../../lib/agent'
+import { DIAL_LEGEND } from '../../lib/chrono/copy'
 import { explorerAddress, shortKey } from '../../lib/format'
 
 // Ink in muted words is under 3:1 against them, so the link is underlined too (review §3.3).
@@ -18,7 +19,10 @@ function HowLink() {
   )
 }
 
-/** `trading`: the market still trades (canTrade of the dial), so the line may invite a fan. */
+/**
+ * `trading`: the market still trades (canTrade of the dial), so the line may invite a fan. The
+ * dial's legend leads it (culture review string 23): the needle and the model it explains.
+ */
 export function AgentLine({ activity, trading }: { activity: GameActivity; trading: boolean }) {
   const wallet = activity.agent.wallet
   return (
@@ -26,6 +30,9 @@ export function AgentLine({ activity, trading }: { activity: GameActivity; tradi
       className="mx-auto max-w-md space-y-1 text-center text-12 font-mono text-ink-muted"
       data-agent-line
     >
+      <p className="font-sans" data-dial-legend>
+        {DIAL_LEGEND}
+      </p>
       <p>{activityLine(activity, trading)}</p>
       <p>
         {AGENT_DISCLOSURE} <HowLink /> ·{' '}

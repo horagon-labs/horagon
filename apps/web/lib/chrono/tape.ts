@@ -2,7 +2,7 @@
 // for its price axis, where each quarter starts, and one marker per scoring run from runs.ts.
 import type { GameHistory } from '@horagon/sdk'
 import type { Time } from 'lightweight-charts'
-import { cents } from '../format'
+import { percent } from '../format'
 import type { Run } from './runs'
 import { COLORS } from './tokens'
 
@@ -24,14 +24,15 @@ export const TAPE_FRAME = {
 const NOISE = 1e-9
 
 /**
- * A price on the axis or the crosshair: held to 0-100¢, so a crosshair above the range reads
- * 100¢ and the bottom tick 0¢. "<1¢" and ">99¢" stay for real prices just inside the edges.
+ * A price on the axis or the crosshair, in the one unit of the main path (culture review A1):
+ * held to 0-100%, so a crosshair above the range reads 100% and the bottom tick 0%. "<1%" and
+ * ">99%" stay for real prices just inside the edges.
  */
-export function tapeCents(p: number): string {
+export function tapePercent(p: number): string {
   const clamped = Math.min(1, Math.max(0, p))
-  if (clamped < NOISE) return cents(0)
-  if (clamped > 1 - NOISE) return cents(1)
-  return cents(clamped)
+  if (clamped < NOISE) return percent(0)
+  if (clamped > 1 - NOISE) return percent(1)
+  return percent(clamped)
 }
 
 /** Unix seconds of a chart time; the Tape only ever sets UTCTimestamp, the rest is for types. */

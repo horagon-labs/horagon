@@ -111,7 +111,9 @@ describe('final means closed (item 1)', () => {
     expect(canTrade(d.state)).toBe(false)
     expect(d.label).toBe('Final, CLE lost, result pending, 77%, model 74%, trading closed')
     expect(d.label).not.toMatch(/open until/)
-    expect(stateLine(d.state, atBuzzer, d.secsLeft, NOW)).toBe('Trading closed · result pending')
+    expect(stateLine(d.state, atBuzzer, d.secsLeft, NOW)).toBe(
+      'Stopped at the buzzer · MEM 110–104 CLE',
+    )
   })
 
   it('refuses the trade with the buzzer line, so Buy is off', () => {

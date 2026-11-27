@@ -311,7 +311,7 @@ export function boardModel(
       list: [],
       later: [],
       dial: [],
-      empty: 'Loading games…',
+      empty: 'Setting the dial…',
       filtered: false,
       next: null,
       chainNow: now,

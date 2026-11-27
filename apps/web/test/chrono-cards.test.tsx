@@ -121,7 +121,7 @@ describe('ResolutionCard (spec 3.2)', () => {
     const final = detail({ status: 'final', resolutions: [won] })
     expect(
       renderToStaticMarkup(<ResolutionCard game={final} state="resolved" now={NOW} />),
-    ).toContain('Resolved: CLE won')
+    ).toContain('Result on-chain · CLE won')
     expect(renderToStaticMarkup(<ResolutionCard game={detail()} state="live" now={NOW} />)).toBe('')
   })
 
@@ -170,9 +170,22 @@ describe('PositionCard (spec 3.2)', () => {
         position({ ...result, side: 'away', market: 'Mkt2', claimable: true }),
       ]),
     })
-    expect(html).toContain('CLE lost')
-    expect(html).toContain('MEM won')
+    // Wins and losses read the same way (culture review rule 6, string 18).
+    expect(html).toContain('MEM won. Your call on CLE at 71% stays marked.')
+    expect(html).toContain('MEM won. Your call at 71% stays marked.')
     expect(html).not.toContain('pays')
+  })
+
+  it('says where the price stood at the horn once trading stopped (culture review string 15)', () => {
+    const html = card({ canSell: false, hornPrice: 0.77 })
+    expect(html).toContain('You backed CLE at 71%. At the horn the price had CLE at 77%.')
+    expect(html).not.toContain('pays')
+    const away = card({
+      canSell: false,
+      hornPrice: 0.77,
+      portfolio: portfolio([position({ side: 'away' })]),
+    })
+    expect(away).toContain('You backed MEM at 71%. At the horn the price had MEM at 23%.')
   })
 
   it('lists the winner market only, with the same live diamond for either side', () => {

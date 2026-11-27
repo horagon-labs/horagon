@@ -1,12 +1,13 @@
 'use client'
-// The two buy buttons under the dial (spec 3.2): "Buy CLE 77¢" and "Buy MEM 23¢". On mobile a
-// button opens the crown for that side; on desktop it picks the side of the crown beside it.
+// The two buttons under the dial (spec 3.2), in a fan's verb and one unit (culture review string
+// 7): "Back CLE · 77%" and "Back MEM · 23%". On mobile a button opens the crown for that side; on
+// desktop it picks the side of the crown beside it.
 // An empty wallet gets the faucet button the wallet sheet already has; a visitor with no wallet
 // gets the buy buttons, and the crown sets the wallet up (R5).
 import type { Side } from '@horagon/sdk'
 import { DISABLED, SELECTED } from '../../lib/chrono/controls'
 import type { PusherMode } from '../../lib/chrono/pusher'
-import { cents } from '../../lib/format'
+import { percent } from '../../lib/format'
 import { sidePrice } from '../../lib/trade-view'
 import { FAUCET_BUTTON, WALLET_PREPARING } from '../../lib/wallet-copy'
 
@@ -41,9 +42,10 @@ export function Pusher(p: {
       </button>
     )
   }
+  // In the Scorebug's order: away on the left, home on the right (culture review A1).
   const sides = [
-    ['home', p.home, 'border-lume-300/60 text-lume-300'],
     ['away', p.away, 'border-brass-500/60 text-brass-400'],
+    ['home', p.home, 'border-lume-300/60 text-lume-300'],
   ] as const
   return (
     <div className="space-y-2">
@@ -57,7 +59,9 @@ export function Pusher(p: {
             onClick={() => p.onPick(side)}
             className={`min-h-14 rounded-card border-2 font-mono text-15 font-semibold tabular-nums ${SELECTED} ${DISABLED} ${look}`}
           >
-            Buy {team} {cents(sidePrice(p.price, side))}
+            {p.price === null
+              ? `Back ${team}`
+              : `Back ${team} · ${percent(sidePrice(p.price, side))}`}
           </button>
         ))}
       </div>

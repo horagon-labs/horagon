@@ -2,7 +2,7 @@
 // Tonight (Chronometer spec 4.1): the live board. Games poll every 3 s as before; the positions
 // that light arcs and rows are the wallet's own portfolio poll, so the board adds no request.
 // The server's first frame (R5, lib/server/initial.ts) fills the board until the first poll
-// answers, so the page never opens on "Loading games…" while the API is up.
+// answers, so the page never opens on "Setting the dial…" while the API is up.
 import { useEffect, useState } from 'react'
 import { api } from '../lib/api'
 import { pollHealth } from '../lib/chrono/health'

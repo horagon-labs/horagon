@@ -1,5 +1,5 @@
 // The first frame's data, loaded on the server (R5): the board's games and a game page's detail
-// go into the first HTML, so neither page opens on "Loading games…" and a link unfurler or a
+// go into the first HTML, so neither page opens on "Setting the dial…" and a link unfurler or a
 // crawler sees real content. Everything here is best effort: a slow or failing API leaves the
 // value out, and the page's own poll loads it in the browser as before.
 import type { Game, GameDetail, HoragonClient } from '@horagon/sdk'

@@ -208,7 +208,7 @@ function CrownDemo() {
       <CrownSheet
         open={open}
         onClose={() => setOpen(false)}
-        title={`${t.action === 'buy' ? 'Buy' : 'Sell'} ${t.team}`}
+        title={`${t.action === 'buy' ? 'Back' : 'Sell'} ${t.team}`}
       >
         {panel}
       </CrownSheet>

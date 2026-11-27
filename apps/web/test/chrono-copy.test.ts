@@ -120,7 +120,7 @@ describe('resolutionStatus (R5, audit finding 11)', () => {
       'Result proposed: the challenge window is open',
     )
     expect(resolutionStatus('challenged', final(105, 107), null)).toBe('Result under review')
-    expect(resolutionStatus('resolved', final(105, 107), 'no')).toBe('Resolved: MEM won')
+    expect(resolutionStatus('resolved', final(105, 107), 'no')).toBe('Result on-chain · MEM won')
     expect(resolutionStatus('void', game({ status: 'canceled' }), null)).toBe('Game canceled')
     expect(resolutionStatus('halted', game(), null)).toBe('Trading halted')
   })

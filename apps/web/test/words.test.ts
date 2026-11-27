@@ -125,9 +125,9 @@ describe('the timekeeper’s words (culture review A1)', () => {
     }
     expect(SHOUTS.test(' now!')).toBe(true)
     expect(SHOUTS.test('a !== b')).toBe(false)
-    expect(productStrings('x.tsx', `const l = 'Play-money on devnet. No real value. No prizes.'`)).toEqual(
-      [],
-    )
+    expect(
+      productStrings('x.tsx', `const l = 'Play-money on devnet. No real value. No prizes.'`),
+    ).toEqual([])
   })
 
   it.each(SOURCES)('keeps value, tout and luck words and "!" out of %s product strings', (dir) => {

@@ -197,6 +197,12 @@ describe('dial words', () => {
     expect(stateLine('closing', live, 252, NOW)).toBe('closes in 4:12')
     expect(stateLine('live', live, 3730, NOW)).toBe('Open until the final buzzer')
     expect(stateLine('closed', live, 0, NOW)).toBe('Trading closed · result pending')
+    // The buzzer, then overtime, in the scorer's words (culture review strings 13, 14).
+    const stopped = game({ status: 'final', homeScore: 105, awayScore: 107, clockSecs: null })
+    expect(stateLine('closed', stopped, 0, NOW)).toBe('Stopped at the buzzer · MEM 107–105 CLE')
+    expect(stateLine('live', game({ period: 5 }), 3730, NOW)).toBe(
+      'Overtime · open until the final buzzer',
+    )
     expect(stateLine('challenged', live, 0, NOW)).toBe('Result under review')
     expect(stateLine('halted', live, 900, NOW)).toBe('Trading halted')
     expect(stateLine('void', game({ status: 'postponed' }), null, NOW)).toBe('Postponed')

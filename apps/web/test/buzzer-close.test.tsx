@@ -57,7 +57,7 @@ describe('a halted market under a final game reads closed (R1 ruling)', () => {
     expect(dial).not.toContain('stroke-dasharray="3 3"')
     expect(dial).toContain('font-mono tabular-nums text-ash-400')
     expect(stateLine(item.state, buzzer, item.secsLeft, NOW)).toBe(
-      'Trading closed · result pending',
+      'Stopped at the buzzer · MEM 110–104 CLE',
     )
     const mini = renderToStaticMarkup(
       <MiniDial price={item.price} timeLeft={item.timeLeft} state={item.state} />,

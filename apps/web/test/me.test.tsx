@@ -198,7 +198,7 @@ describe('each status line, from the dial state', () => {
     const final = (over: Parameters<typeof mePosition>[0]) =>
       statusOf(mePosition({ status: 'final', ...over }), won, NOW)
     expect(final({ claimable: true, valueUsdc: '38.72' })).toMatchObject({
-      line: 'Resolved: MEM won',
+      line: 'Result on-chain · MEM won',
       result: 'You won · 38.72 mUSDC to claim',
       claimUsdc: '38.72 mUSDC',
     })
@@ -325,7 +325,7 @@ describe('My Game-day, rendered', () => {
     const closed = card(final, {})
     expect(closed).toContain('MEM lost')
     const resolved = card(final, { status: 'finalized', outcome: 'no' })
-    expect(resolved).toContain('Resolved: LAC won')
+    expect(resolved).toContain('Result on-chain · LAC won')
     const voided = card({ status: 'postponed' }, {})
     for (const html of [closed, resolved, voided]) {
       expect(html).not.toContain('to win')

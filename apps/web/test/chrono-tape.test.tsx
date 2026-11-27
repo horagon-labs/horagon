@@ -4,7 +4,7 @@ import { Scorebug } from '../components/chrono/scorebug'
 import { Tape } from '../components/chrono/tape'
 import { game, history, market, NOW } from '../lib/chrono/fixtures'
 import { findRuns } from '../lib/chrono/runs'
-import { periodLabel, periodStarts, runMarkers, tapeCents, tapeTime } from '../lib/chrono/tape'
+import { periodLabel, periodStarts, runMarkers, tapePercent, tapeTime } from '../lib/chrono/tape'
 import { COLORS } from '../lib/chrono/tokens'
 
 const MKT = market().pubkey
@@ -23,14 +23,14 @@ describe('tape (spec 3.2)', () => {
     expect(tapeTime({ year: 2026, month: 11, day: 25 })).toBe(Date.UTC(2026, 10, 25) / 1000)
   })
 
-  it('reads axis and crosshair prices inside 0-100¢, with no float noise at the edges', () => {
-    expect(tapeCents(-0.02)).toBe('0¢')
-    expect(tapeCents(1.02)).toBe('100¢')
-    expect(tapeCents(1e-12)).toBe('0¢')
-    expect(tapeCents(1 - 1e-12)).toBe('100¢')
-    expect(tapeCents(0.004)).toBe('<1¢')
-    expect(tapeCents(0.996)).toBe('>99¢')
-    expect(tapeCents(0.5)).toBe('50¢')
+  it('reads axis and crosshair prices inside 0-100%, with no float noise at the edges', () => {
+    expect(tapePercent(-0.02)).toBe('0%')
+    expect(tapePercent(1.02)).toBe('100%')
+    expect(tapePercent(1e-12)).toBe('0%')
+    expect(tapePercent(1 - 1e-12)).toBe('100%')
+    expect(tapePercent(0.004)).toBe('<1%')
+    expect(tapePercent(0.996)).toBe('>99%')
+    expect(tapePercent(0.5)).toBe('50%')
   })
 
   it('marks a run at its last basket on the model line, in ink-muted: the words say whose', () => {
@@ -66,7 +66,7 @@ describe('Scorebug (spec 3.2)', () => {
     expect(html).toContain('>84</p>')
     expect(html).toContain('Q3 4:12')
     expect(html).toContain('data-live')
-    expect(html).toContain('CLE on an 8–0 run · price 74% → 77% in 2 min')
+    expect(html).toContain('CLE on an 8–0 run · CLE to win 74% → 77% in 2 min')
     expect(html).toContain('Model: live win chance from score and clock')
   })
 

@@ -103,24 +103,30 @@ describe('fillTracker', () => {
 })
 
 describe('fillLine', () => {
-  it('states the quote as "about" until the fill is known', () => {
-    expect(fillLine('buy', 'MEM', { quoted: '36.92', exact: null })).toBe(
-      'Bought about 36.92 MEM shares.',
+  // MEM is the away side: its price is 1 - the YES price. 10 mUSDC bought 36.92 (quote) or 37.01.
+  const call = { spent: 10_000_000n, avgPrice: 0.2709, from: 0.26, to: 0.28 }
+  it('says whose call it was and how it moved the price, "about" until the fill is known', () => {
+    expect(fillLine('buy', 'MEM', { quoted: '36.92', exact: null }, call)).toBe(
+      'You backed MEM at about 27% · your call moved the price about 26% → 28%',
+    )
+    expect(fillLine('buy', 'MEM', { quoted: '36.92', exact: 37_010_000n }, call)).toBe(
+      'You backed MEM at 27% · your call moved the price about 26% → 28%',
+    )
+    // A call too small to move the whole-percent price says no move.
+    expect(fillLine('buy', 'MEM', { quoted: '36.92', exact: null }, { ...call, to: 0.262 })).toBe(
+      'You backed MEM at about 27%',
     )
     expect(fillLine('sell', 'MEM', { quoted: '12.5', exact: null })).toBe(
       'Sold for about 12.50 mUSDC.',
     )
   })
   it('states the fill as a fact', () => {
-    expect(fillLine('buy', 'MEM', { quoted: '36.92', exact: 37_010_000n })).toBe(
-      'Bought 37.01 MEM shares.',
-    )
     expect(fillLine('sell', 'MEM', { quoted: '12.5', exact: 12_480_000n })).toBe(
       'Sold for 12.48 mUSDC.',
     )
   })
   it('names no number when there is no quote', () => {
-    expect(fillLine('buy', 'MEM', { quoted: undefined, exact: null })).toBe('Bought MEM shares.')
+    expect(fillLine('buy', 'MEM', { quoted: undefined, exact: null })).toBe('You backed MEM.')
   })
 })
 

@@ -1,5 +1,5 @@
 // What a price means, in words (R5, audit section 13). The number on every dial and row is the
-// home side's chance to win: it reads "MEM to win · 62%", never a bare "62¢". Once the game is
+// home side's chance to win: it reads "MEM to win · 62%", never a bare number. Once the game is
 // over the words follow the scoreboard, then the result on-chain: "Final · CHA lost · result
 // pending", then "Resolved: MEM won". A losing side is never shown as "wins".
 import type { Game, MarketStatus, Outcome } from '@horagon/sdk'
@@ -36,6 +36,15 @@ export function verdict(state: DialState, g: VerdictGame, outcome: Outcome | nul
 function resolvedWords(g: VerdictGame, homeWon: boolean): string {
   if (g.status !== 'final') return `Resolved: ${g.home} ${homeWon ? 'won' : 'did not win'}`
   return `Resolved: ${homeWon ? g.home : g.away} won`
+}
+
+/**
+ * The ResolutionCard's result (culture review string 20): "Result on-chain · MEM won"; its link
+ * to /verify sits under it ("Verify this result").
+ */
+function onChainWords(g: VerdictGame, homeWon: boolean): string {
+  if (g.status !== 'final') return `Result on-chain · ${g.home} ${homeWon ? 'won' : 'did not win'}`
+  return `Result on-chain · ${homeWon ? g.home : g.away} won`
 }
 
 /** "Final · CHA lost", or "Final" while the scoreboard names no winner. */
@@ -135,6 +144,13 @@ export const liveNumber = (state: DialState): boolean =>
 /** The Model line's explanation, in place (audit section 4). */
 export const MODEL_HINT = 'Model: live win chance from score and clock'
 
+/**
+ * The dial's legend (culture review string 23): the two words a fan learns, "the needle" and
+ * "the model". The needle is the market price, never "the crowd": the reference agent drives most
+ * of its moves at this size.
+ */
+export const DIAL_LEGEND = '● Needle: the market price · ▲ Model: win chance from score and clock'
+
 /** Why nothing trades once the game is final, open market or halted (R1, R5c). */
 export const BUZZER_CLOSED = 'Trading closed at the final buzzer.'
 
@@ -180,7 +196,7 @@ export function resolutionStatus(
 ): string {
   switch (state) {
     case 'resolved':
-      return outcome ? resolvedWords(g, outcome === 'yes') : 'Result final'
+      return outcome ? onChainWords(g, outcome === 'yes') : 'Result final'
     case 'challenged':
       return 'Result under review'
     case 'proposed':

@@ -115,7 +115,7 @@ export function GameLoading({ stale }: { stale: boolean }) {
         modelProb={null}
         timeLeft={1}
         state="pre"
-        label="Loading game"
+        label="Setting the dial…"
         className="mx-auto max-w-md"
       />
     </div>
