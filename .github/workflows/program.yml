@@ -1,13 +1,39 @@
 name: program
 
-# The on-chain program: build it, fail when the committed IDL drifts from the build, and audit
-# the Rust dependencies. Deploying stays manual (spec 20.4: CI holds no upgrade key).
+# The on-chain program: build it, fail when the committed IDL drifts from the build, audit the
+# Rust dependencies, and run the program's own suite (tests/integration) against pm-AMM on a
+# local chain. Deploying stays manual (spec 20.4: CI holds no upgrade key).
 on:
   push:
     branches: [main, tier2]
-    paths: [programs/**, Cargo.toml, Cargo.lock, Anchor.toml, idls/**, packages/sdk/idl/**]
+    paths:
+      - programs/**
+      - Cargo.toml
+      - Cargo.lock
+      - Anchor.toml
+      - idls/**
+      - packages/sdk/idl/**
+      # The integration job also runs on the SDK that builds its instructions, and on itself.
+      - packages/sdk/src/**
+      - tests/integration/**
+      - tests/package.json
+      - tests/vitest.config.ts
+      - scripts/program-it.sh
+      - .github/workflows/program.yml
   pull_request:
-    paths: [programs/**, Cargo.toml, Cargo.lock, Anchor.toml, idls/**, packages/sdk/idl/**]
+    paths:
+      - programs/**
+      - Cargo.toml
+      - Cargo.lock
+      - Anchor.toml
+      - idls/**
+      - packages/sdk/idl/**
+      - packages/sdk/src/**
+      - tests/integration/**
+      - tests/package.json
+      - tests/vitest.config.ts
+      - scripts/program-it.sh
+      - .github/workflows/program.yml
   workflow_dispatch:
 
 permissions:
@@ -59,3 +85,87 @@ jobs:
         run: |
           command -v cargo-audit >/dev/null || cargo install cargo-audit --version "$CARGO_AUDIT_VERSION" --locked
           cargo audit
+
+  # The program's own suite (tests/integration): 17 cases against the real pm-AMM, on Surfpool
+  # forking a local solana-test-validator (scripts/program-it.sh says why). It needs no secret:
+  # the upgrade authority is a throwaway key made in the run, the suite makes and airdrops its
+  # own keys, and devnet is only read (the pm-AMM and Metaplex clone). After build, so that the
+  # toolchain cache it restores is warm.
+  integration:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      # The build job's versions, so that the cache key below is its key.
+      AGAVE_VERSION: 4.1.2
+      ANCHOR_VERSION: 1.2.2
+      CARGO_AUDIT_VERSION: 0.23.0
+      # The Surfpool the suite was written on (docs/spikes.md), pinned by version and checksum.
+      SURFPOOL_VERSION: 1.7.0
+      SURFPOOL_SHA256: 5bef2b0b186a74622508f104b6d2e4e2db040932b6d8f3a811172e241f802a63
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+      - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: |
+            ~/.cargo/bin
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.local/share/solana
+            ~/.avm
+            target
+          key: program-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}-agave-${{ env.AGAVE_VERSION }}-anchor-${{ env.ANCHOR_VERSION }}-audit-${{ env.CARGO_AUDIT_VERSION }}
+      - name: Install Agave and Anchor
+        run: |
+          solana_bin="$HOME/.local/share/solana/install/active_release/bin"
+          if [ ! -x "$solana_bin/solana" ]; then
+            sh -c "$(curl -sSfL "https://release.anza.xyz/v${AGAVE_VERSION}/install")"
+          fi
+          echo "$solana_bin" >> "$GITHUB_PATH"
+          if ! command -v avm >/dev/null; then
+            cargo install --git https://github.com/solana-foundation/anchor --tag "v${ANCHOR_VERSION}" avm --locked
+          fi
+          if [ ! -x "$HOME/.avm/bin/anchor-${ANCHOR_VERSION}" ]; then
+            avm install "$ANCHOR_VERSION"
+          fi
+          avm use "$ANCHOR_VERSION"
+      - run: anchor build
+      - name: Install Surfpool
+        run: |
+          set -euo pipefail
+          curl -sSfL -o surfpool.tar.gz "https://github.com/solana-foundation/surfpool/releases/download/v${SURFPOOL_VERSION}/surfpool-linux-x64.tar.gz"
+          echo "${SURFPOOL_SHA256}  surfpool.tar.gz" | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/surfpool"
+          tar -xzf surfpool.tar.gz -C "$RUNNER_TEMP/surfpool"
+          rm surfpool.tar.gz
+          echo "$RUNNER_TEMP/surfpool" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/surfpool/surfpool" --version
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # Fails when any case fails or is skipped (a skipped suite would pass on its own).
+      - name: Program suite on Surfpool
+        run: bash scripts/program-it.sh
+        env:
+          HORAGON_IT_WORK: ${{ runner.temp }}/program-it
+      # Logs only: the throwaway admin keypair in the same directory stays out of the artifact.
+      - name: Keep the chain logs
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: program-it-logs
+          path: |
+            ${{ runner.temp }}/program-it/test-validator.out
+            ${{ runner.temp }}/program-it/ledger/validator*.log
+            ${{ runner.temp }}/program-it/program-show.txt
+            ${{ runner.temp }}/program-it/surfpool.out
+            ${{ runner.temp }}/program-it/surfnet/.surfpool/logs/
+            ${{ runner.temp }}/program-it/vitest.json
+          # Surfpool writes its log files under .surfpool/, which v4 skips unless asked.
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 14
