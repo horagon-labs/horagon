@@ -540,9 +540,14 @@ describe('/ lays out the first screen per state (§7 page.tsx)', () => {
     expect(page).toMatch(
       /Promise\.all\(\[\s*initialBoard\(\),\s*initialLastNight\(\),\s*initialPractice\(\),\s*initialRecord\(\),?\s*\]\)/,
     )
-    expect(page).toMatch(/initialStory\(\s*night\.date,/)
-    expect(page).toContain('screenState(initial.games, initial.now)')
-    expect(page).toContain('currentNight(')
+    // The night the story tells (S5: the night that just ended, from currentNight) and the layout
+    // per state are firstScreen's, pinned by behaviour in first-screen.test.tsx.
+    expect(page).toContain('const told = storyNight(initial.games, initial.now, lastNight)')
+    expect(page).toMatch(/initialStory\(\s*told\.date,/)
+    expect(page).toContain(
+      'firstScreen({ games: initial.games, now: initial.now, lastNight, story, practice })',
+    )
+    expect(read('lib', 'server', 'first-screen.ts')).toContain('currentNight(')
   })
 
   it('passes the story to the hero, the rail and the board, and the face only while idle', () => {

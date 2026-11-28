@@ -480,7 +480,7 @@ describe('a market opening under the poll swaps the idle face, no reload (G4, C1
     expect(src).toContain('idleFoot={gone ? undefined : idleFoot}')
     // No second, hand-rolled latch beside it (refix 1's setter went untested).
     expect(src).not.toMatch(/setHeld|swapHeld/)
-    expect(read('app', 'page.tsx')).toMatch(/<TonightBoard\s[^>]*\bstate=\{state\}/)
+    expect(read('app', 'page.tsx')).toMatch(/<TonightBoard\s[^>]*\bstate=\{screen\.state\}/)
     // One rule for S3/S4 on the server and the swap in the browser.
     expect(read('lib', 'server', 'first-screen.ts')).toContain('marketOpen(games, now)')
   })

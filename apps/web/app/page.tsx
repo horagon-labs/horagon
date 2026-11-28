@@ -9,6 +9,8 @@
 // is open (S3, S4) the Night dial keeps the slot, and the compact story and the Practice line
 // follow the board; the board gets both, so a market opening under its poll swaps them with no
 // reload. Last, one static line discloses the reference agent, only while its claim shows (W9).
+// Which of these shows is one pure decision, `firstScreen` (lib/server/first-screen.ts); this file
+// loads the data and renders what it picks.
 import type { Metadata } from 'next'
 import { connection } from 'next/server'
 import { AgentNote } from '../components/chrono/agent-line'
@@ -20,7 +22,7 @@ import { ProofRail } from '../components/proof-rail'
 import { IdleFoot, StoryCard } from '../components/story-card'
 import { TonightBoard } from '../components/tonight-board'
 import { heroMoved } from '../lib/chrono/board'
-import { practiceLive, practiceStrip } from '../lib/chrono/practice'
+import { practiceStrip } from '../lib/chrono/practice'
 import { HOME_TITLE, SITE_DESCRIPTION } from '../lib/meta'
 import {
   initialBoard,
@@ -29,9 +31,9 @@ import {
   initialRecord,
   initialStory,
 } from '../lib/server/api'
-import { agentNoteHolds, idleState, screenState } from '../lib/server/first-screen'
+import { agentNoteHolds, firstScreen, storyNight } from '../lib/server/first-screen'
 import { INITIAL_TIMEOUT_MS } from '../lib/server/initial'
-import { currentNight, rowsOfNight } from '../lib/server/last-night'
+import { rowsOfNight } from '../lib/server/last-night'
 
 export const metadata: Metadata = {
   title: { absolute: HOME_TITLE },
@@ -59,36 +61,38 @@ export default async function TonightPage() {
     initialPractice(),
     initialRecord(),
   ])
-  const state = screenState(initial.games, initial.now)
-  // S5: the night that just ended tells the story; otherwise the newest final night before it.
-  const night = (state === 'after' && currentNight(initial.games ?? [], initial.now)) || lastNight
-  // The story under what is left of the budget; on a miss the night's strip stands in.
-  const story = night
+  // The story under what is left of the budget, for the night it tells (S5: the night that just
+  // ended; otherwise the newest final night before it). On a miss the night's strip stands in.
+  const told = storyNight(initial.games, initial.now, lastNight)
+  const story = told
     ? await initialStory(
-        night.date,
+        told.date,
         Math.max(STORY_FLOOR_MS, INITIAL_TIMEOUT_MS - (Date.now() - started)),
       )
     : null
+  const screen = firstScreen({ games: initial.games, now: initial.now, lastNight, story, practice })
+  const { night } = screen
   const rows = story ? rowsOfNight(story.night, story.game.id) : []
   const strip = practiceStrip(practice, initial.now)
-  const idle = idleState(state) && night !== null
-  // S6: a run on the court leads the idle face; the story is compact below lg, full from lg, and
-  // the foot drops the strip's own "Practice game live" line. Null with FLAG_PRACTICE off.
-  const run = idle ? practiceLive(practice, initial.now) : null
+  // S6: the run on the court leads the idle face (never with FLAG_PRACTICE off).
   const lead =
-    run && practice ? <PracticeCard run={run} counterparty={practice.counterparty} /> : undefined
-  const face = !idle ? undefined : story ? (
-    <StoryCard story={story} now={initial.now} variant={run ? 'lg-full' : 'full'} />
-  ) : night ? (
-    <LastNightStrip night={night} now={initial.now} className="" />
-  ) : undefined
+    screen.lead && practice ? (
+      <PracticeCard run={screen.lead} counterparty={practice.counterparty} />
+    ) : undefined
+  const face =
+    screen.face === 'story' && story ? (
+      <StoryCard story={story} now={initial.now} variant={screen.compact ? 'lg-full' : 'full'} />
+    ) : screen.face === 'strip' && night ? (
+      <LastNightStrip night={night} now={initial.now} className="" />
+    ) : undefined
+  // While a run leads, the foot drops the strip's own "Practice game live" line.
+  const foot =
+    screen.idle && night ? (
+      <IdleFoot rows={rows} date={night.date} strip={screen.compact ? null : strip} />
+    ) : undefined
   // W9: the agent note only while its claim shows (agent calls on the story night, or a listed
   // market moved tonight).
   const agentNote = agentNoteHolds(initial.games, initial.now, story?.night)
-  const foot =
-    idle && night ? (
-      <IdleFoot rows={rows} date={night.date} strip={run ? null : strip} />
-    ) : undefined
   return (
     <>
       <Hero moved={heroMoved(initial.games, initial.now, story?.game.moved ?? false)} />
@@ -101,7 +105,7 @@ export default async function TonightPage() {
           "How it works" under the board at 375, the compact story, then the Practice line. */}
       <TonightBoard
         initial={initial}
-        state={state}
+        state={screen.state}
         idleLead={lead}
         idleFace={face}
         idleFoot={foot}

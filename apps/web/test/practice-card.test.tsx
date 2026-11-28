@@ -571,14 +571,20 @@ describe('/ wires Practice per state (§3 S6, §7 page.tsx)', () => {
   const page = read('app', 'page.tsx')
 
   it('leads the idle face with the card only while a run is on and the face is idle', () => {
-    expect(page).toMatch(/const run = idle \? practiceLive\(practice, initial\.now\) : null/)
-    expect(page).toMatch(/<PracticeCard run=\{run\} counterparty=\{practice\.counterparty\} \/>/)
+    // The run leads only an idle face: firstScreen's rule (first-screen.test.tsx pins it by
+    // behaviour, and renders / per state); the page renders its `lead` and `compact`.
+    expect(read('lib', 'server', 'first-screen.ts')).toContain(
+      'const lead = idle ? practiceLive(d.practice, d.now) : null',
+    )
+    expect(page).toMatch(
+      /<PracticeCard run=\{screen\.lead\} counterparty=\{practice\.counterparty\} \/>/,
+    )
     expect(page).toMatch(/<TonightBoard[^>]*idleLead=\{lead\}/s)
-    expect(page).toContain("variant={run ? 'lg-full' : 'full'}")
+    expect(page).toContain("variant={screen.compact ? 'lg-full' : 'full'}")
   })
 
   it('keeps the between-runs line in the foot, and drops it there while the card leads', () => {
-    expect(page).toContain('strip={run ? null : strip}')
+    expect(page).toContain('strip={screen.compact ? null : strip}')
     // S3/S4 (or after the swap) the open foot keeps R8's one line, live or between runs.
     expect(page).toMatch(/openFoot=\{[\s\S]*<PracticeStrip strip=\{strip\}/)
   })
