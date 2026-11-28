@@ -249,15 +249,122 @@ describe('the score island polls every 15 s, only while the run is on (W8b)', ()
       markets: [market({ status: 'halted', price: 0.99 })],
       updatedAt: iso(NOW + 1_200),
     }
-    expect(text(island(resp({ current: over })))).toBe('MEM 98–101 CLE · Final')
+    const html = island(resp({ current: over }))
+    expect(text(html)).toBe('MEM 98–101 CLE · Final')
+    expect(stub.calls.at(-1)).toEqual([null, 15_000])
+    // Slice 6 refix 1: the run is over, so the island marks it and the card gives way (below).
+    expect(html).toMatch(/^<div [^>]*data-practice-live[^>]*data-practice-over=""/)
+  })
+
+  it('marks the run over once it is no longer the current one, says nothing, and stops', () => {
+    const OVER = '<span hidden="" data-practice-over=""></span>'
+    expect(island(resp({ current: null, nextAt: NOW + 3_600 }))).toBe(OVER)
+    expect(stub.calls.at(-1)).toEqual([null, 15_000])
+    const next = { ...RUN, id: 'practice-401910008p0' }
+    expect(island(resp({ current: next }))).toBe(OVER)
     expect(stub.calls.at(-1)).toEqual([null, 15_000])
   })
 
-  it('says nothing once the run is no longer the current one, and stops', () => {
-    expect(island(resp({ current: null, nextAt: NOW + 3_600 }))).toBe('')
-    expect(stub.calls.at(-1)).toEqual([null, 15_000])
-    const next = { ...RUN, id: 'practice-401910008p0' }
-    expect(island(resp({ current: next }))).toBe('')
+  it('never marks a run that is still on: the first frame, a tick, a moved price', () => {
+    expect(island()).not.toContain('data-practice-over')
+    const later = { ...RUN, homeScore: 90, clockSecs: 100, updatedAt: iso(NOW + 60) }
+    expect(island(resp({ current: later }))).not.toContain('data-practice-over')
+    const traded = { ...RUN, markets: [market({ price: 0.66 })] }
+    expect(island(resp({ current: traded }))).not.toContain('data-practice-over')
+  })
+})
+
+// Slice 6 refix 1: a page left open past the run's Final (or after /practice moves on to another
+// run, or to none) must not keep "Practice game live" and a filled "Play along" over a Final score.
+// The island marks the run over; one stylesheet rule then hides the whole lead (no new words, no
+// script, no style attribute: R9 CSP), and from lg the idle grid falls back to its no-lead form,
+// so the list tops the right column again and the foot sits under the face.
+describe('the card gives way once the run is over, with no reload (slice 6 refix 1)', () => {
+  const css = read('app', 'globals.css')
+  const noop = () => {}
+  const OK = { stale: false, error: undefined }
+  const FINAL = {
+    ...RUN,
+    status: 'final' as const,
+    period: 4,
+    clockSecs: null,
+    homeScore: 101,
+    awayScore: 98,
+    markets: [market({ status: 'halted', price: 0.99 })],
+  }
+  const board = (practice?: PracticeResponse) => {
+    stub.practice = practice
+    try {
+      return renderToStaticMarkup(
+        <BoardView
+          games={[]}
+          portfolio={undefined}
+          now={S2_NOW}
+          health={OK}
+          follows={[]}
+          onToggleFollow={noop}
+          selectedId={null}
+          onSelect={noop}
+          hoverId={null}
+          onHover={noop}
+          idleLead={<PracticeCard run={RUN} counterparty="none" />}
+          idleFace={<p data-test-face>FACE</p>}
+          idleFoot={<p data-test-foot>FOOT</p>}
+        />,
+      )
+    } finally {
+      stub.practice = undefined
+    }
+  }
+  /** The lead's own markup: from its wrapper to the face's wrapper, its next sibling. */
+  const leadOf = (html: string) =>
+    html.slice(html.indexOf('data-idle-lead'), html.indexOf('data-idle-face'))
+
+  it('puts the mark inside the lead, ahead of the face, the list and the foot', () => {
+    for (const p of [resp({ current: FINAL }), resp({ current: null, nextAt: NOW + 3_600 })]) {
+      const html = board(p)
+      expect(leadOf(html)).toContain('data-practice-card')
+      expect(leadOf(html)).toContain('data-practice-over')
+      // The siblings the stylesheet moves (`~` reaches later siblings only).
+      const order = ['data-idle-lead', 'data-idle-face', 'data-board-list', 'data-idle-foot'].map(
+        (s) => html.indexOf(s),
+      )
+      expect([...order].sort((a, b) => a - b)).toEqual(order)
+    }
+    expect(board(resp())).not.toContain('data-practice-over')
+  })
+
+  it('hides the whole lead, line 1 and "Play along" with it, in the stylesheet', () => {
+    // Top level, outside any @layer: it outranks Tailwind's utilities whatever their order.
+    expect(css).toMatch(
+      /^\[data-idle-lead\]:has\(\[data-practice-over\]\) \{\n {2}display: none;\n\}$/m,
+    )
+    // Never a style attribute (R9 CSP), and no words of its own.
+    expect(read('components', 'chrono', 'practice-live.tsx')).not.toContain('style=')
+  })
+
+  it('from lg lays the idle grid out as with no lead: the list tops the right column', () => {
+    const lg = css.match(/@media \(width >= 64rem\) \{\n([\s\S]*?)\n\}/g) ?? []
+    const block = lg.find((b) => b.includes('data-practice-over')) ?? ''
+    // The no-lead idle grid (board-view.tsx): rows auto 1fr, the face in row 1, the list down
+    // rows 1-2, the foot in row 2.
+    expect(block).toMatch(
+      /\n {2}div:has\(> \[data-idle-lead\] \[data-practice-over\]\) \{\n {4}grid-template-rows: auto 1fr;\n {2}\}/,
+    )
+    const rule = (sibling: string, value: string) =>
+      new RegExp(
+        `\\n {2}\\[data-idle-lead\\]:has\\(\\[data-practice-over\\]\\) ~ \\[${sibling}\\] \\{\\n {4}grid-row: ${value};\\n {2}\\}`,
+      )
+    expect(block).toMatch(rule('data-idle-face', '1'))
+    expect(block).toMatch(rule('data-board-list', '1 / span 2'))
+    expect(block).toMatch(rule('data-idle-foot', '2'))
+    // lg is Tailwind's own 64rem: no breakpoint override in the theme.
+    expect(css).not.toContain('--breakpoint-lg')
+    // The no-lead grid it copies, as board-view.tsx writes it.
+    const view = read('components', 'chrono', 'board-view.tsx')
+    expect(view).toContain('lg:grid-rows-[auto_1fr]')
+    expect(view).toContain("'min-w-0 space-y-3 lg:col-start-2 lg:row-span-2 lg:row-start-1'")
+    expect(view).toContain("'min-w-0 lg:col-start-1 lg:row-start-2'")
   })
 })
 

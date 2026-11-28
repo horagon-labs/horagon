@@ -165,3 +165,28 @@ html[data-motion="reduced"] *:not(.keep-motion) {
 [data-hour][data-motion="reduced"] [data-rule] {
   transition: none;
 }
+
+/* The Practice card gives way once its run is over (first-screen S6, slice 6 refix 1). On a page
+   left open past the run's Final, or after GET /practice moves on to another run or to none, the
+   score island marks it (data-practice-over) and the whole lead goes: "Practice game live" and
+   "Play along" never stand over a Final score. From lg the idle grid then takes its no-lead form
+   (board-view.tsx): rows auto 1fr, the story in row 1, the list down rows 1-2, the foot in row 2.
+   A stylesheet rule, not a style attribute or a script (R9 CSP); a reload brings the
+   between-runs line. */
+[data-idle-lead]:has([data-practice-over]) {
+  display: none;
+}
+@media (width >= 64rem) {
+  div:has(> [data-idle-lead] [data-practice-over]) {
+    grid-template-rows: auto 1fr;
+  }
+  [data-idle-lead]:has([data-practice-over]) ~ [data-idle-face] {
+    grid-row: 1;
+  }
+  [data-idle-lead]:has([data-practice-over]) ~ [data-board-list] {
+    grid-row: 1 / span 2;
+  }
+  [data-idle-lead]:has([data-practice-over]) ~ [data-idle-foot] {
+    grid-row: 2;
+  }
+}
