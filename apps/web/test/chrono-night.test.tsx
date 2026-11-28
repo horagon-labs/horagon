@@ -169,16 +169,28 @@ describe('NightDial (spec 3.2, 4.1)', () => {
     expect(night()).not.toContain('data-stale')
   })
 
-  it('counts the games past the 8th ring as +N', () => {
+  // Slice 7 refix 2: the games past the 8th ring were counted as "+3" under "NYK to win 67%",
+  // the shape of C20's "+2 since open", on a board whose NYK row said "−12 since open". A signed
+  // number on / means a move since open and nothing else (one meaning per glyph; spec §1: no
+  // price move the record does not show), so those games are in the rows only.
+  it('writes no signed count for the games past the 8th ring: they are in the rows only', () => {
     const many = Array.from({ length: 10 }, (_, i) =>
       boardItem(game({ id: `g${i}` }), undefined, NOW),
     )
-    expect(night({ items: many })).toContain('data-overflow="2"')
+    const html = night({ items: many })
+    // Eight arcs, eight options; the two past the 8th ring are not on the dial.
+    expect(options(html)).toHaveLength(8)
+    expect(html).not.toContain('data-overflow')
+    // Nothing the dial shows (its sr-only options aside) is a signed number.
+    const shown = html
+      .replace(/<div [^>]*role="option"[^>]*>[^<]*<\/div>/g, '')
+      .replace(/<[^>]+>/g, ' ')
+    expect(shown).toContain('77%')
+    expect(shown).not.toMatch(/[+−]\s*\d/)
   })
 
-  // Slice 7 refix 1: in S3/S4 (11 games, 8 rings) the "+3" sat on the state line ("final+3uzzer"
-  // at 375), and at 375 the readout ran past the hub ring.
-  describe('keeps the readout and +N inside the hub ring, apart', () => {
+  // Slice 7 refix 1: in S3/S4 (11 games, 8 rings) the readout ran past the hub ring at 375.
+  describe('keeps the readout inside the hub ring', () => {
     const many = Array.from({ length: 10 }, (_, i) =>
       boardItem(game({ id: `g${i}` }), undefined, NOW),
     )
@@ -186,16 +198,10 @@ describe('NightDial (spec 3.2, 4.1)', () => {
     const words =
       html.match(/<div [^>]*data-readout-words[^>]*>([\s\S]*?)<\/div><\/div>/)?.[1] ?? ''
 
-    it("writes +N as the readout's last line, under the state line, never over it", () => {
-      expect(html).not.toMatch(/<text [^>]*data-overflow/)
+    it("ends the readout on the state line, the dial's last word", () => {
       expect(words).toMatch(
-        /<span class="[^"]*font-mono[^"]*"[^>]*data-overflow="2"[^>]*>\+2<\/span>$/,
+        /<span class="hidden [^"]*font-mono[^"]*">Open until the final buzzer<\/span>$/,
       )
-      expect(words.indexOf('Open until the final buzzer')).toBeGreaterThan(-1)
-      expect(words.indexOf('Open until the final buzzer')).toBeLessThan(
-        words.indexOf('data-overflow'),
-      )
-      expect(night()).not.toContain('data-overflow')
     })
 
     it('sizes the readout by the dial, not the viewport: the state line only on the 26rem dial', () => {
@@ -212,9 +218,9 @@ describe('NightDial (spec 3.2, 4.1)', () => {
       expect(words).toMatch(/<span class="[^"]*font-mono text-24 leading-7[^"]*">77%<\/span>/)
       expect(html).not.toMatch(/class="[^"]*gap-[^"]*" data-readout-words/)
       // The number and whose chance it is show at every size; the 12 px lines keep a 14 px line,
-      // so a three-line state line (overtime) and "+N" still fit the 26rem hub.
+      // so a three-line state line (overtime) fits the 26rem hub.
       expect(words).toMatch(/<span class="text-12 leading-3.5 text-brass-400">CLE to win<\/span>/)
-      expect(words.match(/text-12 leading-3.5/g)).toHaveLength(4)
+      expect(words.match(/text-12 leading-3.5/g)).toHaveLength(3)
     })
 
     it('leaves the rest face as it was', () => {

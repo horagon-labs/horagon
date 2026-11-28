@@ -72,7 +72,10 @@ export interface Track<T extends Placeable> {
 
 export interface Packed<T extends Placeable> {
   tracks: Track<T>[]
-  /** In the window but past the 8th ring: shown in the list only, counted as "+N". */
+  /**
+   * In the window but past the 8th ring: shown in the list only. The dial writes no count for
+   * them: a signed number on / means a move since open (first-screen slice 7 refix 2).
+   */
   overflow: T[]
 }
 

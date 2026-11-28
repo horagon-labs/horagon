@@ -112,7 +112,7 @@ export function NightDial(p: {
   const id = useId()
   const reduced = useMotionReduced()
   const [active, setActive] = useState<string | null>(null)
-  const { tracks, overflow } = packTracks(p.items, p.now)
+  const { tracks } = packTracks(p.items, p.now)
   // Arrow keys walk the arcs by closing time (spec 3.2).
   const order = [...tracks].sort((a, b) => a.item.interval.end - b.item.interval.end)
   const index = Math.max(
@@ -300,13 +300,15 @@ export function NightDial(p: {
         {/*
           At rest no arc rings the face, so the words may run wider, inside the numerals. Otherwise
           they stay inside the hub ring (r 33 of 200): the dial is a size container and the readout
-          reads its own width. The 26rem dial (lg) holds the matchup, the number, whose chance, the
-          state line and "+N". A smaller hub (375: a 343 px dial, a 113 px hub) has no room for the
+          reads its own width. The 26rem dial (lg) holds the matchup, the number, whose chance and
+          the state line. A smaller hub (375: a 343 px dial, a 113 px hub) has no room for the
           two-line state line, whose words the rows above it carry ("+2 since open", "closes in
           2:08"); under 20rem the matchup goes too, and the arc's label and the subject still name
-          the team. "+N" (the games past the 8th ring) is the last line: drawn at a fixed spot, it
-          sat on the state line. The 12 px lines keep a 14 px line and the number a 28 px one, so
-          a three-line state line (overtime) and "+N" still fit the 26rem hub.
+          the team. The 12 px lines keep a 14 px line and the number a 28 px one, so a three-line
+          state line (overtime) fits the 26rem hub.
+          The games past the 8th ring are in the rows only, with no count here: "+3" under "NYK to
+          win" read as a move since open (C20's "+2 since open"), and a signed number on / means
+          that and nothing else.
         */}
         <div
           className={`flex ${p.rest ? 'max-w-[56%] gap-0.5' : 'max-w-[32%]'} flex-col items-center text-center`}
@@ -334,14 +336,6 @@ export function NightDial(p: {
             </>
           ) : (
             <span className="text-13 text-ash-400">{p.emptyText}</span>
-          )}
-          {overflow.length > 0 && (
-            <span
-              className="font-mono text-12 leading-3.5 text-ash-400"
-              data-overflow={overflow.length}
-            >
-              +{overflow.length}
-            </span>
           )}
         </div>
       </div>
