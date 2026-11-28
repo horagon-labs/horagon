@@ -291,6 +291,26 @@ describe('note 6: a score names the team ahead', () => {
     )
     expect(text(html)).toContain('MIA @ NYK7:00 PM ET')
   })
+
+  it('puts the final score on a final row, the winner first, not the tip-off', () => {
+    const now = at('2026-11-25T06:30:00Z')
+    const final = game({
+      away: 'MIN',
+      home: 'OKC',
+      status: 'final',
+      awayScore: 113,
+      homeScore: 106,
+      period: 4,
+      clockSecs: 0,
+      markets: [market({ status: 'finalized', outcome: 'no', initialPriceBps: 7_181 })],
+    })
+    const item = boardItem(final, undefined, now)
+    expect(item.state).toBe('resolved')
+    const t = text(renderToStaticMarkup(<DialRow item={item} now={now} />))
+    expect(t).toContain('MIN @ OKCMIN 113–106 · Final')
+    expect(t).toContain('MIN won')
+    expect(t).not.toContain(' PM ET')
+  })
 })
 
 describe('note 7: the eyebrow a stranger reads first says no "on the dial"', () => {

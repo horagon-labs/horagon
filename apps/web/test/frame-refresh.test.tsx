@@ -143,6 +143,8 @@ const ROLLOVER = at('2026-11-28T11:00:00Z')
 const MIDNIGHT = at('2026-11-28T05:00:00Z')
 /** Sunday 00:40 ET: Saturday's night over too (a tab asleep all day). */
 const SAT_OVER = at('2026-11-29T05:40:00Z')
+/** Friday 11:30 PM ET: Friday's night over, before midnight ET and the 06:00 ET rollover. */
+const FRI_OVER = at('2026-11-28T04:30:00Z')
 
 const f = (state: ScreenState | undefined, at_: number): Frame => ({ state, at: at_ })
 
@@ -222,6 +224,13 @@ describe('frameStale: the server frame no longer fits, so the board asks for a n
     expect(frameStale(f('preopen', OPEN_NOW), false, fridayOpen(), OPEN_NOW + 30)).toBe(false)
     // An S5 face asleep through the next night.
     expect(frameStale(f('after', S5_AT), true, saturdayOver(), SAT_OVER)).toBe(true)
+  })
+
+  it('when an S2 face goes at a night over, with no market open and the same night and date', () => {
+    // A poll asleep from 3:00 PM ET wakes at 11:30 PM ET with Friday's night over: neither the
+    // night nor the date has turned, so only the night over can ask for the S5 frame that tells it.
+    expect(frameStale(f('later', S2_AT), true, fridayOver(), FRI_OVER)).toBe(true)
+    expect(frameStale(f('later', S2_AT), false, fridayOver(), FRI_OVER)).toBe(false)
   })
 })
 
@@ -362,6 +371,18 @@ describe('TonightBoard asks for a new frame when its own stops fitting', () => {
     })
     expect(s2.html).not.toContain('data-test-face')
     expect(s2.refresh).toEqual({ due: true, key: 'later:2026-11-27:2026-11-27' })
+  })
+
+  it("an S2 page asleep all evening asks for the S5 frame once Friday's night is over", () => {
+    const { html, refresh } = tonight({
+      initial: { games: friday(), upcoming: null, now: S2_AT },
+      state: 'later',
+      poll: fridayOver(),
+      now: FRI_OVER,
+    })
+    expect(html).toMatch(/<p [^>]*data-stopped[^>]*>All stopped\.<\/p>/)
+    expect(html).not.toContain('data-test-face')
+    expect(refresh).toEqual({ due: true, key: 'later:2026-11-27:2026-11-27' })
   })
 
   it('an S1 page asks at the ET date change, its eyebrow worked out the day before', () => {
