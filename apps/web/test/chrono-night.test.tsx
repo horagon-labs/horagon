@@ -223,9 +223,18 @@ describe('NightDial (spec 3.2, 4.1)', () => {
       expect(words.match(/text-12 leading-3.5/g)).toHaveLength(3)
     })
 
+    // Slice 7 refix 2: with no "+N" under it the lg readout centred 7 px lower, and its widest
+    // line, the state line at the bottom ("tip-off in 14:57", 115 px), came to 0.5 px of the ring.
+    it('lifts the 26rem readout 4 px, so its wide bottom line clears the ring', () => {
+      expect(html).toMatch(
+        /class="[^"]*max-w-\[32%\][^"]*@min-\[26rem\]:pb-2[^"]*" data-readout-words/,
+      )
+    })
+
     it('leaves the rest face as it was', () => {
       const rest = night({ items: [], rest: true, emptyText: 'The dial rests until Sat, Nov 28.' })
       expect(rest).toContain('max-w-[56%]')
+      expect(rest).not.toContain('pb-2')
       expect(rest).toContain('>The dial rests until Sat, Nov 28.<')
       expect(rest).not.toContain('data-overflow')
     })

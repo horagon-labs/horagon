@@ -305,13 +305,15 @@ export function NightDial(p: {
           two-line state line, whose words the rows above it carry ("+2 since open", "closes in
           2:08"); under 20rem the matchup goes too, and the arc's label and the subject still name
           the team. The 12 px lines keep a 14 px line and the number a 28 px one, so a three-line
-          state line (overtime) fits the 26rem hub.
+          state line (overtime) fits the 26rem hub. There the column sits 4 px high (pb-2): its
+          widest line is the state line at the bottom ("tip-off in 14:57", 115 px), which centred
+          came to 0.5 px of the ring.
           The games past the 8th ring are in the rows only, with no count here: "+3" under "NYK to
           win" read as a move since open (C20's "+2 since open"), and a signed number on / means
           that and nothing else.
         */}
         <div
-          className={`flex ${p.rest ? 'max-w-[56%] gap-0.5' : 'max-w-[32%]'} flex-col items-center text-center`}
+          className={`flex ${p.rest ? 'max-w-[56%] gap-0.5' : 'max-w-[32%] @min-[26rem]:pb-2'} flex-col items-center text-center`}
           data-readout-words
         >
           {focus && focusWords ? (
