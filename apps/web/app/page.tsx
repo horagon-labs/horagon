@@ -8,7 +8,7 @@
 // face and the story is compact below lg; between runs the foot keeps R8's one line. Once a market
 // is open (S3, S4) the Night dial keeps the slot, and the compact story and the Practice line
 // follow the board; the board gets both, so a market opening under its poll swaps them with no
-// reload. Last, one static line discloses the reference agent.
+// reload. Last, one static line discloses the reference agent, only while its claim shows (W9).
 import type { Metadata } from 'next'
 import { connection } from 'next/server'
 import { AgentNote } from '../components/chrono/agent-line'
@@ -29,7 +29,7 @@ import {
   initialRecord,
   initialStory,
 } from '../lib/server/api'
-import { idleState, screenState } from '../lib/server/first-screen'
+import { agentNoteHolds, idleState, screenState } from '../lib/server/first-screen'
 import { INITIAL_TIMEOUT_MS } from '../lib/server/initial'
 import { currentNight, rowsOfNight } from '../lib/server/last-night'
 
@@ -82,6 +82,9 @@ export default async function TonightPage() {
   ) : night ? (
     <LastNightStrip night={night} now={initial.now} className="" />
   ) : undefined
+  // W9: the agent note only while its claim shows (agent calls on the story night, or a listed
+  // market moved tonight).
+  const agentNote = agentNoteHolds(initial.games, initial.now, story?.night)
   const foot =
     idle && night ? (
       <IdleFoot rows={rows} date={night.date} strip={run ? null : strip} />
@@ -116,7 +119,7 @@ export default async function TonightPage() {
           </>
         }
       />
-      <AgentNote />
+      {agentNote && <AgentNote />}
     </>
   )
 }
