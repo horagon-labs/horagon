@@ -1,13 +1,13 @@
 'use client'
-// One game in the board's list (spec 3.2, L1 style): MiniDial, teams and score (or the ET
-// tip-off), whose chance the number is and the number in percent (R5), a note and a diamond for
-// your position. Before a market opens the number is the model's, ink-muted with " model" and a ▲
-// on the MiniDial; while the market trades it is Live blue with its move since open (first-screen
-// spec C19, C20). The whole row is one link to the game.
+// One game in the board's list (spec 3.2, L1 style): MiniDial, teams and score with the team
+// ahead first (or the ET tip-off), whose chance the number is and the number in percent (R5), a
+// note and a diamond for your position. Before a market opens the number is the model's, ink-muted
+// with " model" and a ▲ at the end of a dashed model arc on the MiniDial; while the market trades
+// it is Live blue with its move since open (first-screen spec C19, C20). The whole row is one link
+// to the game.
 import Link from 'next/link'
-import { type BoardItem, itemLabel, openNow, rowWords } from '../../lib/chrono/board'
+import { type BoardItem, itemLabel, openNow, rowWords, scoreLine } from '../../lib/chrono/board'
 import { etClock } from '../../lib/chrono/time'
-import { gameClock } from '../../lib/format'
 import { MiniDial } from './mini-dial'
 
 /** Live blue means one thing on a row: this market trades now (first-screen spec W4). */
@@ -15,7 +15,7 @@ const LIVE_NUMBER = 'text-live'
 
 export function DialRow(p: {
   item: BoardItem
-  /** The board's clock, for "opens in 15 h". */
+  /** The board's clock, for "opens in 14 h". */
   now: number
   /** The first trading row: the target of the count line's "Pick a game" (`#first-open`). */
   first?: boolean
@@ -26,6 +26,7 @@ export function DialRow(p: {
   const { item } = p
   const g = item.game
   const words = rowWords(item, p.now)
+  const score = g.status === 'scheduled' ? null : scoreLine(g)
   const tone = openNow(item) ? LIVE_NUMBER : item.state === 'halted' ? 'text-ink' : 'text-ink-muted'
   return (
     <Link
@@ -49,11 +50,19 @@ export function DialRow(p: {
         <span className="block truncate text-15 text-ivory-100">
           {g.away} @ {g.home}
         </span>
-        <span className="block truncate font-mono text-13 text-ash-400 tabular-nums">
-          {g.status === 'scheduled'
-            ? etClock(item.interval.tip)
-            : `${g.awayScore}–${g.homeScore} · ${gameClock(g)}`}
-        </span>
+        {score === null ? (
+          <span className="block truncate font-mono text-13 text-ash-400 tabular-nums">
+            {etClock(item.interval.tip)}
+          </span>
+        ) : (
+          // The team ahead names the score (fresh-eyes note 6). A narrow row wraps between the
+          // score and the clock, never inside one, so neither is cut.
+          <span className="block font-mono text-13 text-ash-400 tabular-nums">
+            <span className="whitespace-nowrap">{score[0]}</span>
+            {' · '}
+            <span className="whitespace-nowrap">{score[1]}</span>
+          </span>
+        )}
       </span>
       <span className="shrink-0 text-right">
         {words.subject && (

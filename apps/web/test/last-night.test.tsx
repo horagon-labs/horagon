@@ -181,14 +181,10 @@ const THU = at('2026-11-26T15:00:00Z')
 describe('the strip copy (R10)', () => {
   it('counts the upsets in the header', () => {
     const base = { date: '2026-11-25', rows: [] }
-    expect(lastNightHeader({ ...base, upsets: 2 }, THU)).toBe(
-      'Last night on the dial · Wed, Nov 25 · 2 upsets',
-    )
-    expect(lastNightHeader({ ...base, upsets: 1 }, THU)).toBe(
-      'Last night on the dial · Wed, Nov 25 · 1 upset',
-    )
+    expect(lastNightHeader({ ...base, upsets: 2 }, THU)).toBe('Last night · Wed, Nov 25 · 2 upsets')
+    expect(lastNightHeader({ ...base, upsets: 1 }, THU)).toBe('Last night · Wed, Nov 25 · 1 upset')
     expect(lastNightHeader({ ...base, upsets: 0 }, THU)).toBe(
-      'Last night on the dial · Wed, Nov 25 · no upsets',
+      'Last night · Wed, Nov 25 · no upsets',
     )
   })
 
@@ -216,7 +212,7 @@ describe('the strip markup (R10)', () => {
   const text = html.replace(/<[^>]+>/g, '')
 
   it('shows the header, the UPSET plate and the rows, closed omitted when null', () => {
-    expect(html).toContain('Last night on the dial · Wed, Nov 25 · 1 upset')
+    expect(html).toContain('Last night · Wed, Nov 25 · 1 upset')
     expect(html.match(/>UPSET</g)).toHaveLength(1)
     expect(text).toContain('CHI 107–105 CHA · opened 26% · closed 81%')
     expect(text).toContain('NYK 110–90 BOS · opened 60%')

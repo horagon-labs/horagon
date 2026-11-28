@@ -302,7 +302,7 @@ export function NightDial(p: {
           they stay inside the hub ring (r 33 of 200): the dial is a size container and the readout
           reads its own width. The 26rem dial (lg) holds the matchup, the number, whose chance and
           the state line. A smaller hub (375: a 343 px dial, a 113 px hub) has no room for the
-          two-line state line, whose words the rows above it carry ("+2 since open", "closes in
+          two-line state line, whose words the rows above it carry ("+2 · opened 79%", "closes in
           2:08"); under 20rem the matchup goes too, and the arc's label and the subject still name
           the team. The 12 px lines keep a 14 px line and the number a 28 px one, so a three-line
           state line (overtime) fits the 26rem hub. There the column sits 4 px high (pb-2): its

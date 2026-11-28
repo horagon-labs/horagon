@@ -10,7 +10,12 @@
 // nothing here is an open market.
 import type { Night, NightGame } from '@horagon/sdk'
 import type { PracticeStripLine } from '../lib/chrono/practice'
-import { type LastNightRow, lastNightHeader, nightDayLabel } from '../lib/server/last-night'
+import {
+  type LastNightRow,
+  lastNightHeadParts,
+  nightDayLabel,
+  upsetCount,
+} from '../lib/server/last-night'
 import { storyLines, type Tape, type TapeBox, tapeModel } from '../lib/server/story'
 import { HowItWorks } from './chrono/hero'
 import { MiniDial } from './chrono/mini-dial'
@@ -208,6 +213,7 @@ export interface StoryCardProps {
 export function StoryCard({ story, now, variant = 'full', rows }: StoryCardProps) {
   const { night, game } = story
   const s = storyLines(game, now)
+  const head = lastNightHeadParts(night, now)
   const full = variant !== 'compact'
   // From lg only: the tape, the readout, line 2 and the tally hide below lg, and the narrow tape
   // (below sm) is never shown, so it is not drawn.
@@ -229,7 +235,17 @@ export function StoryCard({ story, now, variant = 'full', rows }: StoryCardProps
       data-story-game={game.id}
     >
       <h2 id="story-title" className="text-13 font-medium uppercase tracking-[0.2em] text-ink">
-        {lastNightHeader(night, now)}
+        {/* The night's count only beside the rows that show its other upsets (fresh-eyes note 1):
+            the compact card lists them at every width; the full card's foot folds them below
+            lg, where the summary says how many sit inside. */}
+        {full ? (
+          <>
+            {head.head}
+            <span className="hidden lg:inline">{` · ${head.upsets}`}</span>
+          </>
+        ) : (
+          `${head.head} · ${head.upsets}`
+        )}
       </h2>
       {/* The plate flows with the words (no flex row): a long line 1 wraps beside the plate, not
           under it, which keeps a moved card's first board row above the 375 fold (§9). */}
@@ -269,7 +285,7 @@ export function StoryCard({ story, now, variant = 'full', rows }: StoryCardProps
       {tape && wide && (
         <figure className={lgOnly ? 'hidden space-y-1 lg:block' : 'space-y-1'} data-story-tape>
           {/* In the sans, 8 px apart: caption and legend share one row at 375 where both fit
-              ("MIN @ OKC · MIN to win · price and model" 232 px + 98 px), else the legend wraps. */}
+              ("MIA @ NYK · NYK to win" and "▲ Horagon model  — Price"), else the legend wraps. */}
           <figcaption className="flex flex-wrap justify-between gap-x-2 text-12 text-ink-muted">
             <span>{tape.caption}</span>
             <span>{tape.legend.join('  ')}</span>
@@ -339,8 +355,16 @@ export function StoryCard({ story, now, variant = 'full', rows }: StoryCardProps
   )
 }
 
-const moreGames = (n: number, date: string) =>
-  `${n} more ${n === 1 ? 'game' : 'games'} from ${nightDayLabel(date)}`
+/**
+ * C13, plus the upsets folded inside (fresh-eyes note 1): "5 more games from Wed, Nov 25 · 1
+ * upset", so the eyebrow's count is found where the rows are.
+ */
+function moreGames(rows: readonly LastNightRow[], date: string): string {
+  const n = rows.length
+  const upsets = rows.filter((r) => r.upset).length
+  const games = `${n} more ${n === 1 ? 'game' : 'games'} from ${nightDayLabel(date)}`
+  return upsets > 0 ? `${games} · ${upsetCount(upsets)}` : games
+}
 
 /**
  * The idle face's foot (§3 S2): below lg it follows the board's list ("How it works" below sm,
@@ -367,7 +391,7 @@ export function IdleFoot({
               <span aria-hidden="true" className="text-ink-muted group-open:rotate-90">
                 ▸
               </span>
-              {moreGames(rows.length, date)}
+              {moreGames(rows, date)}
             </summary>
             <div className="space-y-2 pt-1">
               <NightRowList rows={rows} />

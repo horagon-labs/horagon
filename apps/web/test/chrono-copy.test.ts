@@ -84,7 +84,7 @@ describe('rowWords (R5)', () => {
       subject: 'CLE to win',
       value: '77%',
       model: false,
-      note: '+27 since open',
+      note: '+27 · opened 50%',
       wide: ' · closes by 10:10 PM ET',
     })
   })

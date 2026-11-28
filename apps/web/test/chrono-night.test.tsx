@@ -252,12 +252,14 @@ describe('DialRow (spec 3.2)', () => {
 
   it('shows the mini dial, the score, whose chance, the % in mono 19 px, the move, the close from sm and your diamond', () => {
     expect(row).toContain('viewBox="0 0 100 100"')
-    expect(row).toContain('78–84 · Q3 4:12')
+    expect(row).toContain(
+      '<span class="whitespace-nowrap">CLE 84–78</span> · <span class="whitespace-nowrap">Q3 4:12</span>',
+    )
     expect(row).toContain('data-subject="true">CLE to win</span>')
     // Live blue: this market trades now (first-screen spec W4).
     expect(row).toContain('font-mono text-19 tabular-nums text-live">77%')
     expect(row).not.toContain('¢')
-    expect(row).toContain('+27 since open<span class="hidden sm:inline"> · closes by 10:10 PM ET')
+    expect(row).toContain('+27 · opened 50%<span class="hidden sm:inline"> · closes by 10:10 PM ET')
     expect(row).not.toContain('closes in')
     expect(row).toContain('◆')
   })

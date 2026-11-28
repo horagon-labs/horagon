@@ -416,7 +416,7 @@ describe('My Game-day, rendered', () => {
   it('says when there is no wallet, with a way to set one up and the key block', () => {
     const html = page({ address: null, me: undefined })
     expect(html).toContain('No play wallet in this browser yet.')
-    expect(html).toContain('Set up wallet')
+    expect(html).toContain('Get a play wallet')
     expect(html).toContain('Show secret key')
     expect(page({ address: null, me: undefined, preparing: true })).toContain('Preparing…')
     expect(page({ address: null, me: undefined, setUpFailed: true })).toContain(

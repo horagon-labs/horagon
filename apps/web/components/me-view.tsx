@@ -31,7 +31,7 @@ import {
   statusOf,
 } from '../lib/me'
 import { usePoll } from '../lib/use-poll'
-import { SOMETHING_WRONG, WALLET_PREPARING } from '../lib/wallet-copy'
+import { SET_UP_WALLET, SOMETHING_WRONG, WALLET_PREPARING } from '../lib/wallet-copy'
 import { NightChip } from './chrono/night-chip'
 import { ErrorText } from './error-text'
 import { KeyBackup } from './key-backup'
@@ -268,7 +268,7 @@ export function MeScreen(p: MeScreenProps) {
       <div className="space-y-2">
         <p className="text-15 text-ink">No play wallet in this browser yet.</p>
         <button type="button" disabled={p.preparing} onClick={p.onSetUp} className={BUTTON}>
-          {p.preparing ? WALLET_PREPARING : 'Set up wallet'}
+          {p.preparing ? WALLET_PREPARING : SET_UP_WALLET}
         </button>
         {p.setUpFailed && (
           <p role="alert" className="text-12 text-error">

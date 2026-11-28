@@ -99,8 +99,8 @@ describe('the shared relative times (W4: inMinutes moves to time.ts)', () => {
     expect(inMinutes(5)).toBe('in 1 min')
   })
 
-  it('rounds to whole hours from 2 h up, and counts minutes below (C19)', () => {
-    expect(roughIn(14 * 3600 + 44 * 60)).toBe('in 15 h')
+  it('keeps the whole hours of inMinutes from 2 h up, and counts minutes below (C19, note 5)', () => {
+    expect(roughIn(14 * 3600 + 44 * 60)).toBe('in 14 h')
     expect(roughIn(2 * 3600)).toBe('in 2 h')
     expect(roughIn(2 * 3600 - 60)).toBe('in 119 min')
     // Seconds short of 2 h never read "120 min".
@@ -118,7 +118,7 @@ describe('a pre-open row says the model number and when it opens (C19)', () => {
       subject: 'NYK to win',
       value: '79%',
       model: true,
-      note: 'opens in 15 h',
+      note: 'opens in 14 h',
       wide: '',
     })
     // 42 min before the open.
@@ -132,7 +132,7 @@ describe('a pre-open row says the model number and when it opens (C19)', () => {
     const html = renderToStaticMarkup(<DialRow item={nyk} now={S2_NOW} />)
     const text = html.replace(/<[^>]+>/g, '')
     expect(text).toContain('MIA @ NYK7:00 PM ET')
-    expect(text).toContain('NYK to win79% modelopens in 15 h')
+    expect(text).toContain('NYK to win79% modelopens in 14 h')
     expect(text).not.toContain('—')
     expect(text).not.toContain('tip-off')
     expect(html).not.toContain('text-live')
@@ -154,11 +154,11 @@ describe('a pre-open row says the model number and when it opens (C19)', () => {
 })
 
 describe('a trading row says the move since open (C20)', () => {
-  it('signs the move in points, with U+2212 for a fall', () => {
-    expect(sinceOpen(0.81, 7_900)).toBe('+2 since open')
-    expect(sinceOpen(0.6, 7_900)).toBe('−19 since open')
+  it('signs the move in points, with U+2212 for a fall, beside the opening price', () => {
+    expect(sinceOpen(0.81, 7_900)).toBe('+2 · opened 79%')
+    expect(sinceOpen(0.6, 7_900)).toBe('−19 · opened 79%')
     expect(sinceOpen(0.79, 7_900)).toBe('opening price')
-    expect(sinceOpen(0.794, 7_900)).toBe('+0.4 since open')
+    expect(sinceOpen(0.794, 7_900)).toBe('+0.4 · opened 79%')
     expect(sinceOpen(0.7904, 7_900)).toBe('opening price')
     expect(sinceOpen(0.78996, 7_900)).toBe('opening price')
   })
@@ -170,11 +170,11 @@ describe('a trading row says the move since open (C20)', () => {
       subject: 'CLE to win',
       value: '77%',
       model: false,
-      note: '+2 since open',
+      note: '+2 · opened 75%',
       wide: ' · closes by 10:10 PM ET',
     })
     const html = renderToStaticMarkup(<DialRow item={live} now={now} />)
-    expect(html).toContain('+2 since open<span class="hidden sm:inline"> · closes by 10:10 PM ET')
+    expect(html).toContain('+2 · opened 75%<span class="hidden sm:inline"> · closes by 10:10 PM ET')
     expect(html).not.toContain('latest')
   })
 
@@ -268,7 +268,7 @@ describe('the board at 08:16Z with Friday listed (spec §3 S2)', () => {
     expect(html).toMatch(/<h2 class="[^"]*uppercase[^"]*">Fri Nov 27 · 11 games<\/h2>/)
     expect(html).toContain('>First market opens in 14 h 44 min<')
     expect(html).toContain(
-      '>Each market opens 60 min before tip-off at the model&#x27;s chance at that time.<',
+      '>Each market opens 60 min before tip-off at the Horagon model&#x27;s chance at that time.<',
     )
     // The count line comes before the note, and both before the first row.
     const first = html.indexOf('First market opens')
@@ -327,7 +327,7 @@ describe('the board with markets open (spec §3 S3/S4, C17)', () => {
     expect(html.match(/id="first-open"/g)).toHaveLength(1)
     // The open row is the only Live blue number; the pre-open rows stay ink-muted.
     expect(html.match(/text-19[^"]*text-live/g)).toHaveLength(1)
-    expect(html).toContain('+2 since open')
+    expect(html).toContain('+2 · opened 79%')
   })
 
   it('says "markets" for more than one, and drops the note once a game is live', () => {
@@ -481,22 +481,24 @@ describe('last night, kept honest (C9, C14)', () => {
   it('says "Last night" only for the ET calendar day before today', () => {
     // Thu, Nov 26, 6:00 AM ET and later that day (a gap day): Wednesday was last night.
     expect(lastNightHeader(night(), at('2026-11-26T11:00:00Z'))).toBe(
-      'Last night on the dial · Wed, Nov 25 · 2 upsets',
+      'Last night · Wed, Nov 25 · 2 upsets',
     )
     expect(lastNightHeader(night(), at('2026-11-27T04:59:00Z'))).toBe(
-      'Last night on the dial · Wed, Nov 25 · 2 upsets',
+      'Last night · Wed, Nov 25 · 2 upsets',
     )
     // Fri, Nov 27, 3:16 AM ET: Wednesday is two calendar days back.
-    expect(lastNightHeader(night(), S2_NOW)).toBe('Wed, Nov 25 on the dial · 2 upsets')
-    expect(lastNightHeader(night({ upsets: 1 }), S2_NOW)).toBe('Wed, Nov 25 on the dial · 1 upset')
+    expect(lastNightHeader(night(), S2_NOW)).toBe('Last game night · Wed, Nov 25 · 2 upsets')
+    expect(lastNightHeader(night({ upsets: 1 }), S2_NOW)).toBe(
+      'Last game night · Wed, Nov 25 · 1 upset',
+    )
     expect(lastNightHeader(night({ upsets: 0 }), S2_NOW)).toBe(
-      'Wed, Nov 25 on the dial · no upsets',
+      'Last game night · Wed, Nov 25 · no upsets',
     )
   })
 
   it('says "Tonight" while the night is still the ET night (before the 06:00 ET rollover)', () => {
     expect(lastNightHeader(night(), at('2026-11-26T10:59:00Z'))).toBe(
-      'Tonight on the dial · Wed, Nov 25 · 2 upsets',
+      'Tonight · Wed, Nov 25 · 2 upsets',
     )
   })
 
@@ -552,7 +554,7 @@ describe('last night, kept honest (C9, C14)', () => {
     const html = renderToStaticMarkup(
       <LastNightStrip night={night({ rows: [row()] })} now={S2_NOW} />,
     )
-    expect(html).toContain('>Wed, Nov 25 on the dial · 2 upsets</h2>')
+    expect(html).toContain('>Last game night · Wed, Nov 25 · 2 upsets</h2>')
     expect(html).not.toContain('closed')
   })
 })

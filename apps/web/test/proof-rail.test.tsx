@@ -55,7 +55,7 @@ describe('the proof rail (C5, C6, C6m)', () => {
 
   it('names both programs and the real counts on the desktop rail', () => {
     expect(text(part(html, 'data-rail-wide'))).toBe(
-      'Pools: pm-AMM GV1F…N16y ↗ · Results: Horagon program HtDJ…9qHF ↗ · 12 markets created · 12 results final on chain · How the model is checked',
+      'Pools: pm-AMM GV1F…N16y ↗ · Results: Horagon program HtDJ…9qHF ↗ · 12 markets created · 12 results final on chain · How the Horagon model is checked',
     )
     const devnet = (k: string) => `https://explorer.solana.com/address/${k}?cluster=devnet`
     expect(html).toContain(`href="${devnet(POOLS)}"`)
@@ -125,7 +125,7 @@ describe('the proof rail (C5, C6, C6m)', () => {
       const html = renderToStaticMarkup(<ProofRail record={record} proofMarket={STORY} />)
       expect(html).not.toContain('data-rail-narrow')
       expect(text(part(html, 'data-rail-wide'))).toBe(
-        'Pools: pm-AMM GV1F…N16y ↗ · Results: Horagon program HtDJ…9qHF ↗ · How the model is checked',
+        'Pools: pm-AMM GV1F…N16y ↗ · Results: Horagon program HtDJ…9qHF ↗ · How the Horagon model is checked',
       )
       expect(part(html, 'data-rail-wide')).not.toMatch(/class="[^"]*\bhidden\b/)
       expect(html).not.toMatch(/\bmarkets?\b.*created/)

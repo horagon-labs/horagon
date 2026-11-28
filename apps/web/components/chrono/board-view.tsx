@@ -63,9 +63,9 @@ export interface BoardViewProps {
   openFoot?: ReactNode
 }
 
-/** C18, word for word. */
+/** C18, the model named as Horagon's: the legend for the rows' "79% model" (fresh-eyes note 2). */
 export const BOARD_NOTE =
-  "Each market opens 60 min before tip-off at the model's chance at that time."
+  "Each market opens 60 min before tip-off at the Horagon model's chance at that time."
 
 export function BoardView(p: BoardViewProps) {
   const filter = p.showAll ? [] : p.follows

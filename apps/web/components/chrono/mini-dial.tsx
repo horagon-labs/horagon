@@ -3,7 +3,10 @@
 // The row around it carries the words, so the picture stays hidden from screen readers. Your
 // position is the row's ◆, never the rim (light branding review §4.3). Before a market exists an
 // ink ▲ on the rim marks the model's chance (first-screen spec W4), like the big dial's model mark.
-import { arcPath, polar, priceToAngle } from '../../lib/chrono/geometry'
+// Before it opens (`pre`, no price) the ring carries that chance instead of a full time ring: a
+// dashed ink arc along the price scale from 0 to the ▲, dashed like the story tape's model line,
+// so each row's dial has its own shape and none reads as an empty clock (fresh-eyes note 4).
+import { arcPath, MIN_ANGLE, polar, priceToAngle } from '../../lib/chrono/geometry'
 import type { DialState } from '../../lib/chrono/state'
 import { needleClass, rimClass, rimWidth, ringClass, ringDash, ringShare } from './dial-look'
 import { Needle } from './needle'
@@ -16,6 +19,10 @@ export function MiniDial(p: {
   state: DialState
   className?: string
 }) {
+  // Not open yet: the model's chance on the ring, in place of the time ring. A game that started
+  // with no market has no time left (timeLeft 0) and will not open, so it keeps the ▲ alone.
+  const gauge =
+    p.price === null && p.model != null && p.state === 'pre' && p.timeLeft > 0 ? p.model : null
   return (
     <svg
       viewBox="0 0 100 100"
@@ -32,15 +39,26 @@ export function MiniDial(p: {
         data-rim
       />
       <circle cx={50} cy={50} r={42} fill="none" strokeWidth={4} className="stroke-rule-faint" />
-      <path
-        d={arcPath(50, 50, 42, 0, 360 * ringShare(p.state, p.timeLeft))}
-        fill="none"
-        // Closing: wider (6 against 4), the same live hue (review §4.3).
-        strokeWidth={p.state === 'closing' ? 6 : 4}
-        strokeDasharray={ringDash(p.state)}
-        className={ringClass(p.state, p.price !== null)}
-        data-ring
-      />
+      {gauge !== null ? (
+        <path
+          d={arcPath(50, 50, 42, MIN_ANGLE, priceToAngle(gauge))}
+          fill="none"
+          strokeWidth={4}
+          strokeDasharray="7 4"
+          className="stroke-ink"
+          data-model-arc
+        />
+      ) : (
+        <path
+          d={arcPath(50, 50, 42, 0, 360 * ringShare(p.state, p.timeLeft))}
+          fill="none"
+          // Closing: wider (6 against 4), the same live hue (review §4.3).
+          strokeWidth={p.state === 'closing' ? 6 : 4}
+          strokeDasharray={ringDash(p.state)}
+          className={ringClass(p.state, p.price !== null)}
+          data-ring
+        />
+      )}
       {p.price !== null && p.state !== 'void' && (
         <Needle
           angle={priceToAngle(p.price)}

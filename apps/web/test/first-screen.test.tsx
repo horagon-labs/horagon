@@ -326,7 +326,9 @@ describe('/ renders the layout firstScreen picks (§3, §7 page.tsx)', () => {
     expect(count(html, 'data-story-card=')).toBe(1)
     expect(html).not.toContain('data-open-foot')
     expect(html).not.toContain('data-idle-lead')
-    expect(html).toContain('Wed, Nov 25 on the dial · 2 upsets')
+    expect(html).toContain(
+      'Last game night · Wed, Nov 25<span class="hidden lg:inline"> · 2 upsets</span>',
+    )
     expect(vi.mocked(initialStory)).toHaveBeenCalledWith('2026-11-25', expect.any(Number))
   })
 
@@ -355,7 +357,7 @@ describe('/ renders the layout firstScreen picks (§3, §7 page.tsx)', () => {
     const html = await page({ games: stopped(), now: S5_NOW, story: null })
     expect(vi.mocked(initialStory)).toHaveBeenCalledWith('2026-11-27', expect.any(Number))
     expect(html).toMatch(/data-idle-face[^>]*>\s*<section [^>]*data-last-night/)
-    expect(html).toContain('Tonight on the dial · Fri, Nov 27 · no upsets')
+    expect(html).toContain('Tonight · Fri, Nov 27 · no upsets')
     expect(html).not.toContain('data-open-foot')
   })
 

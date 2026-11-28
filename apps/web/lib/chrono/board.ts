@@ -4,7 +4,7 @@ import type { Game, MarketSummary, PositionsResponse } from '@horagon/sdk'
 import { formatAmount, parseAmount } from '@horagon/sdk/amount'
 import { etNight } from '@horagon/sdk/et'
 import { effectiveTime } from '@horagon/sdk/math'
-import { countdown, isTonight, percent, usdc } from '../format'
+import { countdown, gameClock, isTonight, percent, usdc } from '../format'
 import type { ScreenState } from '../server/first-screen'
 import { rowSubject, started } from './copy'
 import { timeLeftFraction } from './geometry'
@@ -116,16 +116,49 @@ export function yourHour(
 }
 
 /**
- * The move since the market opened, on the subject's (home) side, in points (first-screen spec
- * C20): "+2 since open", "−19 since open" with U+2212, "+0.4 since open" under one point, and
- * "opening price" while the price still equals the open (to 0.05 of a point).
+ * The move since the market opened, on the subject's (home) side, in points, beside the opening
+ * price it moved from (first-screen spec C20, fresh-eyes note 3): "+2 · opened 79%", "−19 ·
+ * opened 79%" with U+2212, "+0.4 · opened 79%" under one shown point, and "opening price" while
+ * the price still equals the open (to 0.05 of a point). The move is the gap between the two whole
+ * % the row shows (the number above it and "opened"), so they add up. No unit word: "pts" on a
+ * basketball row reads as the score.
  */
 export function sinceOpen(price: number, initialPriceBps: number): string {
-  const points = (price * 10_000 - initialPriceBps) / 100
+  const open = initialPriceBps / 10_000
+  const points = (price - open) * 100
   const size = Math.abs(points)
   if (Math.round(price * 10_000) === initialPriceBps || size < 0.05) return 'opening price'
-  const shown = Math.round(size) >= 1 ? String(Math.round(size)) : size.toFixed(1)
-  return `${points > 0 ? '+' : '−'}${shown} since open`
+  const whole = Math.round(price * 100) - Math.round(open * 100)
+  // Both whole % equal: under one shown point, one decimal, never "1.0" beside the same %.
+  const shown =
+    whole !== 0 ? String(Math.abs(whole)) : Math.min(0.9, Math.round(size * 10) / 10).toFixed(1)
+  return `${points > 0 ? '+' : '−'}${shown} · opened ${percent(open)}`
+}
+
+/**
+ * A started row's second line, in parts that wrap between, never inside (fresh-eyes note 6): the
+ * team ahead first, "MIA 15–11", or "Tied 15–15", then the clock, "Q1 5:22" or "Final". Other
+ * states keep the away–home score of the "MIA @ NYK" line above.
+ */
+export function scoreLine(
+  g: Pick<
+    Game,
+    | 'status'
+    | 'away'
+    | 'home'
+    | 'awayScore'
+    | 'homeScore'
+    | 'period'
+    | 'clockSecs'
+    | 'scheduledTipoff'
+  >,
+): [string, string] {
+  const clock = gameClock(g)
+  if (g.status !== 'live' && g.status !== 'final') return [`${g.awayScore}–${g.homeScore}`, clock]
+  const hi = Math.max(g.awayScore, g.homeScore)
+  const lo = Math.min(g.awayScore, g.homeScore)
+  const lead = g.awayScore === g.homeScore ? 'Tied' : g.awayScore > g.homeScore ? g.away : g.home
+  return [`${lead} ${hi}–${lo}`, clock]
 }
 
 /** The indexed price differs from the opening one (spec §6 "moved", board rows). */
@@ -147,11 +180,12 @@ export interface RowWords {
 
 /**
  * A row's right-hand lines (R5, first-screen spec C19-C21): whose chance the number is, the
- * number in percent, and a note. Before a market opens: "NYK to win · 79% model · opens in 15 h".
- * While it trades: the move since open, "closes by 12:32 AM ET" from `sm` up, and "closes in 2:10"
- * in its last five minutes. Once the final buzzer went, "CHA lost · 74% · result pending"; after
- * the result, "MIN won · opened 28%", plus "closed 81%" only when the price moved. A market that
- * stopped names no time. A game that started with no market says so (R5c).
+ * number in percent, and a note. Before a market opens: "NYK to win · 79% model · opens in 14 h".
+ * While it trades: the move since open beside the opening price, "closes by 12:32 AM ET" from
+ * `sm` up, and "closes in 2:10" in its last five minutes. Once the final buzzer went, "CHA lost
+ * · 74% · result pending"; after the result, "MIN won · opened 28%", plus "closed 81%" only when
+ * the price moved. A market that stopped names no time. A game that started with no market says
+ * so (R5c).
  */
 export function rowWords(i: BoardItem, now: number): RowWords {
   const g = i.game

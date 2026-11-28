@@ -13,6 +13,13 @@ export function replacePrompt(ephemeral: boolean): string {
     : `Replace this wallet? Its key stays saved on this device, but Horagon will not show it again. ${EXPORT_FIRST}`
 }
 
+/**
+ * The header's (and /me's) button on a device with no wallet (fresh-eyes note 9): beside "Free,
+ * no sign-up." a "set up" step read as an account. The tap makes a play-money key in this browser
+ * after the 18+ box, with no account, so the button names that play wallet.
+ */
+export const SET_UP_WALLET = 'Get a play wallet'
+
 export const WALLET_READY = 'Your play wallet is ready. Get play mUSDC from the faucet to start.'
 
 /**

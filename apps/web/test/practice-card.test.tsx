@@ -390,7 +390,9 @@ describe('the story card shrinks below lg while Practice leads (S6: variant lg-f
 
   it('keeps the eyebrow, the plate with line 1 and the proof at every width', () => {
     expect(html).toMatch(/^<section [^>]*data-story-card="lg-full"/)
-    expect(text(html)).toContain('Wed, Nov 25 on the dial · 2 upsets')
+    expect(text(html)).toContain('Last game night · Wed, Nov 25')
+    // The night's count joins from lg, beside the A4 rows (fresh-eyes note 1).
+    expect(html).toContain('<span class="hidden lg:inline"> · 2 upsets</span>')
     expect(text(html)).toContain('MIN won 113–106 from 28% before tip-off')
     expect(html).toMatch(/<a href="\/verify\/54WUaz[^"]*" class="inline-flex min-h-11[^"]*"/)
   })

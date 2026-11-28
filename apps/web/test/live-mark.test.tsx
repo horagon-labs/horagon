@@ -216,7 +216,7 @@ describe('closing reads "closes in m:ss" on the board row (review §10 item 9)',
     expect(closing.state).toBe('closing')
     expect(rowWords(closing, NOW)).toMatchObject({ note: 'closes in 2:10', wide: '' })
     expect(rowWords(boardItem(game(), undefined, NOW), NOW)).toMatchObject({
-      note: '+27 since open',
+      note: '+27 · opened 50%',
       wide: ' · closes by 10:10 PM ET',
     })
   })

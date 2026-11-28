@@ -95,7 +95,7 @@ describe('the night that just ended is the story night in S5 (W3)', () => {
     expect(night?.date).toBe('2026-11-27')
     expect(night?.upsets).toBe(1)
     expect(night?.rows.map((r) => r.winner)).toEqual(['MIA', 'DET'])
-    expect(night && lastNightHeader(night, now)).toBe('Tonight on the dial · Fri, Nov 27 · 1 upset')
+    expect(night && lastNightHeader(night, now)).toBe('Tonight · Fri, Nov 27 · 1 upset')
     expect(currentNight([], now)).toBeNull()
   })
 })
@@ -147,7 +147,7 @@ describe('the full story card on real ET 11-25 data (W2, C7-C12, G1)', () => {
 
   it('heads with the dated eyebrow and tells the upset from 28%', () => {
     expect(html).toMatch(
-      /<h2 [^>]*class="[^"]*uppercase[^"]*"[^>]*>Wed, Nov 25 on the dial · 2 upsets<\/h2>/,
+      /<h2 [^>]*class="[^"]*uppercase[^"]*"[^>]*>Last game night · Wed, Nov 25<span class="hidden lg:inline"> · 2 upsets<\/span><\/h2>/,
     )
     expect(html).toContain('data-story="Upset"')
     expect(t).toContain('MIN won 113–106 from 28% before tip-off')
@@ -157,8 +157,7 @@ describe('the full story card on real ET 11-25 data (W2, C7-C12, G1)', () => {
   it('draws the tape twice, 340×96 below sm and 600×132 from sm, with its marks (C10)', () => {
     expect(html.match(/viewBox="0 0 340 96"/g)).toHaveLength(1)
     expect(html.match(/viewBox="0 0 600 132"/g)).toHaveLength(1)
-    expect(t).toContain('MIN @ OKC · MIN to win · model')
-    expect(t).toContain('▲ Model')
+    expect(t).toContain('MIN @ OKC · MIN to win▲ Horagon model')
     expect(t).not.toContain('— Price')
     expect(html.match(/>opened 28%</g)).toHaveLength(2)
     expect(html.match(/>Final 113–106</g)).toHaveLength(2)
@@ -237,8 +236,7 @@ describe('the full story card on the moved night (C8, C8t, C10)', () => {
 
   it('draws the price line and says the buzzer price and who called', () => {
     expect(html.match(/data-tape-price/g)).toHaveLength(2)
-    expect(t).toContain('MIA @ NYK · NYK to win · price and model')
-    expect(t).toContain('— Price')
+    expect(t).toContain('MIA @ NYK · NYK to win▲ Horagon model  — Price')
     expect(t).toContain('At the buzzer the price had NYK at 81%.')
     expect(t).toContain('14 calls · 2 by fans · 12 by the reference agent')
     expect(html).toMatch(/<a href="\/agent"[^>]*>reference agent<\/a>/)
@@ -319,7 +317,7 @@ describe('the compact story (S3/S4, a missing tape)', () => {
 
   it('keeps the eyebrow, the plate and line 1 and the proof, and drops tape, readout and line 2', () => {
     const t = text(html)
-    expect(t).toContain('Wed, Nov 25 on the dial · 2 upsets')
+    expect(t).toContain('Last game night · Wed, Nov 25 · 2 upsets')
     expect(t).toContain('MIN won 113–106 from 28% before tip-off')
     expect(t).toContain('Result on-chain · MIN won · Check it yourself')
     expect(html).not.toContain('<svg')
@@ -347,7 +345,7 @@ describe("the idle face's foot (C13, C15)", () => {
 
   it('folds the A4 rows under "5 more games from Wed, Nov 25" below lg, and lists them from lg', () => {
     expect(html).toMatch(
-      /<details class="[^"]*lg:hidden[^"]*"[^>]*><summary class="[^"]*min-h-11[^"]*"[^>]*><span aria-hidden="true"[^>]*>▸<\/span>5 more games from Wed, Nov 25<\/summary>/,
+      /<details class="[^"]*lg:hidden[^"]*"[^>]*><summary class="[^"]*min-h-11[^"]*"[^>]*><span aria-hidden="true"[^>]*>▸<\/span>5 more games from Wed, Nov 25 · 1 upset<\/summary>/,
     )
     expect(html).toMatch(/class="hidden[^"]*lg:block[^"]*"[^>]*data-last-night-rows/)
     expect(html.match(/CHI 107–105 CHA/g)).toHaveLength(2)

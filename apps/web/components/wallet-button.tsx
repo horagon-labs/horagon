@@ -2,12 +2,12 @@
 // Header wallet: balance and address; the sheet has test funds, positions, Export and Import.
 // The sheet opens by itself when the 18+ gate has just created a wallet: it starts empty, so
 // the faucet comes first. The YourHour chip opens it at the positions (Chronometer spec 3.2).
-// "Set up wallet" waits for the wallet's key code on its first tap (R5c): it says so, and a load
-// that fails says so beside it.
+// The set-up button (SET_UP_WALLET) waits for the wallet's key code on its first tap (R5c): it
+// says so, and a load that fails says so beside it.
 import dynamic from 'next/dynamic'
 import { useEffect, useRef, useState } from 'react'
 import { shortKey, usdc } from '../lib/format'
-import { SOMETHING_WRONG, WALLET_PREPARING } from '../lib/wallet-copy'
+import { SET_UP_WALLET, SOMETHING_WRONG, WALLET_PREPARING } from '../lib/wallet-copy'
 import { NightChip } from './chrono/night-chip'
 import { YourHour } from './chrono/your-hour'
 import { useWallet } from './wallet'
@@ -52,7 +52,7 @@ export function WalletButton() {
           }}
           className="min-h-11 rounded-full border border-line px-4 text-13 text-brass-400 disabled:opacity-50"
         >
-          {preparing ? WALLET_PREPARING : 'Set up wallet'}
+          {preparing ? WALLET_PREPARING : SET_UP_WALLET}
         </button>
         {failed && (
           <p role="alert" className="pb-1 text-right text-12 text-red-400">

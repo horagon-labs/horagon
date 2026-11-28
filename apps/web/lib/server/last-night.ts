@@ -1,4 +1,4 @@
-// "Last night on the dial" (R10, culture A4): the morning after, on /. The newest ET night before
+// "Last night" (R10, culture A4): the morning after, on /. The newest ET night before
 // tonight's with a final NBA game, up to six of its games, the ones with a story first. The
 // opening price is the model's pre-game % written on chain; the closing price is the last indexed
 // price, which stops at the halt, and is printed only when it moved (first-screen spec C14). Pure
@@ -181,23 +181,37 @@ export const nightDayLabel = (date: string): string =>
 const etCalendarDate = (ts: number) =>
   new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' }).format(new Date(ts * 1000))
 
+/** "no upsets", "1 upset", "2 upsets". */
+export const upsetCount = (n: number): string =>
+  n === 0 ? 'no upsets' : `${n} upset${n === 1 ? '' : 's'}`
+
 /**
- * The strip's eyebrow (first-screen spec C9): "Last night on the dial · Wed, Nov 25 · 2 upsets"
- * only when the night is the ET calendar day before today's; "Tonight on the dial · …" while it is
- * still the ET night (before the 06:00 ET rollover); otherwise the date leads, "Wed, Nov 25 on the
- * dial · 2 upsets", so a night two days back is never called last night.
+ * The strip's eyebrow (first-screen spec C9) in its two parts, the night and its upsets: "Last
+ * night · Wed, Nov 25" only when the night is the ET calendar day before today's; "Tonight · …"
+ * while it is still the ET night (before the 06:00 ET rollover); otherwise "Last game night · Wed,
+ * Nov 25", so a night two days back is never called last night. The culture's "on the dial" is
+ * not the first thing a stranger reads (fresh-eyes note 7). The story card shows the upsets only
+ * where the night's other rows show with it (note 1).
  */
+export function lastNightHeadParts(
+  night: Pick<LastNight, 'date' | 'upsets'>,
+  nowSecs: number,
+): { head: string; upsets: string } {
+  const day = nightDayLabel(night.date)
+  const upsets = upsetCount(night.upsets)
+  if (night.date === etNight(nowSecs)) return { head: `Tonight · ${day}`, upsets }
+  if (night.date === etPrevDay(etCalendarDate(nowSecs)))
+    return { head: `Last night · ${day}`, upsets }
+  return { head: `Last game night · ${day}`, upsets }
+}
+
+/** The eyebrow in one line: "Last game night · Wed, Nov 25 · 2 upsets" (C9). */
 export function lastNightHeader(
   night: Pick<LastNight, 'date' | 'upsets'>,
   nowSecs: number,
 ): string {
-  const day = nightDayLabel(night.date)
-  const upsets =
-    night.upsets === 0 ? 'no upsets' : `${night.upsets} upset${night.upsets === 1 ? '' : 's'}`
-  if (night.date === etNight(nowSecs)) return `Tonight on the dial · ${day} · ${upsets}`
-  if (night.date === etPrevDay(etCalendarDate(nowSecs)))
-    return `Last night on the dial · ${day} · ${upsets}`
-  return `${day} on the dial · ${upsets}`
+  const { head, upsets } = lastNightHeadParts(night, nowSecs)
+  return `${head} · ${upsets}`
 }
 
 /** "CHI 107–105 CHA · opened 26%", plus " · closed 81%" only when the price moved (C14). */

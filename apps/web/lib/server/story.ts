@@ -13,6 +13,9 @@ import { percent } from '../format'
 export const STORY_PENDING =
   'The result goes on-chain after a box-score check. The morning read is ready at 6:00 AM ET.'
 
+/** Whose model the ▲ and the dashed line are (fresh-eyes note 2). */
+export const HORAGON_MODEL = 'Horagon model'
+
 /** The % a reader sees: ties on it go to the upset. */
 const shown = (p: number) => Math.round(p * 100)
 
@@ -79,7 +82,10 @@ export interface StoryLines {
   line2: string | null
   /** C8t, moved only: "14 calls · 2 by fans · 12 by the reference agent". */
   tally: { parts: [string, string, string]; text: string } | null
-  /** C11 (desktop): "Q3 5:41 · 63–74", "MIN to win 7%", then "model" or "price". */
+  /**
+   * C11 (desktop): "Low point · Q3 5:41 · 63–74", "MIN to win 7%", then "Horagon model" or
+   * "price".
+   */
   readout: [string, string, string] | null
   /** C12. */
   proof: StoryProof
@@ -144,8 +150,14 @@ export function storyLines(g: NightGame, now: number): StoryLines {
     line1,
     line2,
     tally: g.moved ? { parts, text: parts.join(' · ') } : null,
+    // "Low point" over the big number, so beside "MIN won" it reads as the game's low, not the
+    // result; and the model named as Horagon's (fresh-eyes notes 8 and 2).
     readout: low
-      ? [`${clockAt(low)} · ${down}`, `${g.winner} to win ${percent(low.prob)}`, low.from]
+      ? [
+          `Low point · ${clockAt(low)} · ${down}`,
+          `${g.winner} to win ${percent(low.prob)}`,
+          low.from === 'model' ? HORAGON_MODEL : 'price',
+        ]
       : null,
     proof: proofOf(g, now),
     moved: g.moved,
@@ -173,7 +185,7 @@ export interface Tape {
   low: TapeMark | null
   /** The end of the model line, with the final score. */
   final: TapeMark
-  /** "MIN @ OKC · MIN to win · model", or "… · price and model" once moved. */
+  /** "MIN @ OKC · MIN to win"; the legend says which lines are drawn. */
   caption: string
   legend: string[]
 }
@@ -235,7 +247,9 @@ export function tapeModel(g: NightGame, box: TapeBox): Tape {
     },
     low: g.low ? { x: r1(x(g.low.ts)), y: r1(y(g.low.prob)), label: percent(g.low.prob) } : null,
     final: { x: right, y: r1(y(last ? last[1] : 1)), label: `Final ${ws}–${ls}` },
-    caption: `${g.away} @ ${g.home} · ${g.winner} to win · ${g.moved ? 'price and model' : 'model'}`,
-    legend: g.moved ? ['▲ Model', '— Price'] : ['▲ Model'],
+    // The legend names the lines, the model as Horagon's (fresh-eyes note 2): the first "model" a
+    // reader meets at 375. The caption no longer repeats it, so both still share one row there.
+    caption: `${g.away} @ ${g.home} · ${g.winner} to win`,
+    legend: g.moved ? [`▲ ${HORAGON_MODEL}`, '— Price'] : [`▲ ${HORAGON_MODEL}`],
   }
 }

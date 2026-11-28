@@ -61,7 +61,7 @@ describe('storyLines on real ET 11-25 data (C7, C8, C11, C12)', () => {
     expect(s.plate).toBe('Upset')
     expect(s.line1).toBe('MIN won 113–106 from 28% before tip-off')
     expect(s.line2).toBe('The model had MIN at 7% at Q3 5:41, down 63–74.')
-    expect(s.readout).toEqual(['Q3 5:41 · 63–74', 'MIN to win 7%', 'model'])
+    expect(s.readout).toEqual(['Low point · Q3 5:41 · 63–74', 'MIN to win 7%', 'Horagon model'])
   })
 
   it('claims no move: no tally, no buzzer price, not moved', () => {
@@ -92,7 +92,7 @@ describe('storyLines on the synthetic moved night (C8 moved, C8t)', () => {
       parts: ['14 calls', '2 by fans', '12 by the reference agent'],
       text: '14 calls · 2 by fans · 12 by the reference agent',
     })
-    expect(s.readout).toEqual(['Q2 6:00 · 38–47', 'NYK to win 35%', 'price'])
+    expect(s.readout).toEqual(['Low point · Q2 6:00 · 38–47', 'NYK to win 35%', 'price'])
     expect(heroMoved([], NOW, s.moved)).toBe(true)
   })
 
@@ -154,7 +154,7 @@ describe('storyLines plates (C7)', () => {
     expect(plain.line2).toBe('The model had MIN at 30% at Q3 5:41, down 63–74.')
     const ahead = storyLines(like(higher, { low: { ...low, prob: 0.3, winnerScore: 80 } }), NOW)
     expect(ahead.line2).toBeNull()
-    expect(ahead.readout?.[0]).toBe('Q3 5:41 · 80–74')
+    expect(ahead.readout?.[0]).toBe('Low point · Q3 5:41 · 80–74')
   })
 
   it('a comeback in a moved game reads the model line, not the price low', () => {
@@ -177,8 +177,8 @@ describe('storyLines plates (C7)', () => {
 describe('tapeModel (C10, G1)', () => {
   it('draws the model line across the box, Q1-Q4, opened 28% at the left, 7% at the low', () => {
     const t = tapeModel(MIN_OKC, { w: 340, h: 96 })
-    expect(t.caption).toBe('MIN @ OKC · MIN to win · model')
-    expect(t.legend).toEqual(['▲ Model'])
+    expect(t.caption).toBe('MIN @ OKC · MIN to win')
+    expect(t.legend).toEqual(['▲ Horagon model'])
     expect(t.price).toBeNull()
     expect(t.model).toMatch(/^M0,[\d.]+(L[\d.]+,[\d.]+){59}$/)
     expect(t.periods.map((p) => p.label)).toEqual(['Q1', 'Q2', 'Q3', 'Q4'])
@@ -196,8 +196,8 @@ describe('tapeModel (C10, G1)', () => {
   it('keeps inside the padding, and draws the price only for a moved game', () => {
     const pad = { top: 10, right: 20, bottom: 14, left: 30 }
     const t = tapeModel(MOVED, { w: 600, h: 132, pad })
-    expect(t.caption).toBe('MIA @ NYK · NYK to win · price and model')
-    expect(t.legend).toEqual(['▲ Model', '— Price'])
+    expect(t.caption).toBe('MIA @ NYK · NYK to win')
+    expect(t.legend).toEqual(['▲ Horagon model', '— Price'])
     const xy = (d: string) =>
       [...d.matchAll(/[ML]([\d.]+),([\d.]+)/g)].map((m) => [Number(m[1]), Number(m[2])])
     for (const d of [t.model, t.price as string]) {

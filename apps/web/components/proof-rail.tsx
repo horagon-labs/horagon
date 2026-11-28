@@ -63,8 +63,9 @@ export function ProofRail({
     [
       'study',
       // A plain <a>: next/link from a server component adds its own client chunk to / (3.2 KiB).
+      // The first "model" from sm up, so it says whose (fresh-eyes note 2).
       <a key="study" href="/study" className={LINK}>
-        How the model is checked
+        How the Horagon model is checked
       </a>,
     ],
   ]
