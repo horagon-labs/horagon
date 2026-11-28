@@ -154,15 +154,45 @@ export const DIAL_LEGEND = '● Needle: the market price · ▲ Model: win chanc
 /** Why nothing trades once the game is final, open market or halted (R1, R5c). */
 export const BUZZER_CLOSED = 'Trading closed at the final buzzer.'
 
-/**
- * After the close, before a result: what comes next (R6). The attestor proposes once ESPN's Final
- * has held 60 s and end_ts (tip-off + 3 h) has passed; never a promise of minutes after the buzzer.
- */
-const RESULT_NEXT =
-  'The result goes on-chain automatically 3 h after tip-off, then a guardian has 15 minutes to challenge it.'
-export const CLOSED_LINE = `Trading closed. ${RESULT_NEXT}`
+/** Where a game's close is read from: its tip-off and its markets (the winner market first). */
+export type CloseGame = Partial<Pick<Game, 'scheduledTipoff' | 'markets'>>
 
-type StatusGame = VerdictGame & Pick<Game, 'status'>
+/**
+ * How long after tip-off the game's market ends, from that market's own end_ts: "3 h",
+ * "2 h 10 min", "30 min", to the minute. Null without a market. Never a constant: the markets of
+ * ET 2026-11-24 and 11-25 ended 2 h 10 min after tip-off, today's 3 h, a Practice run's 30 min.
+ */
+export function endAfterTip(g: CloseGame): string | null {
+  const m = g.markets?.find((x) => x.kind === 'winner') ?? g.markets?.[0]
+  if (!m || !g.scheduledTipoff) return null
+  return spanAfterTip(m.endTs - Date.parse(g.scheduledTipoff) / 1000)
+}
+
+/** Seconds from tip-off to an end_ts, to the minute: "3 h", "2 h 10 min", "30 min". */
+export function spanAfterTip(secs: number): string {
+  const mins = Math.max(0, Math.round(secs / 60))
+  const h = Math.floor(mins / 60)
+  const rest = mins % 60
+  if (h === 0) return `${rest} min`
+  return rest === 0 ? `${h} h` : `${h} h ${rest} min`
+}
+
+/**
+ * After the close, before a result: what comes next (R6). A result can be proposed only from the
+ * market's end_ts on (the program's rule), so this names that time and promises nothing sooner,
+ * nor who sends it. The challenge window is the Config's setting, which the admin can change:
+ * no fixed length here.
+ */
+export function resultNext(g: CloseGame): string {
+  const after = endAfterTip(g)
+  const from = after ? `${after} after tip-off` : "the market's end time"
+  return `The result goes on-chain no earlier than ${from}, then a guardian can challenge it before it is final.`
+}
+
+/** The Pusher's line once trading closed with no result yet (R6). */
+export const closedLine = (g: CloseGame): string => `Trading closed. ${resultNext(g)}`
+
+type StatusGame = VerdictGame & Pick<Game, 'status'> & CloseGame
 
 /** The window before a proposed result: when the API knows it (`Resolution.challengeEndsAt`). */
 const OPEN_WINDOW = 'Result proposed: the challenge window is open'
@@ -207,8 +237,8 @@ export function resolutionStatus(
       return 'Trading halted'
     case 'closed':
       return g.status === 'final'
-        ? `Final ${g.away} ${g.awayScore}–${g.homeScore} ${g.home}. ${RESULT_NEXT}`
-        : CLOSED_LINE
+        ? `Final ${g.away} ${g.awayScore}–${g.homeScore} ${g.home}. ${resultNext(g)}`
+        : closedLine(g)
     default:
       return 'Trading open'
   }

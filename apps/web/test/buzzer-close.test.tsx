@@ -111,13 +111,14 @@ describe('a halted market under a final game reads closed (R1 ruling)', () => {
       effect: null,
       failedAction: 'buy',
       secsLeft: d.secsLeft,
+      close: buzzer,
     })
     expect(pusher).toEqual({
       kind: 'line',
-      text: 'Trading closed. The result goes on-chain automatically 3 h after tip-off, then a guardian has 15 minutes to challenge it.',
+      text: 'Trading closed. The result goes on-chain no earlier than 2 h 10 min after tip-off, then a guardian can challenge it before it is final.',
     })
     expect(resolutionStatus(d.state, buzzer, null)).toBe(
-      'Final MEM 110–104 CLE. The result goes on-chain automatically 3 h after tip-off, then a guardian has 15 minutes to challenge it.',
+      'Final MEM 110–104 CLE. The result goes on-chain no earlier than 2 h 10 min after tip-off, then a guardian can challenge it before it is final.',
     )
     const check = checkTrade({
       action: 'buy',

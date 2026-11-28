@@ -1,5 +1,9 @@
 import type { NextConfig } from 'next'
 
+/** The README's API errors table on the public repository. */
+export const API_ERRORS_DOC =
+  'https://github.com/horagon-labs/horagon/blob/main/README.md#api-errors'
+
 const config: NextConfig = {
   // Workspace packages ship TypeScript sources (api, db) or ESM (sdk); Next compiles them.
   transpilePackages: ['@horagon/sdk', '@horagon/api', '@horagon/db'],
@@ -19,6 +23,11 @@ const config: NextConfig = {
         ],
       },
     ]
+  },
+  // An API error's `type` (packages/api/src/problem.ts) is /docs/errors#<code> on this origin:
+  // the README's table of codes is the documentation, so the path sends a reader there.
+  async redirects() {
+    return [{ source: '/docs/errors', destination: API_ERRORS_DOC, permanent: false }]
   },
 }
 

@@ -1,7 +1,7 @@
 // The disclosed reference agent, as the site explains it (R2b): its rules for the /agent page, and
 // the game page's line of who traded. GameScreen is client code, so this file value-imports
 // nothing from @horagon/sdk: the counts and the agent's wallet come in the game's `activity`.
-import type { GameActivity } from '@horagon/sdk'
+import type { GameActivity, Health } from '@horagon/sdk'
 import { usdc } from './format'
 
 /**
@@ -36,6 +36,27 @@ export const AGENT_PARAMS = {
    */
   hornFromPeriod: 4,
 } as const
+
+/** The agent's mode as /health reports it from the agent's own heartbeat (`Health['agent']`). */
+export type AgentBeat = NonNullable<Health['agent']>
+
+/**
+ * A heartbeat older than this says the agent is not running: it beats after every round, one
+ * round every AGENT_INTERVAL_SECS (20 s). The same bound as the Practice counterparty's.
+ */
+export const AGENT_FRESH_SECS = 120
+
+/**
+ * /agent's line on the agent's mode, read from its heartbeat on the server, never a fixed claim.
+ * Null, so the page says nothing about the mode, without a heartbeat, after a clean stop, or when
+ * the last beat is older than AGENT_FRESH_SECS.
+ */
+export function agentModeLine(beat: AgentBeat | null | undefined): string | null {
+  if (!beat || beat.stopped || beat.heartbeatAgeSecs > AGENT_FRESH_SECS) return null
+  return beat.dryRun
+    ? 'Its heartbeat says it runs as a dry run now: it decides and sends nothing.'
+    : 'Its heartbeat says it trades live now: it sends the swaps it decides.'
+}
 
 /** The rate rule (b) of docs/metrics.md, as BOT_RATE in scripts/count-fans.mjs. */
 export const BOT_RATE = { swaps: 20, seconds: 300 } as const

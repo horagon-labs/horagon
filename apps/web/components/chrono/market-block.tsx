@@ -74,6 +74,7 @@ export function MarketBlock(p: {
     failedAction: t.failedAction,
     secsLeft: p.dial.secsLeft,
     started: started(p.game),
+    close: p.game,
   })
   // setDirection sets the amount too: a sell's share count never becomes a buy amount in mUSDC.
   const pick = (side: Side) => {

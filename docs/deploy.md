@@ -210,7 +210,7 @@ The Practice process (R8, `horagon-practice`) runs beside the keeper on the VPS 
    a run unless an NBA market is near.
 6. Watch the first run end to end (`horagon-ops status`, the `practice` heartbeat, the game
    page): create, live, the halt at the buzzer, the propose about 40 min after the start, the
-   finalize 15 min later.
+   finalize once the dispute window has passed (900 s in `Config` today).
    When the first run is meant to prove a new create path (a release that changes how a market
    id is chosen, say) before an NBA night, it has to start before that night's first NBA create,
    which comes at tip-off - 60 min. A slot is skipped when an NBA window opens within 90 min of

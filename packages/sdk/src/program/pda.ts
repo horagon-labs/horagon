@@ -26,7 +26,7 @@ export function deriveConfig(programId = HORAGON_PROGRAM_ID): PublicKey {
   return PublicKey.findProgramAddressSync([utf8.encode(CONFIG_SEED)], programId)[0]
 }
 
-/** The PDA that is `market.authority` and sole LP of every Horagon market. */
+/** The PDA that is `market.authority` of every Horagon market and seeds its pool. */
 export function deriveAuthority(programId = HORAGON_PROGRAM_ID): PublicKey {
   return PublicKey.findProgramAddressSync([utf8.encode(AUTHORITY_SEED)], programId)[0]
 }

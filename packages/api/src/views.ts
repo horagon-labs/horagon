@@ -57,9 +57,70 @@ export function toGame(g: GameWithMarkets, prices: PriceIndex): Game {
   }
 }
 
+/**
+ * A span in words: "3 hours", "2 h 10 min", "30 minutes", "15 minutes", "45 seconds". Used for a
+ * market's latest close after tip-off and for the challenge window.
+ */
+export function spanWords(secs: number): string {
+  const s = Math.max(0, Math.round(secs))
+  const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? '' : 's'}`
+  if (s % 86_400 === 0 && s > 0) return plural(s / 86_400, 'day')
+  if (s % 3_600 === 0 && s > 0) return plural(s / 3_600, 'hour')
+  if (s % 60 === 0 && s > 0) {
+    return s < 3_600
+      ? plural(s / 60, 'minute')
+      : `${Math.floor(s / 3_600)} h ${(s % 3_600) / 60} min`
+  }
+  if (s < 60) return plural(s, 'second')
+  return `${Math.floor(s / 60)} min ${s % 60} s`
+}
+
+/** The fields of a market its close rule is read from. */
+export type RuleMarket = Pick<MarketRow, 'kind' | 'status' | 'endTs' | 'haltSig'>
+
+/**
+ * When this game's market closes, from the market's own end_ts and halt (never a constant: the
+ * shakedown markets of ET 2026-11-24 and 11-25 ended 2 h 10 min after tip-off and were never
+ * halted; today's end 3 h after it). The winner market speaks for the game. A market past
+ * trading (a result proposed or later) with no halt traded until its end_ts.
+ */
+export function closeRule(
+  g: Pick<GameWithMarkets, 'scheduledTipoff'>,
+  market: RuleMarket | undefined,
+): string {
+  if (!market) {
+    return 'A market closes at the final buzzer (the keeper halts it on the first Final read), or at the latest at the end time the keeper sets when it creates the market.'
+  }
+  const after = spanWords(secs(market.endTs) - secs(g.scheduledTipoff))
+  if (market.haltSig) {
+    return `This market closed with a halt, before its latest close ${after} after the scheduled tip-off.`
+  }
+  if (market.status !== 'open' && market.status !== 'halted') {
+    return `This market closed at its end time, ${after} after the scheduled tip-off: it was never halted, so it did not close at the final buzzer.`
+  }
+  return `A market closes at the final buzzer (the keeper halts it on the first Final read), or ${after} after the scheduled tip-off at the latest.`
+}
+
+/**
+ * The challenge window as the program's Config sets it today (`disputeWindowSecs`, null when
+ * unread): the admin key can change it, from 60 s to 7 days, so it is never stated as fixed.
+ */
+export function challengeRule(disputeWindowSecs: number | null): string {
+  const span =
+    disputeWindowSecs === null
+      ? 'during the challenge window'
+      : `for ${spanWords(disputeWindowSecs)}`
+  return `Results are proposed with public evidence and can be challenged by a guardian ${span} before they become final. The window is a setting in the program's Config that the admin key can change, from 60 s to 7 days. Play money on devnet: no real value, no prizes.`
+}
+
 /** Spec section 6.2, as shown under "Market rules" on the game page. */
-export function marketRules(g: Pick<GameWithMarkets, 'home' | 'away'>, kinds: number[]): string[] {
+export function marketRules(
+  g: Pick<GameWithMarkets, 'home' | 'away' | 'scheduledTipoff'>,
+  markets: readonly RuleMarket[],
+  disputeWindowSecs: number | null,
+): string[] {
   const rules: string[] = []
+  const kinds = markets.map((m) => m.kind)
   if (kinds.includes(0)) {
     rules.push(
       `Winner market: YES if ${g.home} (home) wins, overtime included. Buy ${g.away} = buy NO.`,
@@ -71,10 +132,10 @@ export function marketRules(g: Pick<GameWithMarkets, 'home' | 'away'>, kinds: nu
     )
   }
   rules.push(
-    'A market closes at the final buzzer (the keeper halts it on the first Final read), or 3 hours after the scheduled tip-off at the latest. It also halts if it has not started 24 hours after the scheduled tip-off, if it is postponed or canceled, or if every score feed goes silent for more than 10 minutes in Q4 or overtime.',
+    `${closeRule(g, markets.find((m) => m.kind === 0) ?? markets[0])} The keeper also halts a market if it has not started 24 hours after the scheduled tip-off, if it is postponed or canceled, or if every score feed goes silent for more than 10 minutes in Q4 or overtime.`,
     'A guardian can also halt a market by hand, for example when the score feed is down near the close or shows something wrong. A halt cannot be undone.',
     'Postponed games: a makeup game within 7 days of the scheduled tip-off decides the market; otherwise it resolves NO. Redeeming a YES + NO pair for 1 mUSDC works at any time.',
-    'Results are proposed with public evidence and can be challenged by a guardian for 15 minutes before they become final. Play money on devnet: no real value, no prizes.',
+    challengeRule(disputeWindowSecs),
   )
   return rules
 }
@@ -113,10 +174,7 @@ export function toGameDetail(
 ): GameDetail {
   return {
     ...toGame(g, prices),
-    rules: marketRules(
-      g,
-      g.markets.map((m) => m.kind),
-    ),
+    rules: marketRules(g, g.markets, disputeWindowSecs),
     resolutions: g.markets.map((m) => toResolution(m, publicUrl, disputeWindowSecs)),
     activity,
   }

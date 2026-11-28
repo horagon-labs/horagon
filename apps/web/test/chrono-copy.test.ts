@@ -1,18 +1,21 @@
 import { describe, expect, it } from 'vitest'
 import { boardItem, rowWords } from '../lib/chrono/board'
 import {
+  closedLine,
   dialCaption,
+  endAfterTip,
   faceCaption,
   homeWonOnScore,
   liveNumber,
   MODEL_HINT,
   proposedLine,
   resolutionStatus,
+  resultNext,
   rowSubject,
   toWin,
   verdict,
 } from '../lib/chrono/copy'
-import { game, market, NOW } from '../lib/chrono/fixtures'
+import { at, game, market, NOW } from '../lib/chrono/fixtures'
 import { DIAL_STATES } from '../lib/chrono/state'
 
 // CLE (home) 84, MEM (away) 78 in the fixtures.
@@ -118,10 +121,10 @@ describe('resolutionStatus (R5, audit finding 11)', () => {
   it('says the state of the dial, not the raw chain status', () => {
     expect(resolutionStatus('live', game(), null)).toBe('Trading open')
     expect(resolutionStatus('closed', game(), null)).toBe(
-      'Trading closed. The result goes on-chain automatically 3 h after tip-off, then a guardian has 15 minutes to challenge it.',
+      'Trading closed. The result goes on-chain no earlier than 2 h 10 min after tip-off, then a guardian can challenge it before it is final.',
     )
     expect(resolutionStatus('closed', final(105, 107), null)).toBe(
-      'Final MEM 107–105 CLE. The result goes on-chain automatically 3 h after tip-off, then a guardian has 15 minutes to challenge it.',
+      'Final MEM 107–105 CLE. The result goes on-chain no earlier than 2 h 10 min after tip-off, then a guardian can challenge it before it is final.',
     )
     expect(resolutionStatus('proposed', final(105, 107), null)).toBe(
       'Result proposed: the challenge window is open',
@@ -130,6 +133,43 @@ describe('resolutionStatus (R5, audit finding 11)', () => {
     expect(resolutionStatus('resolved', final(105, 107), 'no')).toBe('Result on-chain · MEM won')
     expect(resolutionStatus('void', game({ status: 'canceled' }), null)).toBe('Game canceled')
     expect(resolutionStatus('halted', game(), null)).toBe('Trading halted')
+  })
+})
+
+describe('the close, read from each market (never a constant)', () => {
+  const tip = at('2026-11-25T01:00:00Z')
+  const withEnd = (endTs: number, kind: 'winner' | 'second-half' = 'winner') =>
+    game({ status: 'final', markets: [market({ kind, endTs })] })
+
+  it("says how long after tip-off the game's own market ends: today's 3 h, the shakedown 2 h 10 min", () => {
+    expect(endAfterTip(withEnd(tip + 10_800))).toBe('3 h')
+    expect(endAfterTip(withEnd(tip + 7_800))).toBe('2 h 10 min')
+    // A Practice run's market ends 30 min after its replayed tip-off.
+    expect(endAfterTip(withEnd(tip + 1_800))).toBe('30 min')
+    expect(endAfterTip(game({ markets: [] }))).toBeNull()
+    // The winner market speaks for the game.
+    const both = game({
+      markets: [
+        market({ kind: 'second-half', endTs: tip + 7_800 }),
+        market({ endTs: tip + 10_800 }),
+      ],
+    })
+    expect(endAfterTip(both)).toBe('3 h')
+  })
+
+  it('names that time in the closed line, promises no sender and no fixed window', () => {
+    expect(resultNext(withEnd(tip + 10_800))).toBe(
+      'The result goes on-chain no earlier than 3 h after tip-off, then a guardian can challenge it before it is final.',
+    )
+    expect(closedLine(withEnd(tip + 7_800))).toBe(
+      'Trading closed. The result goes on-chain no earlier than 2 h 10 min after tip-off, then a guardian can challenge it before it is final.',
+    )
+    expect(closedLine({})).toBe(
+      "Trading closed. The result goes on-chain no earlier than the market's end time, then a guardian can challenge it before it is final.",
+    )
+    for (const words of [resultNext(withEnd(tip + 10_800)), closedLine({})]) {
+      expect(words).not.toMatch(/automatically|15 minutes/)
+    }
   })
 })
 

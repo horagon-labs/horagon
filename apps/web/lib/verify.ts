@@ -12,6 +12,7 @@ import {
   HORAGON_PROGRAM_ID,
 } from '@horagon/sdk/program'
 import { PublicKey } from '@solana/web3.js'
+import { spanAfterTip } from './chrono/copy'
 
 /** An account as getAccountInfo returns it: the owner in base58, the data decoded. */
 export interface RawAccount {
@@ -128,10 +129,15 @@ const UNCHECKED: Partial<Record<CheckId, string>> = {
 }
 
 export const MATCH = 'Match: the published evidence is the one on chain'
+/**
+ * After a challenge the program takes a new proposal from the attestor or a guardian; the keeper
+ * leaves it to a guardian. That is the keeper's policy, not a program rule, and the line says so.
+ */
 const UNDER_REVIEW =
-  'Under review: a guardian challenged the proposed result, so no evidence is on chain until a guardian proposes again.'
-const NOT_PROPOSED =
-  'Nothing proposed yet: the result goes on-chain automatically 3 h after tip-off.'
+  'Under review: a guardian challenged the proposed result, so no evidence is on chain until a new proposal. The keeper leaves it to a guardian.'
+/** A result can be proposed only from the market's end_ts, read here from the account itself. */
+const notProposed = (gm: Pick<GameMarketAccount, 'endTs' | 'scheduledTipoff'>) =>
+  `Nothing proposed yet: a result can go on-chain from this market's end_ts, ${spanAfterTip(gm.endTs - gm.scheduledTipoff)} after tip-off.`
 const FALLBACK_NOTE =
   "The URI on chain did not answer, so the evidence was read from Horagon's API copy."
 const NO_ANSWER_NOTE: Record<number, string> = {
@@ -223,7 +229,7 @@ export async function verifyMarket(deps: VerifyDeps, input: VerifyInput): Promis
   ]
   if (gm.status === 'challenged') return result(gm.status, checks, {}, UNDER_REVIEW)
   if (gm.status === 'open' || gm.status === 'halted') {
-    return result(gm.status, checks, {}, NOT_PROPOSED)
+    return result(gm.status, checks, {}, notProposed(gm))
   }
 
   // Proposed, finalized or recycled: the proposal's fields stay on chain.

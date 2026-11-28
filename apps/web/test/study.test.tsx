@@ -7,7 +7,7 @@ import { type StudyRow, StudySnapshotSchema, studySnapshot } from '@horagon/sdk/
 import { PublicKey } from '@solana/web3.js'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
-import AgentPage from '../app/agent/page'
+import { AgentView } from '../components/agent-view'
 import { StudyView } from '../components/study-view'
 
 const WEB = join(import.meta.dirname, '..')
@@ -224,7 +224,7 @@ describe('the /study route (R10)', () => {
   })
 
   it('is linked from /agent', () => {
-    const html = renderToStaticMarkup(<AgentPage />)
+    const html = renderToStaticMarkup(<AgentView beat={null} />)
     expect(html).toMatch(/<a [^>]*href="\/study"[^>]*>How the model is checked<\/a>/)
   })
 })

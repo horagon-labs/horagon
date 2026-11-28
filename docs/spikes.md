@@ -265,8 +265,8 @@ linear interpolation.
   early, and 17 close games closing before their last minute: the median game ends at
   S + 151.6, but the slowest tenth runs past S + 2h50m.
 - The cost is settlement time. A result can be proposed only from `end_ts`, so a game of median
-  length settles about 45 minutes after its buzzer: 28 minutes to `end_ts`, then the 15-minute
-  dispute window.
+  length settles about 45 minutes after its buzzer: 28 minutes to `end_ts`, then the dispute
+  window (900 s, the `Config` value set at deploy; the admin key can change it).
 - The close now rests on the feed's Final. In the S4 recording ESPN showed Final 25 to 148 s
   after the End Game play, and the keeper reads ESPN every 15 s (spec 6.1); until the halt lands
   the market can be sniped. Depth follows √(end_ts − t) over the market's life from S − 60 min,

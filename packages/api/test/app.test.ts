@@ -30,6 +30,7 @@ import { ComputeBudgetProgram, Keypair, PublicKey, VersionedTransaction } from '
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createApp } from '../src/app'
 import { pmAmmFaucet } from '../src/faucet'
+import { agentBeat } from '../src/health-ops'
 import { DEFAULT_SPONSOR_LIMITS } from '../src/sponsor/policy'
 import { exposureLamports, hashIp, MarketSet } from '../src/sponsor/submit'
 import { validateSponsoredTransaction } from '../src/sponsor/validate'
@@ -1043,6 +1044,46 @@ describe('status, claim, positions, faucet, health', () => {
     const res = await get('/health')
     expect(res.status).toBe(200)
     expect(res.headers.get('cache-control')).toBe('no-store')
+  })
+
+  it("gives the reference agent's mode from its own heartbeat, never in ok", async () => {
+    await heartbeat(env.h.db, 'keeper', { tick: 1 })
+    env.deps.now = () => Math.floor(Date.now() / 1000)
+    const health = async () =>
+      (await (await get('/health')).json()) as { ok: boolean; agent: unknown }
+    // No agent heartbeat: no mode, and the health stays ok.
+    expect(await health()).toMatchObject({ ok: true, agent: null })
+    await heartbeat(env.h.db, 'agent', { round: 3, dryRun: false, practice: false, paused: false })
+    expect((await health()).agent).toEqual({
+      dryRun: false,
+      stopped: false,
+      heartbeatAgeSecs: expect.any(Number),
+    })
+    await heartbeat(env.h.db, 'agent', { round: 4, dryRun: true, paused: false, stopped: true })
+    expect((await health()).agent).toMatchObject({ dryRun: true, stopped: true })
+    // A beat that names no mode says nothing about it.
+    await heartbeat(env.h.db, 'agent', { round: 5 })
+    expect(await health()).toMatchObject({ ok: true, agent: null })
+  })
+})
+
+describe('agentBeat', () => {
+  const ts = new Date('2026-11-28T00:00:00Z')
+  const now = ts.getTime() / 1000 + 25
+
+  it('reads the mode, the clean stop and the age of the agent row', () => {
+    expect(agentBeat({ ts, info: { dryRun: false } }, now)).toEqual({
+      dryRun: false,
+      stopped: false,
+      heartbeatAgeSecs: 25,
+    })
+    expect(agentBeat({ ts, info: { dryRun: true, stopped: true } }, now - 60)).toEqual({
+      dryRun: true,
+      stopped: true,
+      heartbeatAgeSecs: 0,
+    })
+    expect(agentBeat(null, now)).toBeNull()
+    expect(agentBeat({ ts, info: { dryRun: 'no' } }, now)).toBeNull()
   })
 })
 

@@ -107,6 +107,9 @@ reaches it at the same address. The clock moves forward with the `surfnet_timeTr
 cheatcode (`absoluteTimestamp` in milliseconds); `spikes/src/lib/surfnet.ts` wraps it and
 checks the Clock sysvar afterwards.
 
+The program's integration suite needs a chain without the devnet deployment of the program:
+`scripts/program-it.sh` builds one ([testing.md](testing.md)).
+
 ## Keys
 
 Spike and local keypairs live in `.keys/<name>.json` (Solana CLI format, git-ignored, created

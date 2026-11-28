@@ -2,6 +2,7 @@
 // share, end to end, without a network.
 
 import { Buffer } from 'node:buffer'
+import { heartbeat } from '@horagon/db'
 import { HoragonClient, HoragonError } from '@horagon/sdk'
 import { VersionedTransaction } from '@solana/web3.js'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -70,5 +71,11 @@ describe('HoragonClient against the API', () => {
 
   it('reports a degraded health instead of throwing', async () => {
     await expect(client.health()).resolves.toMatchObject({ ok: false })
+  })
+
+  it("keeps the reference agent's mode from /health, what /agent reads", async () => {
+    expect((await client.health()).agent).toBeNull()
+    await heartbeat(env.h.db, 'agent', { round: 1, dryRun: false, practice: false, paused: false })
+    expect((await client.health()).agent).toMatchObject({ dryRun: false, stopped: false })
   })
 })
