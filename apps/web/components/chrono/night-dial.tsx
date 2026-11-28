@@ -159,7 +159,7 @@ export function NightDial(p: {
         setActive(null)
         p.onHover?.(null)
       }}
-      className={`relative aspect-square w-full rounded-full ${p.className ?? ''}`}
+      className={`@container relative aspect-square w-full rounded-full ${p.className ?? ''}`}
     >
       <svg viewBox="0 0 200 200" aria-hidden="true" className="absolute inset-0 size-full">
         {/* A white face in a brass case (light branding review §4.4). */}
@@ -292,33 +292,33 @@ export function NightDial(p: {
             <circle cx={hand.x} cy={hand.y} r={2} className="fill-ink" data-now-pip />
           </>
         )}
-        {overflow.length > 0 && (
-          <text
-            x={C}
-            y={C + 28}
-            textAnchor="middle"
-            className="fill-ash-400 font-mono text-[9px]"
-            data-overflow={overflow.length}
-          >
-            +{overflow.length}
-          </text>
-        )}
       </svg>
       <div
         aria-hidden="true"
-        className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-0.5 text-center"
+        className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center text-center"
       >
-        {/* At rest no arc rings the face, so the words may run wider, inside the numerals. */}
+        {/*
+          At rest no arc rings the face, so the words may run wider, inside the numerals. Otherwise
+          they stay inside the hub ring (r 33 of 200): the dial is a size container and the readout
+          reads its own width. The 26rem dial (lg) holds the matchup, the number, whose chance, the
+          state line and "+N". A smaller hub (375: a 343 px dial, a 113 px hub) has no room for the
+          two-line state line, whose words the rows above it carry ("+2 since open", "closes in
+          2:08"); under 20rem the matchup goes too, and the arc's label and the subject still name
+          the team. "+N" (the games past the 8th ring) is the last line: drawn at a fixed spot, it
+          sat on the state line. The 12 px lines keep a 14 px line and the number a 28 px one, so
+          a three-line state line (overtime) and "+N" still fit the 26rem hub.
+        */}
         <div
-          className={`flex ${p.rest ? 'max-w-[56%]' : 'max-w-[32%]'} flex-col items-center gap-0.5 text-center`}
+          className={`flex ${p.rest ? 'max-w-[56%] gap-0.5' : 'max-w-[32%]'} flex-col items-center text-center`}
+          data-readout-words
         >
           {focus && focusWords ? (
             <>
-              <span className="text-12 uppercase tracking-[0.16em] text-brass-500">
+              <span className="hidden text-12 leading-3.5 uppercase tracking-[0.16em] text-brass-500 @min-[20rem]:block">
                 {focus.game.away} @ {focus.game.home}
               </span>
               {focusWords.value && (
-                <span className="font-mono text-24 text-ivory-100 tabular-nums">
+                <span className="font-mono text-24 leading-7 text-ivory-100 tabular-nums">
                   {focusWords.value}
                   {focusWords.model && (
                     <span className="font-sans text-12 text-ink-muted"> model</span>
@@ -326,14 +326,22 @@ export function NightDial(p: {
                 </span>
               )}
               {focusWords.subject && (
-                <span className="text-12 text-brass-400">{focusWords.subject}</span>
+                <span className="text-12 leading-3.5 text-brass-400">{focusWords.subject}</span>
               )}
-              <span className="font-mono text-12 text-ash-400">
+              <span className="hidden font-mono text-12 leading-3.5 text-ash-400 @min-[26rem]:block">
                 {stateLine(focus.state, focus.game, focus.secsLeft, p.now)}
               </span>
             </>
           ) : (
             <span className="text-13 text-ash-400">{p.emptyText}</span>
+          )}
+          {overflow.length > 0 && (
+            <span
+              className="font-mono text-12 leading-3.5 text-ash-400"
+              data-overflow={overflow.length}
+            >
+              +{overflow.length}
+            </span>
           )}
         </div>
       </div>

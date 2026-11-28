@@ -175,6 +175,55 @@ describe('NightDial (spec 3.2, 4.1)', () => {
     )
     expect(night({ items: many })).toContain('data-overflow="2"')
   })
+
+  // Slice 7 refix 1: in S3/S4 (11 games, 8 rings) the "+3" sat on the state line ("final+3uzzer"
+  // at 375), and at 375 the readout ran past the hub ring.
+  describe('keeps the readout and +N inside the hub ring, apart', () => {
+    const many = Array.from({ length: 10 }, (_, i) =>
+      boardItem(game({ id: `g${i}` }), undefined, NOW),
+    )
+    const html = night({ items: many })
+    const words =
+      html.match(/<div [^>]*data-readout-words[^>]*>([\s\S]*?)<\/div><\/div>/)?.[1] ?? ''
+
+    it("writes +N as the readout's last line, under the state line, never over it", () => {
+      expect(html).not.toMatch(/<text [^>]*data-overflow/)
+      expect(words).toMatch(
+        /<span class="[^"]*font-mono[^"]*"[^>]*data-overflow="2"[^>]*>\+2<\/span>$/,
+      )
+      expect(words.indexOf('Open until the final buzzer')).toBeGreaterThan(-1)
+      expect(words.indexOf('Open until the final buzzer')).toBeLessThan(
+        words.indexOf('data-overflow'),
+      )
+      expect(night()).not.toContain('data-overflow')
+    })
+
+    it('sizes the readout by the dial, not the viewport: the state line only on the 26rem dial', () => {
+      // The dial is a size container, so its readout reads the dial's own width.
+      expect(html).toMatch(/role="listbox"[^>]*class="[^"]*@container/)
+      // The two-line state line fits the 26rem (lg) hub only; the rows carry its words below it.
+      expect(words).toMatch(
+        /<span class="hidden [^"]*@min-\[26rem\]:block[^"]*">Open until the final buzzer<\/span>/,
+      )
+      // The matchup from a 20rem dial (375: 343 px); under it the arc's label and the subject
+      // name the team.
+      expect(words).toMatch(/<span class="hidden [^"]*@min-\[20rem\]:block[^"]*">MEM @ CLE<\/span>/)
+      // The number keeps a 28 px line (not 32) and the lines no gap, so five fit the 26rem hub.
+      expect(words).toMatch(/<span class="[^"]*font-mono text-24 leading-7[^"]*">77%<\/span>/)
+      expect(html).not.toMatch(/class="[^"]*gap-[^"]*" data-readout-words/)
+      // The number and whose chance it is show at every size; the 12 px lines keep a 14 px line,
+      // so a three-line state line (overtime) and "+N" still fit the 26rem hub.
+      expect(words).toMatch(/<span class="text-12 leading-3.5 text-brass-400">CLE to win<\/span>/)
+      expect(words.match(/text-12 leading-3.5/g)).toHaveLength(4)
+    })
+
+    it('leaves the rest face as it was', () => {
+      const rest = night({ items: [], rest: true, emptyText: 'The dial rests until Sat, Nov 28.' })
+      expect(rest).toContain('max-w-[56%]')
+      expect(rest).toContain('>The dial rests until Sat, Nov 28.<')
+      expect(rest).not.toContain('data-overflow')
+    })
+  })
 })
 
 describe('DialRow (spec 3.2)', () => {
