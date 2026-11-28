@@ -35,6 +35,9 @@ vi.mock('../lib/chrono/now', async (actual) => ({
   ...(await actual<typeof import('../lib/chrono/now')>()),
   useNow: () => stub.now,
 }))
+// The board asks the router for a new frame (lib/use-refresh.ts). There is no app router here,
+// and a server render runs no effect, so nothing is asked (test/frame-refresh.test.tsx).
+vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: () => {} }) }))
 
 const WEB = join(import.meta.dirname, '..')
 const read = (...p: string[]) => readFileSync(join(WEB, ...p), 'utf8')
@@ -352,10 +355,12 @@ describe('a market opening under the poll swaps the idle face, no reload (G4, C1
     expect(marketOpen(stopped(), NIGHT_OVER)).toBe(false)
     expect(marketOpen(undefined, OPEN_NOW)).toBe(false)
     for (const built of ['rest', 'later', 'after'] as const) {
+      // The face's frame: its state and the server's clock (finding 2), here 5:58 PM ET.
+      const frame = { state: built, at: S2_LATER }
       // S2: no market open and the night not over, so every idle face stays.
-      expect(faceGone(built, friday(), S2_LATER), built).toBe(false)
-      expect(faceGone(built, undefined, S2_LATER), built).toBe(false)
-      expect(faceGone(built, opened(1), OPEN_NOW), built).toBe(true)
+      expect(faceGone(frame, friday(), S2_LATER), built).toBe(false)
+      expect(faceGone(frame, undefined, S2_LATER), built).toBe(false)
+      expect(faceGone(frame, opened(1), OPEN_NOW), built).toBe(true)
     }
   })
 
@@ -365,15 +370,18 @@ describe('a market opening under the poll swaps the idle face, no reload (G4, C1
   // in between. Its face (the night before) would sit under "All stopped." where S5 tells the
   // night that just ended. Only a face the server built for S5 fits a night that is over.
   it('drops a face built before the night ended once the poll sees the night over', () => {
-    expect(faceGone('later', stopped(), NIGHT_OVER)).toBe(true)
-    expect(faceGone('rest', stopped(), NIGHT_OVER)).toBe(true)
+    // S1 and S2 faces the server built at 5:58 PM ET; an S5 face it built once the night was over.
+    const day = (state: ScreenState) => ({ state, at: S2_LATER })
+    const s5 = { state: 'after' as const, at: NIGHT_OVER }
+    expect(faceGone(day('later'), stopped(), NIGHT_OVER)).toBe(true)
+    expect(faceGone(day('rest'), stopped(), NIGHT_OVER)).toBe(true)
     // After midnight ET and before the 06:00 rollover it is still the night that just ended.
-    expect(faceGone('later', stopped(), at('2026-11-28T05:30:00Z'))).toBe(true)
-    expect(faceGone('after', stopped(), at('2026-11-28T05:30:00Z'))).toBe(false)
+    expect(faceGone(day('later'), stopped(), at('2026-11-28T05:30:00Z'))).toBe(true)
+    expect(faceGone(s5, stopped(), at('2026-11-28T05:30:00Z'))).toBe(false)
     // An S5 face tells the night that just ended: it stays.
-    expect(faceGone('after', stopped(), NIGHT_OVER)).toBe(false)
+    expect(faceGone(s5, stopped(), NIGHT_OVER)).toBe(false)
     // An S1 or S2 page whose poll saw the night end the usual way: the open dropped it first.
-    expect(faceGone('later', opened(1), OPEN_NOW)).toBe(true)
+    expect(faceGone(day('later'), opened(1), OPEN_NOW)).toBe(true)
   })
 
   it('counts every listed market, whatever the follow filter shows, as the server does', () => {
@@ -475,7 +483,8 @@ describe('a market opening under the poll swaps the idle face, no reload (G4, C1
 
   it('TonightBoard latches the drop (lib/use-latch.ts); / tells it the state its faces are for', () => {
     const src = read('components', 'tonight-board.tsx')
-    expect(src).toMatch(/const gone = useLatch\(faceGone\(state, shown, now\)\)/)
+    // Keyed on the server frame (finding 2): a new frame after a refresh starts it over.
+    expect(src).toContain('const gone = useLatch(faceGone(frame, shown, now), key)')
     expect(src).toContain('idleFace={gone ? undefined : idleFace}')
     expect(src).toContain('idleFoot={gone ? undefined : idleFoot}')
     // No second, hand-rolled latch beside it (refix 1's setter went untested).

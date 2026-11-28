@@ -61,4 +61,31 @@ describe('useLatch', () => {
     react.slots = []
     expect(render(false)).toBe(false)
   })
+
+  // Slice 5 review finding 2: the board asks the server for a new frame once its own stops
+  // fitting (router.refresh), and the page stays mounted. A face the old frame dropped must not
+  // hide the new frame's face, so the latch holds per frame.
+  const keyed = (on: boolean, key: string): boolean => {
+    react.at = 0
+    return useLatch(on, key)
+  }
+
+  it('starts over when its key changes (a new server frame), and holds per key', () => {
+    expect(keyed(true, 'later:2026-11-27:2026-11-27')).toBe(true)
+    expect(keyed(false, 'later:2026-11-27:2026-11-27')).toBe(true)
+    // The refresh lands with a new frame: its face shows until it, in its turn, stops fitting.
+    expect(keyed(false, 'after:2026-11-27:2026-11-28')).toBe(false)
+    expect(keyed(false, 'after:2026-11-27:2026-11-28')).toBe(false)
+    expect(keyed(true, 'after:2026-11-27:2026-11-28')).toBe(true)
+    expect(keyed(false, 'after:2026-11-27:2026-11-28')).toBe(true)
+  })
+
+  it('sets its state once per key', () => {
+    keyed(true, 'a')
+    keyed(true, 'a')
+    keyed(false, 'a')
+    keyed(true, 'b')
+    keyed(true, 'b')
+    expect(react.sets).toBe(2)
+  })
 })

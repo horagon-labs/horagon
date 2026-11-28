@@ -5,7 +5,14 @@
 // copy, next/dist/compiled/server-only) fails the build if a client component imports this.
 import 'server-only'
 import { createApp, depsFromEnv } from '@horagon/api'
-import type { Game, Night, NightGame, PracticeResponse, RecordResponse } from '@horagon/sdk'
+import {
+  etNight,
+  type Game,
+  type Night,
+  type NightGame,
+  type PracticeResponse,
+  type RecordResponse,
+} from '@horagon/sdk'
 import { HoragonClient } from '@horagon/sdk/client'
 import { isHoragonError } from '@horagon/sdk/errors'
 import type { AgentBeat } from '../agent'
@@ -172,12 +179,14 @@ const lastNights = ttlCache<LastNight | null>(LAST_NIGHT_TTL_MS)
 
 /**
  * "Last night on the dial" for / (R10). Null when there is no such night, or the API was late or
- * failed; only a found night is kept, for 60 s. Never throws.
+ * failed; only a found night is kept, for 60 s, and per ET night: a page asked for again just after
+ * the 06:00 ET rollover (components/tonight-board.tsx) gets the night that has just become last
+ * night, not the one before it. Never throws.
  */
 export function initialLastNight(): Promise<LastNight | null> {
   const now = Math.floor(Date.now() / 1000)
   return lastNights(
-    'last-night',
+    `last-night:${etNight(now)}`,
     async () => {
       try {
         return await loadLastNight(serverClient(), now)

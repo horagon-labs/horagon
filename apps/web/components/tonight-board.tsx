@@ -4,11 +4,12 @@
 // The server's first frame (R5, lib/server/initial.ts) fills the board until the first poll
 // answers, so the page never opens on "Setting the dial…" while the API is up. While no market is
 // open, the server's idle face (the story card) takes the dial's slot; once the poll has seen a
-// market open, or the night over under a face built before it ended, the Night dial keeps it until
-// a reload.
+// market open, or a night over that the face does not tell, the Night dial keeps it for that
+// server frame. When the frame stops fitting (the face gone, the night rolled over at 06:00 ET,
+// or the ET date changed), the board asks the server for a new one, in place, once per frame.
 import { type ReactNode, useEffect, useState } from 'react'
 import { boardApi } from '../lib/api'
-import { faceGone } from '../lib/chrono/board'
+import { faceGone, frameKey, frameStale } from '../lib/chrono/board'
 import { pollHealth } from '../lib/chrono/health'
 import { useNow } from '../lib/chrono/now'
 import { loadFollows, toggleFollow } from '../lib/follows'
@@ -16,6 +17,7 @@ import type { ScreenState } from '../lib/server/first-screen'
 import type { InitialBoard } from '../lib/server/initial'
 import { useLatch } from '../lib/use-latch'
 import { usePoll } from '../lib/use-poll'
+import { useRefresh } from '../lib/use-refresh'
 import { BoardView } from './chrono/board-view'
 import { useWallet } from './wallet'
 
@@ -31,7 +33,7 @@ const storage = () => {
  * `idleLead`: the Practice card while a run is on (first-screen S6), shown and dropped with the
  * face. `idleFace` and `idleFoot`: the server-rendered story card and what follows it (W5),
  * built for the server's `state`, shown in the dial's slot until they stop fitting what the poll
- * sees (lib/chrono/board.ts faceGone), and not again on this page. `openFoot`: the compact story
+ * sees (lib/chrono/board.ts faceGone), and not again for that frame. `openFoot`: the compact story
  * and the Practice line, shown under the board once no idle face shows, so the poll swaps them in
  * (G4).
  */
@@ -63,10 +65,15 @@ export function TonightBoard({
   const [hoverId, setHoverId] = useState<string | null>(null)
   useEffect(() => setFollows(loadFollows(storage())), [])
   const shown = games.data ?? initial.games
-  // The server built the faces for the state it saw. Once they stop fitting what the poll sees (a
-  // market open, or the night over under a face built before it ended), they go and stay gone
-  // until a reload (lib/use-latch.ts), so no S1 or S2 face ever sits under "All stopped.".
-  const gone = useLatch(faceGone(state, shown, now))
+  // The server built this frame for the state, ET night and ET date it saw. Once the faces stop
+  // fitting what the poll sees (a market open, or a night over that they do not tell), they go and
+  // stay gone for this frame (lib/use-latch.ts), so no face sits under "All stopped." that tells
+  // another night. A frame that no longer fits is asked for again (lib/use-refresh.ts): the new
+  // one comes with new props and a new key, so its faces show until they, in turn, stop fitting.
+  const frame = { state, at: initial.now }
+  const key = frameKey(frame)
+  const gone = useLatch(faceGone(frame, shown, now), key)
+  useRefresh(frameStale(frame, idleFace != null, shown, now), key)
 
   return (
     <BoardView

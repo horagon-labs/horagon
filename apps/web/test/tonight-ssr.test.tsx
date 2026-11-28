@@ -1,10 +1,14 @@
 import { renderToStaticMarkup } from 'react-dom/server'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { HERO_LINE, HERO_STEPS, HERO_SUB, Hero } from '../components/chrono/hero'
 import { TonightBoard } from '../components/tonight-board'
 import { WalletProvider } from '../components/wallet'
 import { evening, NOW } from '../lib/chrono/fixtures'
 import type { InitialBoard } from '../lib/server/initial'
+
+// The board asks the router for a new frame (lib/use-refresh.ts); no app router here, and a
+// server render runs no effect.
+vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: () => {} }) }))
 
 const page = (initial: InitialBoard) =>
   renderToStaticMarkup(

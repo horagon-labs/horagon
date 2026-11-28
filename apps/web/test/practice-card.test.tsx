@@ -59,6 +59,9 @@ vi.mock('../lib/chrono/now', async (actual) => ({
   ...(await actual<typeof import('../lib/chrono/now')>()),
   useNow: () => stub.now,
 }))
+// The board asks the router for a new frame (lib/use-refresh.ts); no app router here, and a
+// server render runs no effect.
+vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: () => {} }) }))
 
 const WEB = join(import.meta.dirname, '..')
 const read = (...p: string[]) => readFileSync(join(WEB, ...p), 'utf8')

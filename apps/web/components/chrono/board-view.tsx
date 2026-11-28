@@ -13,7 +13,7 @@
 // an idle lead (the Practice card, first-screen S6) comes first of all below lg and tops the
 // list's column from lg. When the first market opens under the poll, the Night dial, the count
 // line and the open foot (the compact story) take over with no reload (G4), and TonightBoard hands
-// no idle face (or lead) again until a reload.
+// no idle face (or lead) again until the server sends a new frame.
 import type { Game, PositionsResponse } from '@horagon/sdk'
 import type { ReactNode } from 'react'
 import {

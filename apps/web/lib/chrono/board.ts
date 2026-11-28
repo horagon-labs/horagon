@@ -206,20 +206,65 @@ export const marketOpen = (games: readonly Game[] | undefined, now: number): boo
   (games ?? []).some((g) => isTonight(g, now * 1000) && openNow(boardItem(g, undefined, now)))
 
 /**
- * The server's idle face no longer fits what the poll sees (G4), so the board drops it, and keeps
- * it dropped until a reload (components/tonight-board.tsx): a market is open (the Night dial takes
- * the slot), or the night is over under a face `built` for an earlier state. The face is the
- * server's, for the state it saw (lib/server/first-screen.ts): an S1 or S2 face tells an older
- * night, while S5 tells the night that just ended, which only the server knows. A poll that ran all
- * evening drops it at the first open; one that slept (a hidden tab skips every tick, and no timer
- * runs while the machine sleeps) may first see the night over. Either way the page then shows what
- * an S3/S4-loaded one shows at the night's end: the dial, "All stopped." and the compact story.
+ * The server render a page of / shows (first-screen §3): the state it picked
+ * (lib/server/first-screen.ts) and the clock it read (InitialBoard.now). It built the idle faces,
+ * and every eyebrow and line it wrote, for that state, ET night and ET date.
  */
-export const faceGone = (
-  built: ScreenState | undefined,
+export interface Frame {
+  state: ScreenState | undefined
+  /** The server's clock, unix seconds. */
+  at: number
+}
+
+/**
+ * The server's idle face no longer fits what the poll sees (G4), so the board drops it, and keeps
+ * it dropped for this frame (components/tonight-board.tsx): a market is open (the Night dial takes
+ * the slot), or a night is over that the face does not tell. An S1 or S2 face tells an older
+ * night; an S5 face tells the night that just ended, which only the server knows, and only that
+ * night: a tab asleep through the next one must not show it under the next one's "All stopped.".
+ * A poll that ran all evening drops an S2 face at the first open; one that slept (a hidden tab
+ * skips every tick, and no timer runs while the machine sleeps) may first see the night over.
+ * Either way the page then shows what an S3/S4-loaded one shows at the night's end, the dial,
+ * "All stopped." and the compact story, until the new frame it asks for lands (`frameStale`).
+ */
+export function faceGone(frame: Frame, games: readonly Game[] | undefined, now: number): boolean {
+  if (marketOpen(games, now)) return true
+  if (!nightOver(games ?? [], now)) return false
+  return frame.state !== 'after' || etNight(frame.at) !== etNight(now)
+}
+
+/**
+ * How long past 06:00 ET (the night's rollover) and midnight ET (the date's change) the board
+ * waits before it asks for a new frame. A browser clock a little ahead of the server's would
+ * otherwise ask before the server's clock has turned, get the same frame back, and keep it.
+ */
+export const TURN_GRACE_SECS = 60
+
+/**
+ * The server's frame no longer fits (first-screen §3, C9), so the board asks the server for a new
+ * one (router.refresh, lib/use-refresh.ts), once per `frameKey`: the ET night rolled over at
+ * 06:00 ET (an S5 face becomes S1 or S2, with the "Last night" or dated eyebrow); the ET date
+ * changed at midnight (C9 calls the night "Last night" only on the day after it, the compact
+ * story's eyebrow included); or the idle face the server gave (`face`) is gone. Never on the first
+ * frame: the server's games at the server's clock fit it.
+ */
+export function frameStale(
+  frame: Frame,
+  face: boolean,
   games: readonly Game[] | undefined,
   now: number,
-): boolean => marketOpen(games, now) || (built !== 'after' && nightOver(games ?? [], now))
+): boolean {
+  // Later, not just different: a frame rendered inside the grace already holds the new night.
+  const t = now - TURN_GRACE_SECS
+  if (etNight(t) > etNight(frame.at) || etDay(t) > etDay(frame.at)) return true
+  return face && faceGone(frame, games, now)
+}
+
+/**
+ * One key per state, ET night and ET date: a refresh that brings the same frame back (a server
+ * clock a little behind) keeps the key, so the board asks no more for it.
+ */
+export const frameKey = (f: Frame): string => `${f.state}:${etNight(f.at)}:${etDay(f.at)}`
 
 /**
  * The H1 may say "Prices move with every run." (first-screen C2b) only when a moved market is on
