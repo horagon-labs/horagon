@@ -348,6 +348,70 @@ describe('the board with markets open (spec §3 S3/S4, C17)', () => {
   })
 })
 
+describe('the board after the last game (spec §3 S5: string 21 first, no C17 or C18)', () => {
+  // Sat, Nov 28, 1:30 AM ET: still the night of Fri, Nov 27, whose two late games (10:00 and
+  // 10:30 PM ET) are final with their markets stopped at the buzzer; Saturday's 3:30 PM ET slate
+  // (no market yet) is listed.
+  const now = at('2026-11-28T06:30:00Z')
+  const stopped = (id: string, away: string, home: string, tip: string, status: 'proposed') =>
+    game({
+      id,
+      away,
+      home,
+      status: 'final',
+      homeScore: 98,
+      awayScore: 104,
+      period: 4,
+      clockSecs: 0,
+      scheduledTipoff: tip,
+      markets: [
+        market({
+          pubkey: `Mkt${id}`,
+          status,
+          initialPriceBps: 7_900,
+          price: 0.79,
+          priceTs: at('2026-11-28T05:40:00Z'),
+          endTs: at('2026-11-28T06:00:00Z'),
+        }),
+      ],
+    })
+  const night = (): Game[] => [
+    stopped('nba-cup-1', 'MIA', 'NYK', '2026-11-28T03:00:00.000Z', 'proposed'),
+    stopped('nba-cup-2', 'MIL', 'DET', '2026-11-28T03:30:00.000Z', 'proposed'),
+    scheduled('nba-sat-1', 'ORL', 'WAS', '2026-11-28T20:30:00.000Z', 0.39),
+    scheduled('nba-sat-2', 'BKN', 'CHA', '2026-11-28T21:30:00.000Z', 0.79),
+  ]
+
+  it('says only "All stopped." with the next tip-off, never that a market opens', () => {
+    const m = boardModel(night(), undefined, now, [])
+    expect(m.stopped).toBe('All stopped. Next tip-off Sat 3:30 PM ET.')
+    expect(m.openNow).toBe(0)
+    expect(m.firstOpen).toBeNull()
+    expect(m.note).toBe(false)
+  })
+
+  it('puts string 21 first under the heading, with no count line or board note', () => {
+    const html = board({ games: night(), now })
+    expect(html).not.toContain('First market opens')
+    expect(html).not.toContain('Each market opens')
+    expect(html).not.toContain('data-count')
+    expect(html).not.toContain('data-board-note')
+    const heading = html.indexOf('>Tonight · Fri Nov 27 · 2 games</h2>')
+    const stoppedAt = html.indexOf('data-stopped')
+    expect(heading).toBeGreaterThan(-1)
+    expect(stoppedAt).toBeGreaterThan(heading)
+    expect(stoppedAt).toBeLessThan(html.indexOf('href="/game/'))
+  })
+
+  it('keeps C17 and C18 for the S2 board of a later night once the night rolled over', () => {
+    // Sat, Nov 28, 6:00 AM ET: the night rolled over, so Saturday's slate is S2 again.
+    const m = boardModel(night(), undefined, at('2026-11-28T11:00:00Z'), [])
+    expect(m.stopped).toBeNull()
+    expect(m.firstOpen).toBe('First market opens in 8 h 30 min')
+    expect(m.note).toBe(true)
+  })
+})
+
 describe('the board heading carries the date and the count (C16)', () => {
   it('reads "Tonight · Fri Nov 27 · 11 games" for the night, the date alone for a later one', () => {
     const noon = at('2026-11-27T17:00:00Z')

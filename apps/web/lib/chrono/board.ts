@@ -400,9 +400,12 @@ export interface BoardModel {
   calendar: { href: string; label: string } | null
   /** Listed winner markets that trade now: "● 4 markets open now" (C17). */
   openNow: number
-  /** No market open yet: "First market opens in 14 h 44 min" (C17); else null. */
+  /** No market open yet, and the night not over (S2): "First market opens in 14 h 44 min" (C17). */
   firstOpen: string | null
-  /** No game on the court and a market still to open: the board note says how one opens (C18). */
+  /**
+   * No game on the court, the night not over, and a market still to open (S2, S3): the board note
+   * says how one opens (C18).
+   */
   note: boolean
   /** Every game of the night stopped: "All stopped. Next tip-off …" (stoppedLine); else null. */
   stopped: string | null
@@ -497,11 +500,14 @@ export function boardModel(
     calendar: calendarNext ? calendarLink(calendarNext) : null,
     stopped: over ? stoppedLine(aheadOf(games, now)?.tip ?? ahead?.tip ?? null, now) : null,
     openNow: open,
+    // Once the night is over (S5) the board's first line is string 21, "All stopped. Next tip-off
+    // …": the next night's opens belong to S2 (C17), its note to S2/S3 (C18), and either one over
+    // a night whose markets all stopped reads as if tonight's had not opened yet.
     firstOpen:
-      open === 0 && Number.isFinite(opensAt)
+      open === 0 && !over && Number.isFinite(opensAt)
         ? `First market opens ${inMinutes(opensAt - now)}`
         : null,
-    note: !anyLive && waiting.length > 0,
+    note: !anyLive && !over && waiting.length > 0,
   }
   if (items.length > 0) return { ...base, empty: null, filtered: false, next: null }
   if (follows.length > 0) {
